@@ -1,0 +1,456 @@
+<Window
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="MainWindow" Height="760" Width="800"
+    WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+    WindowStartupLocation="CenterScreen">
+
+    <Window.Resources>
+        <!-- Define DataTemplate for Video Content -->
+        <DataTemplate x:Key="VideoTemplate">
+            <Border Style="{StaticResource EF_card}">
+                <StackPanel>
+                    <!-- Video Thumbnail Image -->
+                    <Image Source="{Binding VideoThumbnailUrl}" VerticalAlignment="Center" Style="{StaticResource Thumbnail}"/>
+                    <!-- Video Title -->
+                    <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="Bold" Foreground="White" Margin="15,0,15,0"/>
+                    <!-- Browse Here Hyperlink -->
+                    <TextBlock HorizontalAlignment="Center">
+                    <Hyperlink NavigateUri="{Binding VideoUrl}" RequestNavigate="Hyperlink_RequestNavigate">
+                        <TextBlock Text="Browse Here" Margin="0,10,0,0" FontSize="16" FontWeight="Bold" Foreground="#2341EB"/>
+                    </Hyperlink>
+                </TextBlock>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+
+        <!-- Style for Video Content Card -->
+        <Style x:Key="EF_card" TargetType="Border">
+            <Setter Property="Background" Value="#393939"/>
+            <Setter Property="CornerRadius" Value="7"/>
+            <Setter Property="Padding" Value="10"/>
+            <Setter Property="Margin" Value="10"/>
+            <Setter Property="BorderBrush" Value="#2341EB"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+            <Setter Property="Width" Value="250"/>
+            <Setter Property="Height" Value="210"/>
+        </Style>
+
+        <!-- Style for Video Thumbnail Image -->
+        <Style x:Key="Thumbnail" TargetType="Image">
+            <Setter Property="Width" Value="200"/>
+            <Setter Property="Height" Value="112.5"/>
+            <Setter Property="Stretch" Value="UniformToFill"/>
+            <Setter Property="Margin" Value="0,0,0,10"/>
+        </Style>
+
+        <!-- Style for Buttons -->
+        <Style TargetType="Button">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="BorderElement"
+                            CornerRadius="8"
+                            Background="#1c1c1c"
+                            BorderBrush="#2341EB"
+                            BorderThickness="1">
+                            <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <!-- Trigger for Mouse Hover -->
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="BorderElement" Property="Background" Value="#2341EB"/>
+                                <Setter TargetName="BorderElement" Property="BorderBrush" Value="#2341EB"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Style for TextBlocks -->
+        <Style TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="Poppins"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Foreground" Value="#C9C9C9"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+        </Style>
+
+        <!-- Style for ScrollViewer Scrollbars -->
+        <Style TargetType="{x:Type ScrollViewer}">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ScrollViewer}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <ScrollContentPresenter Grid.Column="0"/>
+                            <!-- Vertical ScrollBar -->
+                            <ScrollBar Grid.Column="1"
+                                   Opacity="0.5"
+                                   Name="PART_VerticalScrollBar"
+                                   Value="{TemplateBinding VerticalOffset}"
+                                   Maximum="{TemplateBinding ScrollableHeight}"
+                                   ViewportSize="{TemplateBinding ViewportHeight}"
+                                   Width="10"
+                                   MinWidth="10"
+                                   Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}"/>
+                            <!-- Horizontal ScrollBar -->
+                            <ScrollBar Name="PART_HorizontalScrollBar"
+                                   Opacity="0.5"
+                                   Orientation="Horizontal"
+                                   Grid.Row="1"
+                                   Grid.Column="0"
+                                   Height="10"
+                                   MinHeight="10"
+                                   Value="{TemplateBinding HorizontalOffset}"
+                                   Maximum="{TemplateBinding ScrollableWidth}"
+                                   ViewportSize="{TemplateBinding ViewportWidth}"
+                                   Visibility="{TemplateBinding ComputedHorizontalScrollBarVisibility}"/>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+
+        <!-- Style for a YouTube-like Button -->
+        <Style x:Key="YouTubeButtonStyle" TargetType="Border">
+            <Setter Property="Background" Value="#2341EB"/>
+            <Setter Property="CornerRadius" Value="5"/>
+            <Setter Property="Padding" Value="10,5"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Effect">
+                <Setter.Value>
+                    <DropShadowEffect Color="#2341EB" 
+                                      Direction="0" 
+                                      ShadowDepth="0" 
+                                      BlurRadius="50"/>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="TextBlock.Foreground" Value="White"/>
+            <Setter Property="TextBlock.FontWeight" Value="Bold"/>
+            <Setter Property="TextBlock.HorizontalAlignment" Value="Center"/>
+            <Setter Property="TextBlock.VerticalAlignment" Value="Center"/>
+            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+            <Setter Property="RenderTransform">
+                <Setter.Value>
+                    <ScaleTransform ScaleX="1" ScaleY="1"/>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="RenderTransform">
+                        <Setter.Value>
+                            <ScaleTransform ScaleX="1.1" ScaleY="1.1"/>
+                        </Setter.Value>
+                    </Setter>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+    </Window.Resources>
+
+
+    <!--MAIN-->
+    <Border CornerRadius="20" 
+            Background="#1C1C1C" 
+            BorderBrush="#2341EB" 
+            BorderThickness="5"
+            Padding="5">
+
+        <Grid>
+            <!-- Main Background Color -->
+            <Grid.Background>
+                <LinearGradientBrush StartPoint="0,1" EndPoint="1,0">
+                    <GradientStop Color="#1c1c1c" Offset="0" />
+                    <GradientStop Color="#222222" Offset="1" />
+                </LinearGradientBrush>
+            </Grid.Background>
+
+
+            <!-- ROW DEFINITIONS -->
+            <Grid.RowDefinitions>
+                <!-- Header Row -->
+                <RowDefinition Height="50"/>
+                <!-- Main Content Row -->
+                <RowDefinition/>
+                <!-- Footer Row -->
+                <RowDefinition Height="25"/>
+            </Grid.RowDefinitions>
+
+
+            <!-- ROW 0 - HEADER START -->
+            <Grid MouseDown="header_drag" Background="Transparent" Grid.Row="0" Margin="5">
+
+                <!--Header Hrid-->
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="75"/>
+                    <ColumnDefinition/>
+                    <ColumnDefinition Width="75"/>
+                </Grid.ColumnDefinitions>
+
+                <!--Linked LearnRevitAPI Logo-->
+                <TextBlock Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Center">
+                    <Hyperlink NavigateUri="https://acc.autodesk.com/home" 
+                               TextDecorations="None"
+                               RequestNavigate="Hyperlink_RequestNavigate">
+                        <Image x:Name="logoImage"
+                               Source="\\172.16.1.7\ffe\Internal Share\Drafting\FFE Logo - Titleblock\FFE Logo-Titleblock-Tagline-WebAddress.png"
+                               Height="50" Width="200"
+                               Stretch="Uniform"
+                               RenderTransformOrigin="0.5,0.5">
+                            <Image.RenderTransform>
+                                <ScaleTransform x:Name="imageScaleTransform"/>
+                            </Image.RenderTransform>
+                            <Image.Triggers>
+                                <EventTrigger RoutedEvent="Image.MouseEnter">
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="imageScaleTransform"
+                                                             Storyboard.TargetProperty="ScaleX"
+                                                             To="0.9" Duration="0:0:0.2"/>
+                                            <DoubleAnimation Storyboard.TargetName="imageScaleTransform"
+                                                             Storyboard.TargetProperty="ScaleY"
+                                                             To="0.9" Duration="0:0:0.2"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </EventTrigger>
+                                <EventTrigger RoutedEvent="Image.MouseLeave">
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="imageScaleTransform"
+                                                             Storyboard.TargetProperty="ScaleX"
+                                                             To="1.0" Duration="0:0:0.2"/>
+                                            <DoubleAnimation Storyboard.TargetName="imageScaleTransform"
+                                                             Storyboard.TargetProperty="ScaleY"
+                                                             To="1.0" Duration="0:0:0.2"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </EventTrigger>
+                            </Image.Triggers>
+                        </Image>
+                    </Hyperlink>
+                </TextBlock>
+
+                <!--Close Button-->
+                <Button Content="Close"
+                        Grid.Column="2"
+                        Width="60" Height="20"
+                        Margin="0,0,10,0"
+                        FontSize="10"
+                        Click="button_close"
+                        VerticalAlignment="Center"
+                        HorizontalAlignment="Right"
+                        Background="Transparent" Foreground="White" BorderBrush="Transparent"/>
+
+            </Grid>
+            <!-- ROW 0 - HEADER START-->
+
+
+            <!-- ROW 1 - MAIN SECTION START-->
+            <StackPanel Margin="10" Grid.Row="1" HorizontalAlignment="Center">
+
+
+
+                <!-- Rounded Card Title -->
+                <DockPanel HorizontalAlignment="Center">
+
+                    <Border Background="#393939" CornerRadius="7" Padding="5" Margin="10" 
+                            BorderBrush="#2341EB" BorderThickness="0" RenderTransformOrigin="0.5,0.5">
+
+                        <Border.RenderTransform>
+                            <RotateTransform Angle="3"/>
+                        </Border.RenderTransform>
+
+                        <DockPanel>
+                            <!-- Title Text with Hyperlink -->
+                            <TextBlock Text="Autodesk Content Catalog"
+                                            FontSize="28"
+                                            FontWeight="Bold"
+                                            Foreground="#2341EB"
+                                            VerticalAlignment="Center"
+                                            HorizontalAlignment="Left">
+
+
+                            </TextBlock>
+
+                            <!-- Image with Animation -->
+                        </DockPanel>
+                    </Border>
+
+
+
+                    <!-- Title Text with Hyperlink -->
+                    <TextBlock DockPanel.Dock="Left" VerticalAlignment="Center">
+                            <Hyperlink NavigateUri="https://learnrevitapi.com/pyrevit-starter-kit" 
+                                       TextDecorations="None"
+                                       RequestNavigate="Hyperlink_RequestNavigate"/>
+                    </TextBlock>
+                </DockPanel>
+
+
+                <TextBlock  Text="Scroll Down to See More!" 
+                            Grid.Column="1"
+                            FontSize="14"        Foreground="#95999D" Opacity="1"
+                            TextWrapping="Wrap"   Grid.Row="2"
+                            VerticalAlignment="Center" HorizontalAlignment="Center"/>
+
+                <!-- Additional Information -->
+                <Border Background="#222222" CornerRadius="10" Padding="10" Margin="10" Width="650">
+                    <Border.Effect>
+                        <DropShadowEffect Color="#FFFFFF" 
+                          Direction="0" 
+                          ShadowDepth="0" 
+                          Opacity="1" 
+                          BlurRadius="50"/>
+                    </Border.Effect>
+
+                    <!-- MAIN CONTENT -->
+                    <ScrollViewer Grid.Row="1" Margin="10" Height="460">
+                        <StackPanel>
+                            <!-- Example content for scrolling -->
+                            <UniformGrid Columns="2" HorizontalAlignment="Center" VerticalAlignment="Top">
+
+                                <!-- FFE's Collection -->
+                                <Border Style="{StaticResource EF_card}">
+                                    <StackPanel>
+                                        <Image Source="https://i.postimg.cc/Pq3CWtMv/FFE-s-Collection.jpg" VerticalAlignment="Center" Style="{StaticResource Thumbnail}"/>
+                                        <TextBlock Text="FFE's Collection" FontSize="16" FontWeight="Bold" Foreground="White" Margin="15,0,15,0"/>
+                                        <TextBlock HorizontalAlignment="Center">
+                                        <Hyperlink NavigateUri="https://contentcatalog.autodesk.com/browse/YzUwY2E3NGYtNjFiMi00MDY3LThjYjctMTgzYzExZTYzYzdi" RequestNavigate="Hyperlink_RequestNavigate">
+                                            <TextBlock Text="Browse Here" Margin="0,10,0,0" FontSize="16" FontWeight="Bold" Foreground="#F7F01F"/>
+                                        </Hyperlink>
+                                    </TextBlock>
+                                    </StackPanel>
+                                </Border>
+
+
+                                <!-- Architecture Collection -->
+                                <Border Style="{StaticResource EF_card}">
+                                    <StackPanel>
+                                        <Image Source="https://i.postimg.cc/dVFZvN13/Architecture.jpg" VerticalAlignment="Center" Style="{StaticResource Thumbnail}"/>
+                                        <TextBlock Text="Architecture Collection" FontSize="16" FontWeight="Bold" Foreground="White" Margin="15,0,15,0"/>
+                                        <TextBlock HorizontalAlignment="Center">
+                                        <Hyperlink NavigateUri="https://contentcatalog.autodesk.com/browse/RTg2ODg2MTAtQjE1Qi00MzNGLUI5MzYtNkFFMTIxMzFFRDlG" RequestNavigate="Hyperlink_RequestNavigate">
+                                            <TextBlock Text="Browse Here" Margin="0,10,0,0" FontSize="16" FontWeight="Bold" Foreground="#F7F01F"/>
+                                        </Hyperlink>
+                                    </TextBlock>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Electrical Collection -->
+                                <Border Style="{StaticResource EF_card}">
+                                    <StackPanel>
+                                        <Image Source="https://i.postimg.cc/qRx8Hfck/Electrical.jpg" VerticalAlignment="Center" Style="{StaticResource Thumbnail}"/>
+                                        <TextBlock Text="Electrical Collection" FontSize="16" FontWeight="Bold" Foreground="White" Margin="15,0,15,0"/>
+                                        <TextBlock HorizontalAlignment="Center">
+                                            <Hyperlink NavigateUri="https://contentcatalog.autodesk.com/browse/NEE5N0YxQzItQTBENC00QjIzLTg1M0QtMzc1QTYxMDk1QTQw" RequestNavigate="Hyperlink_RequestNavigate">
+                                                <TextBlock Text="Browse Here" Margin="0,10,0,0" FontSize="16" FontWeight="Bold" Foreground="#F7F01F"/>
+                                            </Hyperlink>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Border>
+
+
+                                <!-- Mechanical Collection -->
+                                <Border Style="{StaticResource EF_card}">
+                                    <StackPanel>
+                                        <Image Source="https://i.postimg.cc/9FZw6Hcs/Mechanical.jpg" VerticalAlignment="Center" Style="{StaticResource Thumbnail}"/>
+                                        <TextBlock Text="Mechanical Collection" FontSize="16" FontWeight="Bold" Foreground="White" Margin="15,0,15,0"/>
+                                        <TextBlock HorizontalAlignment="Center">
+                                            <Hyperlink NavigateUri="https://contentcatalog.autodesk.com/browse/QzZGMzdCQjYtN0IxRS00NEZDLUI1RkItMUZENjAxOEUzMEFC" RequestNavigate="Hyperlink_RequestNavigate">
+                                                <TextBlock Text="Browse Here" Margin="0,10,0,0" FontSize="16" FontWeight="Bold" Foreground="#F7F01F"/>
+                                            </Hyperlink>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Plumbing Collection -->
+                                <Border Style="{StaticResource EF_card}">
+                                    <StackPanel>
+                                        <Image Source="https://i.postimg.cc/s1dyYL8h/Plumbing.jpg" VerticalAlignment="Center" Style="{StaticResource Thumbnail}"/>
+                                        <TextBlock Text="Plumbing Collection" FontSize="16" FontWeight="Bold" Foreground="White" Margin="15,0,15,0"/>
+                                        <TextBlock HorizontalAlignment="Center">
+                                            <Hyperlink NavigateUri="https://contentcatalog.autodesk.com/browse/RjM1QURGOUYtQURBMi00QjhELUJGNTUtRjZDMEVENzFCNEUx" RequestNavigate="Hyperlink_RequestNavigate">
+                                                <TextBlock Text="Browse Here" Margin="0,10,0,0" FontSize="16" FontWeight="Bold" Foreground="#F7F01F"/>
+                                            </Hyperlink>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Structural Collection -->
+                                <Border Style="{StaticResource EF_card}">
+                                    <StackPanel>
+                                        <Image Source="https://i.postimg.cc/RCjnpZxc/Structural.jpg" VerticalAlignment="Center" Style="{StaticResource Thumbnail}"/>
+                                        <TextBlock Text="Structural Collection" FontSize="16" FontWeight="Bold" Foreground="White" Margin="15,0,15,0"/>
+                                        <TextBlock HorizontalAlignment="Center">
+                                            <Hyperlink NavigateUri="https://contentcatalog.autodesk.com/browse/N0Y1NDg5NkUtRTc0Mi00Q0JGLTg3QTAtMDhEMDgzN0ZCMjcx" RequestNavigate="Hyperlink_RequestNavigate">
+                                                <TextBlock Text="Browse Here" Margin="0,10,0,0" FontSize="16" FontWeight="Bold" Foreground="#F7F01F"/>
+                                            </Hyperlink>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- VA TIL Collection -->
+                                <Border Style="{StaticResource EF_card}">
+                                    <StackPanel>
+                                        <Image Source="https://i.postimg.cc/mZcHSFJL/VA-TIL.jpg" VerticalAlignment="Center" Style="{StaticResource Thumbnail}"/>
+                                        <TextBlock Text="VA TIL Collection" FontSize="16" FontWeight="Bold" Foreground="White" Margin="15,0,15,0"/>
+                                        <TextBlock HorizontalAlignment="Center">
+                                            <Hyperlink NavigateUri="https://contentcatalog.autodesk.com/browse/MzBGRDBBMDgtNTFGOS00MjZFLUI2NzktMjA1QjMxQTY3QjEw" RequestNavigate="Hyperlink_RequestNavigate">
+                                                <TextBlock Text="Browse Here" Margin="0,10,0,0" FontSize="16" FontWeight="Bold" Foreground="#F7F01F"/>
+                                            </Hyperlink>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Border>
+
+
+                                <!-- Repeat the Border content as needed -->
+                            </UniformGrid>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+
+
+
+                <Border Style="{StaticResource YouTubeButtonStyle}" Margin="0,10,0,0">
+                    <TextBlock>
+                <Hyperlink NavigateUri="https://youtu.be/yw2coGHojw0?si=2mfyAhR46wrMDUNo" 
+                           TextDecorations="None"
+                           Foreground="#1C1C1C"
+                           RequestNavigate="Hyperlink_RequestNavigate">
+                    Watch More on YouTube
+                </Hyperlink>
+                    </TextBlock>
+                </Border>
+
+
+
+            </StackPanel>
+            <!-- ROW 1 - MAIN SECTION END-->
+
+
+            <!--ROW 2 - FOOTER START-->
+            <TextBlock  Text="FFE-pyRevit Version: 1.0" 
+                            Grid.Column="1"
+                            FontSize="14"        Foreground="#95999D" Opacity="0.6"
+                            TextWrapping="Wrap"   Grid.Row="2"
+                            VerticalAlignment="Center" HorizontalAlignment="Center"/>
+            <!--ROW 2 - FOOTER END-->
+
+
+        </Grid>
+    </Border>
+</Window>
