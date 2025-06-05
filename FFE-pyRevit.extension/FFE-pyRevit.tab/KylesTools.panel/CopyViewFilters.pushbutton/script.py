@@ -5,14 +5,14 @@ Date    = 03.06.2025
 ________________________________________________________________
 Description:
 
-This is my test button.
-# # -*- coding: utf-8 -*-
+This buttom will copy view filters from one view to multiple views.
 
 ________________________________________________________________
 How-To:
 
-1. [Hold ALT + CLICK] on the button to open its source folder.
-You will be able to override this placeholder.
+1. Press the button
+2. Select the view with filters
+3. Select the destination views
 ________________________________________________________________
 Author: Kyle Guggenheim"""
 
