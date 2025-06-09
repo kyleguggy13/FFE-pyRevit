@@ -1,5 +1,5 @@
 # FFE-pyRevit
-FFE's pyRevit add-in extension.
+### FFE's pyRevit add-in extension.
 
 1. Copy View Filters
 2. Transfer View Templates
@@ -8,3 +8,5 @@ FFE's pyRevit add-in extension.
     - Sheet set per Discipline
     - Sheet set for all
     - Check Sheet Sets to be published
+4. Text Leader Position
+5. Keynote Symbol Update
