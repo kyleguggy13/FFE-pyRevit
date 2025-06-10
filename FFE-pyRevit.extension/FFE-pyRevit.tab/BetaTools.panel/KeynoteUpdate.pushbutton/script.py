@@ -28,12 +28,13 @@ clr.AddReference("System")
 from System.Collections.Generic import List
 from Autodesk.Revit.DB import *
 from Autodesk.Revit.UI import *
-from Autodesk.Revit.UI.Selection import Selection
+from Autodesk.Revit.DB import FilteredElementCollector, FamilySymbol, Transaction
 
 
 #____________________________________________________________________ IMPORTS (PYREVIT)
 
-from pyrevit import revit, DB, forms
+from pyrevit import revit, DB
+from pyrevit.script import output
 
 
 #____________________________________________________________________ VARIABLES
@@ -45,86 +46,60 @@ selection   = uidoc.Selection                       #type: Selection
 
 #____________________________________________________________________ MAIN
 
-### NOTES ###
-# LeaderAtachement Enumeration
-# https://www.revitapidocs.com/2026/82ed0368-6da3-53a3-8c07-4061efd0be56.htm
+
+# Set up the output panel
+output_window = output.get_output()
+output_window.set_title("Family Type Renamer")
+output_window.print_md("## 🛠 Renaming Family Types Based on Parameters")
+
+# Customize these parameter names
+PARAM_NAME_1 = "Width"
+PARAM_NAME_2 = "Height"
+
+def get_param_value(symbol, param_name):
+    param = symbol.LookupParameter(param_name)
+    if param and param.HasValue:
+        return param.AsValueString() or str(param.AsDouble())
+    return "None"
+
+def rename_family_types(param1_name, param2_name):
+    doc = revit.doc
+    collector = FilteredElementCollector(doc).OfClass(FamilySymbol)
+
+    renamed_types = []
+
+    #________________________________________________________________ 🤖 Transaction
+    with Transaction(doc, "Rename Family Types") as t:
+        t.Start()
+        for symbol in collector:
+            val1 = get_param_value(symbol, param1_name)
+            val2 = get_param_value(symbol, param2_name)
+            if val1 and val2:
+                new_name = "{} x {}".format(val1, val2)
+                old_name = symbol.Name
+                try:
+                    if old_name != new_name:
+                        symbol.Name = new_name
+                        renamed_types.append([symbol.FamilyName, old_name, new_name])
+                except Exception as e:
+                    output.print_md("### ❌ Error Renaming Type: {} - {}".format(old_name, str(e)))
+        t.Commit()
 
 
+    #________________________________________________________________ 📊 Output Results
+    if renamed_types:
+        output.print_md("### ✅ Renamed Types")
+        output.print_table(
+            table_data=renamed_types,
+            title="Family Type Renames",
+            columns=["Family", "Old Name", "New Name"]
+        )
+    else:
+        output.print_md("### ⚠️ No Types Renamed")
 
-# GET SELECTION
-selected_elements = selection.GetElementIds()
+# Run it
+rename_family_types(PARAM_NAME_1, PARAM_NAME_2)
 
-# CONTAINER
-elements_list = []
-param_Left_List = []
-param_Right_List = []
-
-# LOOP THROUGH SELECTED ELEMENTS
-for element_id in selected_elements:
-    element = doc.GetElement(element_id)
-    elements_list.append(element)
-    param_Left_List.append(element.get_Parameter(BuiltInParameter.LEADER_LEFT_ATTACHMENT))
-    param_Right_List.append(element.get_Parameter(BuiltInParameter.LEADER_RIGHT_ATTACHMENT))
-
-    # print("Element ID: ", element.Id, " Element Parameters: ", element.GetParameters('Left Attachment')[0].AsValueString())
-    print("get_Parameter: ", element.get_Parameter(BuiltInParameter.LEADER_LEFT_ATTACHMENT).AsValueString())
-
-
-
-
-# Step 1: Ask user for Top, Middle, or Bottom attachment
-options = ["Top", "Middle", "Bottom"]
-attachment_choice_left = forms.SelectFromList.show(options, title="Select Left Leader Attachment Position", button_name="Apply")
-attachment_choice_right = forms.SelectFromList.show(options, title="Select Right Leader Attachment Position", button_name="Apply")
-
-print("Selected Attachment Position: ", attachment_choice_left)
-print("Selected Attachment Position: ", attachment_choice_right)
-
-
-# If not selected, exit the script
-if not attachment_choice_left or not attachment_choice_right:
-    forms.alert("No attachment selected. Exiting.", exitscript=True)
-
-
-
-# Step 2: Use raw int for AttachmentType enum
-attachment_map = {
-    "Top": 0,
-    "Middle": 1,
-    "Bottom": 2
-}
-
-
-attachment_value_left = attachment_map[attachment_choice_left]
-
-attachment_value_right = attachment_map[attachment_choice_right]
-
-
-#____________________________________________________________________ 🤖 Transaction
-
-# Set Attachment Parameters
-transaction = Transaction(doc, "Text Leader")
-transaction.Start()
-try:
-    print("Changing text leader position...")
-    for param_left, param_right in zip(param_Left_List, param_Right_List):
-        ## Set the Left Attachment parameter to the selected attachment position
-        param_left.Set(attachment_value_left)
-        param_right.Set(attachment_value_right)
-
-        ## Optionally, you can also set the Right Attachment if needed
-
-        ## If you want to set a specific attachment type, you can do so here
-        ## For example, if you want to set it to TopLine:
-        ##
-        print("Left Leader position changed to: ", attachment_choice_left)
-        print("Right Leader position changed to: ", attachment_choice_right)
-
-    transaction.Commit()
-except Exception as e:
-
-    transaction.RollBack()
-    print("Error ", "Failed to change leader position: ", str(e))
 
 
 
