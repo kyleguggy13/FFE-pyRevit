@@ -22,6 +22,7 @@ Date    = 06.11.2025
 # Last update:
 # - [06.05.2025] - 1.0 RELEASE
 # _____________________________________________________________________
+Inspiration: Olivia Bates
 Author: Kyle Guggenheim"""
 
 
