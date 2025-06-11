@@ -2,16 +2,22 @@
 __title__     = "Text Leader Position"
 __version__   = 'Version = 1.0'
 __doc__       = """Version = 1.0
-Date    = 06.05.2025
+Date    = 06.11.2025
 # _____________________________________________________________________
 # Description:
-#
+# - This script allows you to change the left/right 
+#   attachment position of text leaders in Revit.
+# - The script will prompt you to select the 
+#   attachment position
+# - The available positions are Top, Middle, and Bottom.
 # 
 # _____________________________________________________________________
 # How-to:
 #
+# -> Select the text elements you want to change
 # -> Click the button
-# -> 
+# -> Choose the Left Attachment position from the list
+# -> Choose the Right Attachment position from the list
 # _____________________________________________________________________
 # Last update:
 # - [06.05.2025] - 1.0 RELEASE
@@ -54,6 +60,8 @@ selection   = uidoc.Selection                       #type: Selection
 # GET SELECTION
 selected_elements = selection.GetElementIds()
 
+print("Selected Elements: ", len(selected_elements))
+
 # CONTAINER
 elements_list = []
 param_Left_List = []
@@ -67,7 +75,7 @@ for element_id in selected_elements:
     param_Right_List.append(element.get_Parameter(BuiltInParameter.LEADER_RIGHT_ATTACHMENT))
 
     # print("Element ID: ", element.Id, " Element Parameters: ", element.GetParameters('Left Attachment')[0].AsValueString())
-    print("get_Parameter: ", element.get_Parameter(BuiltInParameter.LEADER_LEFT_ATTACHMENT).AsValueString())
+    # print("get_Parameter: ", element.get_Parameter(BuiltInParameter.LEADER_LEFT_ATTACHMENT).AsValueString())
 
 
 
@@ -77,12 +85,12 @@ options = ["Top", "Middle", "Bottom"]
 attachment_choice_left = forms.SelectFromList.show(options, title="Select Left Leader Attachment Position", button_name="Apply")
 attachment_choice_right = forms.SelectFromList.show(options, title="Select Right Leader Attachment Position", button_name="Apply")
 
-print("Selected Attachment Position: ", attachment_choice_left)
-print("Selected Attachment Position: ", attachment_choice_right)
+print("Left Attachment Position: ", attachment_choice_left)
+print("Right Attachment Position: ", attachment_choice_right)
 
 
-# If not selected, exit the script
-if not attachment_choice_left or not attachment_choice_right:
+### If not selected, exit the script
+if not attachment_choice_left and not attachment_choice_right:
     forms.alert("No attachment selected. Exiting.", exitscript=True)
 
 
@@ -94,10 +102,16 @@ attachment_map = {
     "Bottom": 2
 }
 
+if attachment_choice_left not in attachment_map:
+    attachment_value_left = ""
+else:
+    attachment_value_left = attachment_map[attachment_choice_left]
 
-attachment_value_left = attachment_map[attachment_choice_left]
 
-attachment_value_right = attachment_map[attachment_choice_right]
+if attachment_choice_right not in attachment_map:
+    attachment_value_right = ""
+else:
+    attachment_value_right = attachment_map[attachment_choice_right]
 
 
 #____________________________________________________________________ 🤖 Transaction
@@ -109,16 +123,23 @@ try:
     print("Changing text leader position...")
     for param_left, param_right in zip(param_Left_List, param_Right_List):
         ## Set the Left Attachment parameter to the selected attachment position
-        param_left.Set(attachment_value_left)
-        param_right.Set(attachment_value_right)
+        if attachment_value_left == "":
+            print("Left Attachment not set, skipping...")
+        else:
+            param_left.Set(attachment_value_left)
+            print("Left Leader position changed to: ", attachment_choice_left)
+        
+        ## Set the Right Attachment parameter to the selected attachment position
+        if attachment_value_right == "":
+            print("Right Attachment not set, skipping...")
+        else:
+            param_right.Set(attachment_value_right)
+            print("Right Leader position changed to: ", attachment_choice_right)
 
-        ## Optionally, you can also set the Right Attachment if needed
 
-        ## If you want to set a specific attachment type, you can do so here
-        ## For example, if you want to set it to TopLine:
         ##
-        print("Left Leader position changed to: ", attachment_choice_left)
-        print("Right Leader position changed to: ", attachment_choice_right)
+        # print("Left Leader position changed to: ", attachment_choice_left)
+        # print("Right Leader position changed to: ", attachment_choice_right)
 
     transaction.Commit()
 except Exception as e:
