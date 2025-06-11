@@ -5,13 +5,16 @@ __doc__       = """Version = 1.0
 Date    = 06.09.2025
 # _____________________________________________________________________
 # Description:
-#
+#   This script renames selected Family Types in Revit based on two parameters:
+#   - "Number" and "Text"
 # 
 # _____________________________________________________________________
 # How-to:
 #
 # -> Click the button
-# -> 
+# -> Select the Family Types you want to rename
+# -> The script will rename them to "Number Text" format
+#   
 # _____________________________________________________________________
 # Last update:
 # - [06.09.2025] - 1.0 RELEASE
@@ -21,11 +24,9 @@ Author: Kyle Guggenheim"""
 
 #____________________________________________________________________ IMPORTS (AUTODESK)
 
-from logging import Filter
-from requests import get
+import select
 import clr
 clr.AddReference("System")
-from System.Collections.Generic import List
 from Autodesk.Revit.DB import *
 from Autodesk.Revit.UI import *
 from Autodesk.Revit.DB import FilteredElementCollector, FamilySymbol, Transaction
@@ -35,6 +36,7 @@ from Autodesk.Revit.DB import FilteredElementCollector, FamilySymbol, Transactio
 
 from pyrevit import revit, DB
 from pyrevit.script import output
+from pyrevit import forms
 
 
 #____________________________________________________________________ VARIABLES
@@ -50,11 +52,11 @@ selection   = uidoc.Selection                       #type: Selection
 # Set up the output panel
 output_window = output.get_output()
 output_window.set_title("Family Type Renamer")
-output_window.print_md("## 🛠 Renaming Family Types Based on Parameters")
+output_window.print_md("## 🛠 Rename Selected Family Types")
 
 # Customize these parameter names
-PARAM_NAME_1 = "Width"
-PARAM_NAME_2 = "Height"
+PARAM_NAME_1 = "Number"
+PARAM_NAME_2 = "Text"
 
 def get_param_value(symbol, param_name):
     param = symbol.LookupParameter(param_name)
@@ -62,20 +64,46 @@ def get_param_value(symbol, param_name):
         return param.AsValueString() or str(param.AsDouble())
     return "None"
 
-def rename_family_types(param1_name, param2_name):
+
+def select_family_types():
     doc = revit.doc
     collector = FilteredElementCollector(doc).OfClass(FamilySymbol)
+    symbols = list(collector)
 
+    # Build display list
+    symbol_options = ["{} : {}".format(s.Family.Name, s.Name) for s in symbols]
+    selected = forms.SelectFromList.show(
+        symbol_options,
+        multiselect=True,
+        title="Select Family Types to Rename"
+        )
+    
+    if not selected: 
+        forms.alert("No types selected.")
+        return []
+    
+    # Get selected FamilySymbol objects back from names
+    selected_symbols = []
+    for s in symbols:
+        label = "{} : {}".format(s.Family.Name, s.Name)
+        if label in selected:
+            selected_symbols.append(s)
+    
+    return selected_symbols
+
+
+def rename_selected_types(symbols, param1_name, param2_name):
+    doc = revit.doc
     renamed_types = []
 
     #________________________________________________________________ 🤖 Transaction
     with Transaction(doc, "Rename Family Types") as t:
         t.Start()
-        for symbol in collector:
+        for symbol in symbols:
             val1 = get_param_value(symbol, param1_name)
             val2 = get_param_value(symbol, param2_name)
             if val1 and val2:
-                new_name = "{} x {}".format(val1, val2)
+                new_name = "{} {}".format(val1, val2)
                 old_name = symbol.Name
                 try:
                     if old_name != new_name:
@@ -97,10 +125,9 @@ def rename_family_types(param1_name, param2_name):
     else:
         output.print_md("### ⚠️ No Types Renamed")
 
-# Run it
-rename_family_types(PARAM_NAME_1, PARAM_NAME_2)
-
-
-
+#_____________________________________________________________________ 🏃‍➡️ RUN 
+selected_symbols = select_family_types()
+if selected_symbols:
+    rename_selected_types(selected_symbols, PARAM_NAME_1, PARAM_NAME_2)
 
 #==================================================
