@@ -52,6 +52,7 @@ selection   = uidoc.Selection                       #type: Selection
 output_window = output.get_output()
 output_window.set_title("Family Type Renamer")
 output_window.print_md("## 🛠 Rename Types in Selected Annotation Families")
+output_window.print_md("### ⚠️ Must have two parameters: **Number** and **Text**")
 
 # Customize these parameter names
 PARAM_NAME_1 = "Number"
