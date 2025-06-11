@@ -71,7 +71,7 @@ def select_family_types():
     symbols = list(collector)
 
     # Build display list
-    symbol_options = ["{} : {}".format(s.Family.Name, s.Name) for s in symbols]
+    symbol_options = ["{} : {}".format(s.FamilyName, s.TypeName) for s in symbols]
     selected = forms.SelectFromList.show(
         symbol_options,
         multiselect=True,
@@ -85,7 +85,7 @@ def select_family_types():
     # Get selected FamilySymbol objects back from names
     selected_symbols = []
     for s in symbols:
-        label = "{} : {}".format(s.Family.Name, s.Name)
+        label = "{} : {}".format(s.FamilyName, s.Name)
         if label in selected:
             selected_symbols.append(s)
     
