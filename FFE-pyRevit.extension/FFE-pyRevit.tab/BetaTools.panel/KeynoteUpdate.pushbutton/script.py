@@ -3,22 +3,23 @@ __title__     = "Keynote Update"
 __version__   = 'Version = 1.0'
 __doc__       = """Version = 1.0
 Date    = 06.09.2025
-# _____________________________________________________________________
+# ______________________________________________________________
 # Description:
-#   This script renames selected Family Types in Revit based on two parameters:
-#   - "Number" and "Text"
+# -> This script renames selected Family Types 
+#    in Revit based on two parameters:
+# -> "Number" and "Text"
 # 
-# _____________________________________________________________________
+# ______________________________________________________________
 # How-to:
 #
 # -> Click the button
 # -> Select the Family Types you want to rename
 # -> The script will rename them to "Number Text" format
 #   
-# _____________________________________________________________________
+# ______________________________________________________________
 # Last update:
 # - [06.09.2025] - 1.0 RELEASE
-# _____________________________________________________________________
+# ______________________________________________________________
 Author: Kyle Guggenheim"""
 
 
@@ -30,6 +31,7 @@ clr.AddReference("System")
 from Autodesk.Revit.DB import *
 from Autodesk.Revit.UI import *
 from Autodesk.Revit.DB import FilteredElementCollector, FamilySymbol, Transaction
+from Autodesk.Revit.DB import BuiltInParameter
 
 
 #____________________________________________________________________ IMPORTS (PYREVIT)
@@ -52,7 +54,7 @@ selection   = uidoc.Selection                       #type: Selection
 # Set up the output panel
 output_window = output.get_output()
 output_window.set_title("Family Type Renamer")
-output_window.print_md("## 🛠 Rename Selected Family Types")
+output_window.print_md("## 🛠 Rename Selected Annotation Family Types")
 
 # Customize these parameter names
 PARAM_NAME_1 = "Number"
@@ -67,29 +69,35 @@ def get_param_value(symbol, param_name):
 
 def select_family_types():
     doc = revit.doc
+    # Filter only Generic Annotation symbols
     collector = FilteredElementCollector(doc).OfClass(FamilySymbol)
-    symbols = list(collector)
+    symbols = [s for s in collector if s.Category and s.Category.Id == ElementId(BuiltInCategory.OST_GenericAnnotation)]
 
     # Build display list
-    symbol_options = ["{} : {}".format(s.FamilyName, s.TypeName) for s in symbols]
+    symbol_options = []
+    symbol_lookup = {}
+
+    for s in symbols:
+        try:
+            type_name = s.get_Parameter(BuiltInParameter.SYMBOL_NAME_PARAM).AsString()
+            label = "{} : {}".format(s.FamilyName, type_name)
+            symbol_options.append(label)
+            symbol_lookup[label] = s
+        except:
+            continue
+
     selected = forms.SelectFromList.show(
         symbol_options,
         multiselect=True,
-        title="Select Family Types to Rename"
-        )
-    
+        title="Select Annotation Family Types to Rename"
+    )
+
     if not selected: 
         forms.alert("No types selected.")
         return []
-    
-    # Get selected FamilySymbol objects back from names
-    selected_symbols = []
-    for s in symbols:
-        label = "{} : {}".format(s.FamilyName, s.Name)
-        if label in selected:
-            selected_symbols.append(s)
-    
-    return selected_symbols
+
+    return [symbol_lookup[label] for label in selected if label in symbol_lookup]
+
 
 
 def rename_selected_types(symbols, param1_name, param2_name):
@@ -97,33 +105,33 @@ def rename_selected_types(symbols, param1_name, param2_name):
     renamed_types = []
 
     #________________________________________________________________ 🤖 Transaction
-    with Transaction(doc, "Rename Family Types") as t:
+    with Transaction(doc, "Rename Selected Family Types") as t:
         t.Start()
         for symbol in symbols:
             val1 = get_param_value(symbol, param1_name)
             val2 = get_param_value(symbol, param2_name)
             if val1 and val2:
                 new_name = "{} {}".format(val1, val2)
-                old_name = symbol.Name
+                old_name = symbol.get_Parameter(BuiltInParameter.SYMBOL_NAME_PARAM).AsString()
                 try:
                     if old_name != new_name:
                         symbol.Name = new_name
                         renamed_types.append([symbol.FamilyName, old_name, new_name])
                 except Exception as e:
-                    output.print_md("### ❌ Error Renaming Type: {} - {}".format(old_name, str(e)))
+                    output_window.print_md("### ❌ Error Renaming Type: {} : {}".format(old_name, str(e)))
         t.Commit()
 
 
     #________________________________________________________________ 📊 Output Results
     if renamed_types:
-        output.print_md("### ✅ Renamed Types")
-        output.print_table(
+        output_window.print_md("### ✅ Renamed Types")
+        output_window.print_table(
             table_data=renamed_types,
             title="Family Type Renames",
             columns=["Family", "Old Name", "New Name"]
         )
     else:
-        output.print_md("### ⚠️ No Types Renamed")
+        output_window.print_md("### ⚠️ No Types Renamed")
 
 #_____________________________________________________________________ 🏃‍➡️ RUN 
 selected_symbols = select_family_types()
