@@ -32,7 +32,7 @@ import clr
 clr.AddReference("System")
 from Autodesk.Revit.DB import *
 from Autodesk.Revit.UI import *
-from Autodesk.Revit.DB import FilteredElementCollector, FamilySymbol, Transaction, Family, BuiltInParameter
+from Autodesk.Revit.DB import FilteredElementCollector, FamilySymbol, Transaction, Family, BuiltInParameter, ElementType
 
 #____________________________________________________________________ IMPORTS (PYREVIT)
 
@@ -53,6 +53,15 @@ output_window = output.get_output()
 output_window.set_title("Family Type Renamer")
 output_window.print_md("## 🛠 Rename Types in Selected Annotation Families")
 output_window.print_md("### ⚠️ Must have two parameters: **Number** and **Text**")
+
+
+# Test arrowhead_collector
+arrowhead_collector = FilteredElementCollector(doc).OfClass(ElementType).WhereElementIsElementType().ToElements()
+for arrowhead_type in arrowhead_collector:
+    if arrowhead_type.FamilyName == "Arrowhead":
+        Arrowheadtype_Name = DB.Element.Name.__get__(arrowhead_type)
+        Arrowheadtype_ID = DB.Element.Id.__get__(arrowhead_type)
+        output_window.print_md("### ✅ Found Arrowhead Type: {}, {}".format(Arrowheadtype_Name, Arrowheadtype_ID))
 
 
 # Customize these parameter names
@@ -97,7 +106,7 @@ def set_leader_arrowhead(symbol):
     arrowhead_name = "Arrow Filled 20 Degree"
     
     # Find the arrowhead type in the document
-    arrowhead_collector = FilteredElementCollector(doc).OfClass(FamilySymbol)
+    arrowhead_collector = FilteredElementCollector(doc).OfClass(ElementType).WhereElementIsElementType().ToElements()
     arrowhead_type = next((a for a in arrowhead_collector if a.Name == arrowhead_name), None)
 
     if not arrowhead_type:
@@ -124,7 +133,7 @@ def rename_types_in_families(families, param1_name, param2_name):
             symbols = family.GetFamilySymbolIds()
             for sym_id in symbols:
                 symbol = doc.GetElement(sym_id)
-                set_leader_arrowhead(symbol)  # Set the leader arrowhead
+                # set_leader_arrowhead(symbol)  # Set the leader arrowhead
                 val1 = get_param_value(symbol, param1_name)
                 val2 = get_param_value(symbol, param2_name)
                 if val1 and val2:
