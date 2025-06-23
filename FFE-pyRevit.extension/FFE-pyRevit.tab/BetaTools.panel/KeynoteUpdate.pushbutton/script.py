@@ -124,6 +124,7 @@ def rename_types_in_families(families, param1_name, param2_name):
             symbols = family.GetFamilySymbolIds()
             for sym_id in symbols:
                 symbol = doc.GetElement(sym_id)
+                set_leader_arrowhead(symbol)  # Set the leader arrowhead
                 val1 = get_param_value(symbol, param1_name)
                 val2 = get_param_value(symbol, param2_name)
                 if val1 and val2:
@@ -133,7 +134,7 @@ def rename_types_in_families(families, param1_name, param2_name):
                         if old_name != new_name:
                             symbol.Name = new_name
                             renamed_types.append([family.Name, old_name, new_name])
-                            set_leader_arrowhead(symbol)  # Set the leader arrowhead
+                            
                     except Exception as e:
                         output_window.print_md("### ❌ Error Renaming Type: {} : {}".format(old_name, str(e)))
         t.Commit()
