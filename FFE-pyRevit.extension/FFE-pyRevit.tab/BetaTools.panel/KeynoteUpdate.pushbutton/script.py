@@ -16,7 +16,7 @@ Date    = 06.11.2025
 # -> Click the button
 # -> Select the Annotation Families you want to rename
 # -> All Family Types within those families will be 
-#       renamed to "Number Text" format
+#    renamed to "Number Text" format
 # -> Leader Arrowhead will be set to "Arrow Filled 20 Degree"
 #   
 # ______________________________________________________________
@@ -54,16 +54,23 @@ output_window.set_title("Family Type Renamer")
 output_window.print_md("## 🛠 Rename Types in Selected Annotation Families")
 output_window.print_md("### ⚠️ Must have two parameters: **Number** and **Text**")
 
+
 # Customize these parameter names
 PARAM_NAME_1 = "Number"
 PARAM_NAME_2 = "Text"
 
+
+# Function to get parameter value from a symbol
+# Returns the value as a string or "None" if not set
 def get_param_value(symbol, param_name):
     param = symbol.LookupParameter(param_name)
     if param and param.HasValue:
         return param.AsValueString() or str(param.AsDouble())
     return "None"
 
+
+# Function to select annotation families
+# Returns a list of selected Family objects
 def select_annotation_families():
     doc = revit.doc
     collector = FilteredElementCollector(doc).OfClass(Family)
@@ -82,6 +89,31 @@ def select_annotation_families():
 
     return [f for f in annotation_families if f.Name in selected]
 
+
+# Function to set the leader arrowhead for a symbol
+# It sets the arrowhead to "Arrow Filled 20 Degree"
+def set_leader_arrowhead(symbol):
+    doc = revit.doc
+    arrowhead_name = "Arrow Filled 20 Degree"
+    
+    # Find the arrowhead type in the document
+    arrowhead_collector = FilteredElementCollector(doc).OfClass(FamilySymbol)
+    arrowhead_type = next((a for a in arrowhead_collector if a.Name == arrowhead_name), None)
+
+    if not arrowhead_type:
+        output_window.print_md("### ❌ Arrowhead Type Not Found: {}".format(arrowhead_name))
+        return
+
+    # Set the leader arrowhead type
+    try:
+        symbol.get_Parameter(BuiltInParameter.LEADER_ARROWHEAD_TYPE).Set(arrowhead_type.Id)
+        output_window.print_md("### ✅ Leader Arrowhead Set to: {}".format(arrowhead_name))
+    except Exception as e:
+        output_window.print_md("### ❌ Error Setting Leader Arrowhead: {}".format(str(e)))
+
+
+# Function to rename types in selected families
+# It renames each type based on the values of the specified parameters
 def rename_types_in_families(families, param1_name, param2_name):
     doc = revit.doc
     renamed_types = []
@@ -114,6 +146,7 @@ def rename_types_in_families(families, param1_name, param2_name):
         )
     else:
         output_window.print_md("### ⚠️ No Types Renamed")
+
 
 #_____________________________________________________________________ 🏃‍➡️ RUN 
 selected_families = select_annotation_families()
