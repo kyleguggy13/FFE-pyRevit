@@ -133,6 +133,7 @@ def rename_types_in_families(families, param1_name, param2_name):
                         if old_name != new_name:
                             symbol.Name = new_name
                             renamed_types.append([family.Name, old_name, new_name])
+                            set_leader_arrowhead(symbol)  # Set the leader arrowhead
                     except Exception as e:
                         output_window.print_md("### ❌ Error Renaming Type: {} : {}".format(old_name, str(e)))
         t.Commit()
