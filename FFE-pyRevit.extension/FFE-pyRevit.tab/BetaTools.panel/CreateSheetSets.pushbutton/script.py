@@ -21,8 +21,6 @@ Author: Kyle Guggenheim"""
 
 #____________________________________________________________________ IMPORTS (AUTODESK)
 
-from operator import mul
-from math import exp
 import clr
 from Autodesk.Revit.DB import *
 from Autodesk.Revit.UI import *
@@ -30,6 +28,8 @@ from System.Collections.Generic import List
 
 
 #____________________________________________________________________ IMPORTS (PYREVIT)
+from pyrevit import framework
+from pyrevit import revit, script, DB, UI
 from pyrevit import forms
 
 
@@ -42,94 +42,85 @@ doc    = __revit__.ActiveUIDocument.Document #type:Document
 #____________________________________________________________________ MAIN
 
 # 1️⃣ Get Sheets
-
-# Get all sheets
-collector = FilteredElementCollector(doc).OfClass(ViewSheet)
-all_sheets = [sheet for sheet in collector if sheet.GetParameters("Appears In Sheet List") and 
-              sheet.LookupParameter("Appears In Sheet List").AsInteger() == 1]
-
-
-export_options = ["ALL SHEETS", "GENERAL", "STRUCTURAL", "ARCHITECTURE", "PLUMBING", "MECHANICAL", "ELECTRICAL"]
-
-# Select ALL SHEETS or BY DISCIPLINE
-select_group = forms.SelectFromList.show(export_options, multiselect=False, button_name="Select Group")
-export_group = select_group
-print("Selected group: ", select_group, "Type: ", type(select_group))
-print("Selected group: ", export_group, "Type: ", type(export_group))
-
-
-# Check if the user selected "ALL SHEETS" or a specific discipline
-if export_group == "ALL SHEETS":
-    # Select all sheets
+def GetSheets():
+    # Get all sheets
+    collector = FilteredElementCollector(doc).OfClass(ViewSheet)
     all_sheets = [sheet for sheet in collector if sheet.GetParameters("Appears In Sheet List") and 
-                  sheet.LookupParameter("Appears In Sheet List").AsInteger() == 1]
-    print("ALL SHEETS: ", len(all_sheets))
-else:
-    # Select sheets by discipline
-    all_sheets = [sheet for sheet in collector if sheet.GetParameters("Appears In Sheet List") and 
-                  sheet.LookupParameter("Appears In Sheet List").AsInteger() == 1 and 
-                  sheet.LookupParameter("FFE_Sheet_Discipline").AsString() == export_group]
-    print("Sheets selected by discipline: ", len(all_sheets))
+                sheet.LookupParameter("Appears In Sheet List").AsInteger() == 1]
+
+
+    export_options = ["ALL SHEETS", "GENERAL", "STRUCTURAL", "ARCHITECTURE", "PLUMBING", "MECHANICAL", "ELECTRICAL"]
+
+    # Select ALL SHEETS or BY DISCIPLINE
+    select_group = forms.SelectFromList.show(export_options, multiselect=False, button_name="Select Group")
+    export_group = select_group
+    print("Selected group: ", select_group, "Type: ", type(select_group))
+    print("Selected group: ", export_group, "Type: ", type(export_group))
+
+
+    # Check if the user selected "ALL SHEETS" or a specific discipline
+    if export_group == "ALL SHEETS":
+        # Select all sheets
+        all_sheets = [sheet for sheet in collector if sheet.GetParameters("Appears In Sheet List") and 
+                    sheet.LookupParameter("Appears In Sheet List").AsInteger() == 1]
+        print("ALL SHEETS: ", len(all_sheets))
+    else:
+        # Select sheets by discipline
+        all_sheets = [sheet for sheet in collector if sheet.GetParameters("Appears In Sheet List") and 
+                    sheet.LookupParameter("Appears In Sheet List").AsInteger() == 1 and 
+                    sheet.LookupParameter("FFE_Sheet_Discipline").AsString() == export_group]
+        print("Sheets selected by discipline: ", len(all_sheets))
+    return all_sheets
 
 
 
+### REFER TO: 
+### "C:\Users\kyleg\AppData\Roaming\pyRevit-Master\extensions\pyRevitTools.extension\pyRevit.tab\Drawing Set.panel\views.stack\Views.pulldown\Create Print Set From Selected Views.pushbutton"
+### "C:\Users\kyleg\AppData\Roaming\pyRevit-Master\extensions\pyRevitTools.extension\pyRevit.tab\Drawing Set.panel\Sheets.pulldown\List TitleBlocks on Sheets.pushbutton\script.py"
+
+# Get PrintManager / ViewSheetSetting
+print_manager = revit.doc.PrintManager
+print_manager.PrintRange = DB.PrintRange.Select
+viewsheetsetting = print_manager.ViewSheetSetting
 
 
-# Create a new PrintSet
-print_manager = doc.PrintManager
-print_manager.PrintRange = PrintRange.Select
-view_set = ViewSet()
+# Collect existing ViewSheetSets (List)
+print_sets_existing = DB.FilteredElementCollector(revit.doc)\
+    .WhereElementIsNotElementType().OfClass(DB.ViewSheetSet).ToElements()
+
+# print_sets_names_existing = [vs.Name for vs in print_sets_existing if vs.Name]
+
+print_sets_names_existing = []
+for vs in print_sets_existing:
+    vs_name = vs.Name
+    print("Existing Print Set Name: ", vs_name)
+    print_sets_names_existing.append(vs_name)
 
 
-# Add all eligible sheets to the ViewSet
-for sheet in all_sheets:
-    view_set.Insert(sheet)
-
-
-# Create the print set
-print_manager.ViewSetToUse = view_set
-
-
-
-
-# # Set name for the print set
-# with Transaction(doc, "Create Sheet Set") as t:
-#     t.Start() # 🔓
-
-#     try:
-#         printSetName = export_group
-#         viewSheetSetting = doc.PrintManager.ViewSheetSetting
-#         viewSheetSetting.CurrentViewSheetSet.Views = view_set
-#         viewSheetSetting.SaveAs(printSetName)
-#         t.Commit()
-#         print("Success", "Sheet set '{p}' created with {a} sheets".format(p=printSetName, a=len(all_sheets)))
-#         # TaskDialog.Show("Success", f"Sheet set '{printSetName}' created with {len(all_sheets)} sheets")
-#     except Exception as e:
-#         t.RollBack()
-#         print("Error ", "Failed to create sheet set: {e}".format(e=str(e)))
-#         # TaskDialog.Show("Error", f"Failed to create sheet set: {str(e)}")
-
-#🤖 Automate Your Boring Work Here
-
-
+SheetCollector = FilteredElementCollector(doc).OfClass(ViewSheet)
+all_sheets = []
+for sheet in SheetCollector:
+    if sheet.GetParameters("Appears In Sheet List") and sheet.LookupParameter("Appears In Sheet List").AsInteger() == 1:
+        all_sheets.append(sheet)
+        print("Sheet Name: ", sheet.GetParameters("Appears In Sheet List").AsValue(), "Sheet Number: ", sheet.SheetNumber)
 
 #_____________________________________________________________________ 🏃‍➡️ RUN 
 
 # # Set name for the print set
-transaction = Transaction(doc, "Create Sheet Set")
-transaction.Start()
-try:
-    printSetName = "ALL SHEETS"
-    viewSheetSetting = doc.PrintManager.ViewSheetSetting
-    viewSheetSetting.CurrentViewSheetSet.Views = view_set
-    viewSheetSetting.SaveAs(printSetName)
-    transaction.Commit()
-    print("Success", "Sheet set '{p}' created with {a} sheets".format(p=printSetName, a=len(all_sheets)))
-    # TaskDialog.Show("Success", f"Sheet set '{printSetName}' created with {len(all_sheets)} sheets")
-except Exception as e:
-    transaction.RollBack()
-    print("Error ", "Failed to create sheet set: {e}".format(e=str(e)))
-    # TaskDialog.Show("Error", f"Failed to create sheet set: {str(e)}")
+# transaction = Transaction(doc, "Create Sheet Set")
+# transaction.Start()
+# try:
+#     printSetName = "ALL SHEETS"
+#     viewSheetSetting = doc.PrintManager.ViewSheetSetting
+#     viewSheetSetting.CurrentViewSheetSet.Views = view_set
+#     viewSheetSetting.SaveAs(printSetName)
+#     transaction.Commit()
+#     print("Success", "Sheet set '{p}' created with {a} sheets".format(p=printSetName, a=len(all_sheets)))
+#     # TaskDialog.Show("Success", f"Sheet set '{printSetName}' created with {len(all_sheets)} sheets")
+# except Exception as e:
+#     transaction.RollBack()
+#     print("Error ", "Failed to create sheet set: {e}".format(e=str(e)))
+#     # TaskDialog.Show("Error", f"Failed to create sheet set: {str(e)}")
 
 #🤖 Automate Your Boring Work Here
 
