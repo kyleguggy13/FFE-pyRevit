@@ -157,17 +157,21 @@ allviewsheetsets = {vss.Name: vss for vss in viewsheetsets}
 
 
 #_____________________________________________________________________ 🏃‍➡️ RUN 
-with revit.Transaction('Created Print Set'):
+with revit.Transaction('Created Sheet Set'):
     # Delete existing matching sheet set
-    if sheetsetname in allviewsheetsets.keys():
-        viewsheetsetting.CurrentViewSheetSet = allviewsheetsets[sheetsetname]
-        viewsheetsetting.Delete()
+    try:
+        if sheetsetname in allviewsheetsets.keys():
+            viewsheetsetting.CurrentViewSheetSet = allviewsheetsets[sheetsetname]
+            viewsheetsetting.Delete()
+    
 
-    # Create new sheet set
-    viewsheetsetting.CurrentViewSheetSet.Views = myviewset
-    viewsheetsetting.SaveAs(sheetsetname)
-    print("Sheet Set Created: ", sheetsetname, " with ", len(myviewset), " sheets.")
+        # Create new sheet set
+        viewsheetsetting.CurrentViewSheetSet.Views = myviewset
+        viewsheetsetting.SaveAs(sheetsetname)
+        print("Sheet Set Created: ", sheetsetname, " with ", len(Disciplines[sheetsetname]), " sheets.")
 
+    except Exception as e:
+            print("Error ", "Failed to create sheet set: {e}".format(e=str(e)))
 
 
 
