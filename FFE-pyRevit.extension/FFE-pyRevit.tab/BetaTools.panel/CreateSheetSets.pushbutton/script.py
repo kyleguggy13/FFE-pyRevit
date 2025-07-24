@@ -97,9 +97,10 @@ for vs in print_sets_existing:
     print_sets_names_existing.append(vs_name)
 
 
+### Collect Sheets with "Appears In Sheet List" parameter
 SheetCollector = FilteredElementCollector(doc).OfClass(ViewSheet)
 all_sheets = []
-Dicsciplines = {}
+
 for sheet in SheetCollector:
     if sheet.GetParameters("Appears In Sheet List") and sheet.LookupParameter("Appears In Sheet List").AsInteger() == 1:
         all_sheets.append(sheet)
@@ -108,21 +109,67 @@ for sheet in SheetCollector:
         order = sheet.LookupParameter("FFE_Sheet_Order").AsString()
         SheetNumber = sheet.SheetNumber
         SheetName = sheet.Name
-        print("{i}.{o}_{s} - {n}".format(i=index, o=order, s=SheetNumber, n=SheetName))
+        # print("{i}.{o}_{s} - {n}".format(i=index, o=order, s=SheetNumber, n=SheetName))
 
 
-print("all_sheets: ", len(all_sheets))
 
+### Create a dictionary to store sheets by discipline
+Disciplines = {}
+Disciplines["SHEETS"] = all_sheets
 for sheet in all_sheets:
     discipline = sheet.LookupParameter("FFE_Sheet_Discipline").AsString()
-    if discipline not in Dicsciplines:
-        Dicsciplines[discipline] = []
-    Dicsciplines[discipline].append(sheet)
+    if discipline not in Disciplines:
+        Disciplines[discipline] = []
+    Disciplines[discipline].append(sheet)
 
-print("Dicsciplines: ", Dicsciplines.keys())
+print("Disciplines: ", Disciplines.keys())
+
+
+
+# Choose a discipline for the sheet set
+# If the user selects "ALL SHEETS", use that as the sheet set name
+sheetsetname = None
+while not sheetsetname:
+    sheetsetname = forms.SelectFromList.show(
+        Disciplines.keys(),
+        title="Select Disciplines",
+        multiselect=False
+    )
+    if not sheetsetname:
+        script.exit()
+
+
+# Create ViewSet
+myviewset = DB.ViewSet()
+for el in Disciplines[sheetsetname]:
+    myviewset.Insert(el)
+
+
+
+# Collect existing sheet sets
+viewsheetsets = DB.FilteredElementCollector(revit.doc)\
+                    .OfClass(framework.get_type(DB.ViewSheetSet))\
+                    .WhereElementIsNotElementType()\
+                    .ToElements()
+
+allviewsheetsets = {vss.Name: vss for vss in viewsheetsets}
+
 
 
 #_____________________________________________________________________ 🏃‍➡️ RUN 
+with revit.Transaction('Created Print Set'):
+    # Delete existing matching sheet set
+    if sheetsetname in allviewsheetsets.keys():
+        viewsheetsetting.CurrentViewSheetSet = allviewsheetsets[sheetsetname]
+        viewsheetsetting.Delete()
+
+    # Create new sheet set
+    viewsheetsetting.CurrentViewSheetSet.Views = myviewset
+    viewsheetsetting.SaveAs(sheetsetname)
+    print("Sheet Set Created: ", sheetsetname, " with ", len(myviewset), " sheets.")
+
+
+
 
 # # Set name for the print set
 # transaction = Transaction(doc, "Create Sheet Set")
