@@ -99,10 +99,28 @@ for vs in print_sets_existing:
 
 SheetCollector = FilteredElementCollector(doc).OfClass(ViewSheet)
 all_sheets = []
+Dicsciplines = {}
 for sheet in SheetCollector:
     if sheet.GetParameters("Appears In Sheet List") and sheet.LookupParameter("Appears In Sheet List").AsInteger() == 1:
         all_sheets.append(sheet)
-        print("Sheet Name: ", sheet.GetParameters("Appears In Sheet List").AsValue(), "Sheet Number: ", sheet.SheetNumber)
+        discipline = sheet.LookupParameter("FFE_Sheet_Discipline").AsString()
+        index = sheet.LookupParameter("FFE_Sheet_Discipline Index").AsString()
+        order = sheet.LookupParameter("FFE_Sheet_Order").AsString()
+        SheetNumber = sheet.SheetNumber
+        SheetName = sheet.Name
+        print("{i}.{o}_{s} - {n}".format(i=index, o=order, s=SheetNumber, n=SheetName))
+
+
+print("all_sheets: ", len(all_sheets))
+
+for sheet in all_sheets:
+    discipline = sheet.LookupParameter("FFE_Sheet_Discipline").AsString()
+    if discipline not in Dicsciplines:
+        Dicsciplines[discipline] = []
+    Dicsciplines[discipline].append(sheet)
+
+print("Dicsciplines: ", Dicsciplines.keys())
+
 
 #_____________________________________________________________________ 🏃‍➡️ RUN 
 
