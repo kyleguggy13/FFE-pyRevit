@@ -11,10 +11,15 @@ Date    = 04.21.2025
 # How-to:
 
 # -> Click on the button
-# -> Select All or By Discipline
+# -> Review existing print sets
+# -> Select SHEETS or a DISCIPLINE
+# -> Review the output in the console
+#
+# -> NOTE: Only sheets with the "Appears In Sheet List" parameter checked on will be included in the sheet set.
 # ___________________________________________________________________
 # Last update:
-# - [05.22.2025] - 1.0 RELEASE
+# - [05.22.2025] - 0.1 BETA RELEASE
+# - [07.25.2025] - 1.0 RELEASE
 # ___________________________________________________________________
 Author: Kyle Guggenheim"""
 
@@ -78,26 +83,35 @@ def GetSheets():
 ### "C:\Users\kyleg\AppData\Roaming\pyRevit-Master\extensions\pyRevitTools.extension\pyRevit.tab\Drawing Set.panel\views.stack\Views.pulldown\Create Print Set From Selected Views.pushbutton"
 ### "C:\Users\kyleg\AppData\Roaming\pyRevit-Master\extensions\pyRevitTools.extension\pyRevit.tab\Drawing Set.panel\Sheets.pulldown\List TitleBlocks on Sheets.pushbutton\script.py"
 
-# Get PrintManager / ViewSheetSetting
+
+output = script.get_output()
+
+### 1️⃣ Get PrintManager / ViewSheetSetting
 print_manager = revit.doc.PrintManager
 print_manager.PrintRange = DB.PrintRange.Select
 viewsheetsetting = print_manager.ViewSheetSetting
 
 
-# Collect existing ViewSheetSets (List)
+### 2️⃣ Collect existing ViewSheetSets (List)
 print_sets_existing = DB.FilteredElementCollector(revit.doc)\
     .WhereElementIsNotElementType().OfClass(DB.ViewSheetSet).ToElements()
 
-# print_sets_names_existing = [vs.Name for vs in print_sets_existing if vs.Name]
 
+output.print_md("### EXISTING PRINT SETS:")
 print_sets_names_existing = []
 for vs in print_sets_existing:
     vs_name = vs.Name
-    print("Existing Print Set Name: ", vs_name)
+    vs_viewcount = len(vs.OrderedViewList)
+
+    output.print_md("{vs_name} ({vs_viewcount})".format(vs_name=vs_name, vs_viewcount=vs_viewcount))
+    
     print_sets_names_existing.append(vs_name)
 
 
-### Collect Sheets with "Appears In Sheet List" parameter
+output.print_md("---")
+
+
+### 3️⃣ Collect Sheets with "Appears In Sheet List" parameter
 SheetCollector = FilteredElementCollector(doc).OfClass(ViewSheet)
 all_sheets = []
 
@@ -109,11 +123,9 @@ for sheet in SheetCollector:
         order = sheet.LookupParameter("FFE_Sheet_Order").AsString()
         SheetNumber = sheet.SheetNumber
         SheetName = sheet.Name
-        # print("{i}.{o}_{s} - {n}".format(i=index, o=order, s=SheetNumber, n=SheetName))
 
 
-
-### Create a dictionary to store sheets by discipline
+### 4️⃣ Create a dictionary to store sheets by discipline
 Disciplines = {}
 Disciplines["SHEETS"] = all_sheets
 for sheet in all_sheets:
@@ -122,7 +134,8 @@ for sheet in all_sheets:
         Disciplines[discipline] = []
     Disciplines[discipline].append(sheet)
 
-print("Disciplines: ", Disciplines.keys())
+
+# output.print_md("### DISCIPLINES: **{}**".format(", ".join(Disciplines.keys())))
 
 
 
@@ -156,6 +169,7 @@ allviewsheetsets = {vss.Name: vss for vss in viewsheetsets}
 
 
 
+
 #_____________________________________________________________________ 🏃‍➡️ RUN 
 with revit.Transaction('Created Sheet Set'):
     # Delete existing matching sheet set
@@ -168,7 +182,8 @@ with revit.Transaction('Created Sheet Set'):
         # Create new sheet set
         viewsheetsetting.CurrentViewSheetSet.Views = myviewset
         viewsheetsetting.SaveAs(sheetsetname)
-        print("Sheet Set Created: ", sheetsetname, " with ", len(Disciplines[sheetsetname]), " sheets.")
+        output.print_md("### Sheet Set Created: **{}** with **{}** sheets".format(sheetsetname, len(Disciplines[sheetsetname])))
+        # print("Sheet Set Created: ", sheetsetname, " with ", len(Disciplines[sheetsetname]), " sheets.")
 
     except Exception as e:
             print("Error ", "Failed to create sheet set: {e}".format(e=str(e)))
