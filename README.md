@@ -10,5 +10,3 @@
     - Check Sheet Sets to be published
 4. Text Leader Position
 5. Keynote Symbol Update
-
-[Sketcher.html](Sketcher.html)
