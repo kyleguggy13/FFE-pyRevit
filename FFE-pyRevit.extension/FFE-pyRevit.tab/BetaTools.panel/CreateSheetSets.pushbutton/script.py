@@ -46,7 +46,7 @@ doc    = __revit__.ActiveUIDocument.Document #type:Document
 
 #____________________________________________________________________ MAIN
 
-# 1️⃣ Get Sheets
+# 1️⃣ Get Sheets 🚫
 def GetSheets():
     # Get all sheets
     collector = FilteredElementCollector(doc).OfClass(ViewSheet)
