@@ -26,7 +26,7 @@ import clr
 clr.AddReference("System")
 from Autodesk.Revit.DB import *
 from Autodesk.Revit.UI import *
-from Autodesk.Revit.DB import FilteredElementCollector, FamilySymbol, Transaction, Family, BuiltInParameter, ElementType
+from Autodesk.Revit.DB import FilteredElementCollector, Mechanical, Transaction, Family, BuiltInParameter, ElementType, BuiltInCategory, ElementCategoryFilter, ElementId
 
 #____________________________________________________________________ IMPORTS (PYREVIT)
 
@@ -73,16 +73,18 @@ output_window.print_md("### 📋 Selected Element IDs:"
 #         output_window.print_md("### ✅ Found Duct Instances: {}, {}".format(ductinstance_Name, ductinstance_ID))
 
 
-for duct in selection:
-    if isinstance(duct, FamilyInstance):
-        if duct.Symbol.FamilyName == "Round Duct" or duct.Symbol.FamilyName == "Rectangular Duct":
-            ductinstance_Name = DB.Element.Name.__get__(duct)
-            ductinstance_ID = DB.Element.Id.__get__(duct)
-            output_window.print_md("### ✅ Found Duct Instance: {}, {}".format(ductinstance_Name, ductinstance_ID))
-            break
+##################
+### CURRENTLY WORKING:
+# for duct in selection:
+#     if isinstance(duct, FamilyInstance):
+#         if duct.Symbol.FamilyName == "Round Duct" or duct.Symbol.FamilyName == "Rectangular Duct":
+#             ductinstance_Name = DB.Element.Name.__get__(duct)
+#             ductinstance_ID = DB.Element.Id.__get__(duct)
+#             output_window.print_md("### ✅ Found Duct Instance: {}, {}".format(ductinstance_Name, ductinstance_ID))
+#             break
+##################
 
-
-# Steps:
+### Steps:
 # 1. Select duct
 # 2. Get "DuctNetwork" property
     # Property: DuctNetwork
@@ -116,5 +118,26 @@ for duct in selection:
 
 #_____________________________________________________________________ 🏃‍➡️ RUN 
 
+# Collect all duct elements
+duct_collector = FilteredElementCollector(doc)\
+                    .OfCategory(BuiltInCategory.OST_DuctCurves)\
+                    .WhereElementIsNotElementType()
 
+# Print header
+output_window.print_md("### Duct Elements Found")
+output_window.print_table(
+    table_data=[
+        ["Id", "Type Name", "System Name", "Length (ft)", "Level"]
+    ] + [
+        [
+            duct.Id.ToString(),
+            duct.Name,
+            duct.MEPSystem.Name if duct.MEPSystem else "N/A",
+            "{:.2f}".format(duct.get_Parameter(BuiltInParameter.CURVE_ELEM_LENGTH).AsDouble()) if duct.get_Parameter(BuiltInParameter.CURVE_ELEM_LENGTH) else "N/A",
+            doc.GetElement(duct.LevelId).Name if duct.LevelId != ElementId.InvalidElementId else "N/A"
+        ]
+        for duct in duct_collector
+    ],
+    title="Ducts in Model"
+)
 #==================================================
