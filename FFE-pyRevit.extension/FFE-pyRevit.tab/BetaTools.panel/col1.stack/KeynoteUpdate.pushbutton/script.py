@@ -27,7 +27,6 @@ Inspiration: Marc Padros
 Author: Kyle Guggenheim"""
 
 #____________________________________________________________________ IMPORTS (AUTODESK)
-
 import clr
 clr.AddReference("System")
 from Autodesk.Revit.DB import *
@@ -35,16 +34,17 @@ from Autodesk.Revit.UI import *
 from Autodesk.Revit.DB import FilteredElementCollector, FamilySymbol, Transaction, Family, BuiltInParameter, ElementType
 
 #____________________________________________________________________ IMPORTS (PYREVIT)
-
 from pyrevit import revit, DB
 from pyrevit.script import output
 from pyrevit import forms
+
 
 #____________________________________________________________________ VARIABLES
 app         = __revit__.Application
 uidoc       = __revit__.ActiveUIDocument
 doc         = __revit__.ActiveUIDocument.Document   #type: Document
 selection   = uidoc.Selection                       #type: Selection
+
 
 #____________________________________________________________________ MAIN
 
@@ -62,6 +62,14 @@ for arrowhead_type in arrowhead_collector:
         Arrowheadtype_Name = DB.Element.Name.__get__(arrowhead_type)
         Arrowheadtype_ID = DB.Element.Id.__get__(arrowhead_type)
         output_window.print_md("### ✅ Found Arrowhead Type: {}, {}".format(Arrowheadtype_Name, Arrowheadtype_ID))
+        
+        if Arrowheadtype_Name == "Arrow Filled 20 Degree":
+            output_window.print_md("---")
+            output_window.print_md("### ✅ Arrow Filled 20 Degree is available")
+            output_window.print_md("---")
+            ArrowFilled20Degree_ID = Arrowheadtype_ID
+            ArrowFilled20Degree_Name = Arrowheadtype_Name
+            break
 
 
 # Customize these parameter names
@@ -89,7 +97,7 @@ def select_annotation_families():
     selected = forms.SelectFromList.show(
         family_options,
         multiselect=True,
-        title="Select Annotation Families"
+        title="Select Annotation Families (This will set the Leader Arrowhead)",
     )
 
     if not selected:
@@ -107,18 +115,19 @@ def set_leader_arrowhead(symbol):
     
     # Find the arrowhead type in the document
     arrowhead_collector = FilteredElementCollector(doc).OfClass(ElementType).WhereElementIsElementType().ToElements()
-    arrowhead_type = next((a for a in arrowhead_collector if a.Name == arrowhead_name), None)
+    # arrowhead_type = next((a for a in arrowhead_collector if a.Name == arrowhead_name), None)
 
-    if not arrowhead_type:
-        output_window.print_md("### ❌ Arrowhead Type Not Found: {}".format(arrowhead_name))
-        return
+    # if not arrowhead_type:
+    #     output_window.print_md("### ❌ Arrowhead Type Not Found: {}".format(arrowhead_name))
+    #     return
 
     # Set the leader arrowhead type
     try:
-        symbol.get_Parameter(BuiltInParameter.LEADER_ARROWHEAD_TYPE).Set(arrowhead_type.Id)
-        output_window.print_md("### ✅ Leader Arrowhead Set to: {}".format(arrowhead_name))
+        symbol.get_Parameter(DB.BuiltInParameter.LEADER_ARROWHEAD).Set(ArrowFilled20Degree_ID)
+        # output_window.print_md("### ✅ Leader Arrowhead Set to: {}".format(arrowhead_name))
     except Exception as e:
         output_window.print_md("### ❌ Error Setting Leader Arrowhead: {}".format(str(e)))
+
 
 
 # Function to rename types in selected families
@@ -133,15 +142,18 @@ def rename_types_in_families(families, param1_name, param2_name):
             symbols = family.GetFamilySymbolIds()
             for sym_id in symbols:
                 symbol = doc.GetElement(sym_id)
-                # set_leader_arrowhead(symbol)  # Set the leader arrowhead
-                val1 = get_param_value(symbol, param1_name)
-                val2 = get_param_value(symbol, param2_name)
+
+                set_leader_arrowhead(symbol)  # Set the leader arrowhead
+                
+                val1 = get_param_value(symbol, param1_name)  # Get value of first parameter
+                val2 = get_param_value(symbol, param2_name)  # Get value of second parameter
+                
                 if val1 and val2:
                     new_name = "{} {}".format(val1, val2)
                     old_name = symbol.get_Parameter(BuiltInParameter.SYMBOL_NAME_PARAM).AsString()
                     try:
                         if old_name != new_name:
-                            symbol.Name = new_name
+                            symbol.Name = new_name  # Set the new name
                             renamed_types.append([family.Name, old_name, new_name])
                             
                     except Exception as e:
@@ -149,6 +161,7 @@ def rename_types_in_families(families, param1_name, param2_name):
         t.Commit()
 
     if renamed_types:
+        output_window.print_md("---")
         output_window.print_md("### ✅ Renamed Types")
         output_window.print_table(
             table_data=renamed_types,
