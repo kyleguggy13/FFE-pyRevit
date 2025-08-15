@@ -1,12 +1,21 @@
-# FFE-pyRevit
-### FFE's pyRevit add-in extension.
+# 🛠️ FFE-pyRevit 🛠️
 
-1. Copy View Filters
-2. Transfer View Templates
-3. Create Sheet Sets
-    - Based on "Appears in Sheet List" parameter
-    - Sheet set per Discipline
-    - Sheet set for all
-    - Check Sheet Sets to be published
-4. Text Leader Position
-5. Keynote Symbol Update
+---
+
+FFE's pyRevit add-in extension.
+
+---
+
+
+💠 Installation 💠
+
+[Point pyRevit to FFE-pyRevit](https://ffeinc.sharepoint.com/sites/RevitUsers/SitePages/Point-pyRevit-to-FFE-pyRevit.aspx)
+
+---
+
+Functions:
+- Copy View Filters
+- Transfer View Templates
+- [Create Sheet Sets](https://ffeinc.sharepoint.com/sites/RevitUsers/SitePages/FFE-pyRevit-CreateSheetSets.aspx)
+- Text Leader Position
+- Keynote Update
