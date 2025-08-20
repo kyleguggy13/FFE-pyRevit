@@ -80,8 +80,8 @@ def GetSheets():
 
 
 ### REFER TO: 
-### "C:\Users\kyleg\AppData\Roaming\pyRevit-Master\extensions\pyRevitTools.extension\pyRevit.tab\Drawing Set.panel\views.stack\Views.pulldown\Create Print Set From Selected Views.pushbutton"
-### "C:\Users\kyleg\AppData\Roaming\pyRevit-Master\extensions\pyRevitTools.extension\pyRevit.tab\Drawing Set.panel\Sheets.pulldown\List TitleBlocks on Sheets.pushbutton\script.py"
+### "\pyRevitTools.extension\pyRevit.tab\Drawing Set.panel\views.stack\Views.pulldown\Create Print Set From Selected Views.pushbutton"
+### "\pyRevitTools.extension\pyRevit.tab\Drawing Set.panel\Sheets.pulldown\List TitleBlocks on Sheets.pushbutton\script.py"
 
 
 output = script.get_output()
@@ -140,7 +140,7 @@ for sheet in all_sheets:
 
 
 # Choose a discipline for the sheet set
-# If the user selects "ALL SHEETS", use that as the sheet set name
+# If the user selects "SHEETS", use that as the sheet set name
 sheetsetname = None
 while not sheetsetname:
     sheetsetname = forms.SelectFromList.show(
