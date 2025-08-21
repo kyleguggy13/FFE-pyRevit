@@ -8,7 +8,7 @@
     <Window.Resources>
         <!-- Define DataTemplate for Video Content -->
         <DataTemplate x:Key="VideoTemplate">
-            <Border Style="{StaticResource EF_card}">
+            <Border Style="{StaticResource FFE_card}">
                 <StackPanel>
                     <!-- Video Thumbnail Image -->
                     <Image Source="{Binding VideoThumbnailUrl}" VerticalAlignment="Center" Style="{StaticResource Thumbnail}"/>
@@ -25,7 +25,7 @@
         </DataTemplate>
 
         <!-- Style for Video Content Card -->
-        <Style x:Key="EF_card" TargetType="Border">
+        <Style x:Key="FFE_card" TargetType="Border">
             <Setter Property="Background" Value="#393939"/>
             <Setter Property="CornerRadius" Value="7"/>
             <Setter Property="Padding" Value="10"/>
@@ -324,7 +324,7 @@
                             <UniformGrid Columns="2" HorizontalAlignment="Center" VerticalAlignment="Top">
 
                                 <!-- FFE's Collection -->
-                                <Border Style="{StaticResource EF_card}">
+                                <Border Style="{StaticResource FFE_card}">
                                     <StackPanel>
                                         <Image Source="https://i.postimg.cc/Pq3CWtMv/FFE-s-Collection.jpg" VerticalAlignment="Center" Style="{StaticResource Thumbnail}"/>
                                         <TextBlock Text="FFE's Collection" FontSize="16" FontWeight="Bold" Foreground="White" Margin="15,0,15,0"/>
@@ -338,7 +338,7 @@
 
 
                                 <!-- Architecture Collection -->
-                                <Border Style="{StaticResource EF_card}">
+                                <Border Style="{StaticResource FFE_card}">
                                     <StackPanel>
                                         <Image Source="https://i.postimg.cc/dVFZvN13/Architecture.jpg" VerticalAlignment="Center" Style="{StaticResource Thumbnail}"/>
                                         <TextBlock Text="Architecture Collection" FontSize="16" FontWeight="Bold" Foreground="White" Margin="15,0,15,0"/>
@@ -351,7 +351,7 @@
                                 </Border>
 
                                 <!-- Electrical Collection -->
-                                <Border Style="{StaticResource EF_card}">
+                                <Border Style="{StaticResource FFE_card}">
                                     <StackPanel>
                                         <Image Source="https://i.postimg.cc/qRx8Hfck/Electrical.jpg" VerticalAlignment="Center" Style="{StaticResource Thumbnail}"/>
                                         <TextBlock Text="Electrical Collection" FontSize="16" FontWeight="Bold" Foreground="White" Margin="15,0,15,0"/>
@@ -365,7 +365,7 @@
 
 
                                 <!-- Mechanical Collection -->
-                                <Border Style="{StaticResource EF_card}">
+                                <Border Style="{StaticResource FFE_card}">
                                     <StackPanel>
                                         <Image Source="https://i.postimg.cc/9FZw6Hcs/Mechanical.jpg" VerticalAlignment="Center" Style="{StaticResource Thumbnail}"/>
                                         <TextBlock Text="Mechanical Collection" FontSize="16" FontWeight="Bold" Foreground="White" Margin="15,0,15,0"/>
@@ -378,7 +378,7 @@
                                 </Border>
 
                                 <!-- Plumbing Collection -->
-                                <Border Style="{StaticResource EF_card}">
+                                <Border Style="{StaticResource FFE_card}">
                                     <StackPanel>
                                         <Image Source="https://i.postimg.cc/s1dyYL8h/Plumbing.jpg" VerticalAlignment="Center" Style="{StaticResource Thumbnail}"/>
                                         <TextBlock Text="Plumbing Collection" FontSize="16" FontWeight="Bold" Foreground="White" Margin="15,0,15,0"/>
@@ -391,7 +391,7 @@
                                 </Border>
 
                                 <!-- Structural Collection -->
-                                <Border Style="{StaticResource EF_card}">
+                                <Border Style="{StaticResource FFE_card}">
                                     <StackPanel>
                                         <Image Source="https://i.postimg.cc/RCjnpZxc/Structural.jpg" VerticalAlignment="Center" Style="{StaticResource Thumbnail}"/>
                                         <TextBlock Text="Structural Collection" FontSize="16" FontWeight="Bold" Foreground="White" Margin="15,0,15,0"/>
@@ -404,7 +404,7 @@
                                 </Border>
 
                                 <!-- VA TIL Collection -->
-                                <Border Style="{StaticResource EF_card}">
+                                <Border Style="{StaticResource FFE_card}">
                                     <StackPanel>
                                         <Image Source="https://i.postimg.cc/mZcHSFJL/VA-TIL.jpg" VerticalAlignment="Center" Style="{StaticResource Thumbnail}"/>
                                         <TextBlock Text="VA TIL Collection" FontSize="16" FontWeight="Bold" Foreground="White" Margin="15,0,15,0"/>
