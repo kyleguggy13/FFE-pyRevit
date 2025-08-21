@@ -48,6 +48,13 @@ doc         = __revit__.ActiveUIDocument.Document   #type: Document
 selection   = uidoc.Selection                       #type: Selection
 
 
+#____________________________________________________________________ TO-DO
+# - [ ] Add error handling for missing parameters
+# - [ ] Add option to select different arrowhead types
+# - [ ] Check for duplicate numbers or texts
+# - [ ] Add element links to the output table for easier identification
+# - [ ] Add a confirmation dialog before renaming types 
+
 #____________________________________________________________________ MAIN
 
 ### Set up the output panel
