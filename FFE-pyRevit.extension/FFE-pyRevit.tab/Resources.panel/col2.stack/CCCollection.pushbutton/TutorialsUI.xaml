@@ -165,7 +165,7 @@
 
     <!--MAIN-->
     <Border CornerRadius="20" 
-            Background="#1C1C1C" 
+            Background="#E3E3E3" 
             BorderBrush="#2341EB" 
             BorderThickness="5"
             Padding="5">
@@ -173,10 +173,11 @@
         <Grid>
             <!-- Main Background Color -->
             <Grid.Background>
-                <LinearGradientBrush StartPoint="0,1" EndPoint="1,0">
-                    <GradientStop Color="#1c1c1c" Offset="0" />
+                <!--<LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                    <GradientStop Color="#E3E3E3" Offset="0" />
                     <GradientStop Color="#222222" Offset="1" />
-                </LinearGradientBrush>
+                </LinearGradientBrush> -->
+                <SolidColorBrush Color="#E3E3E3"/>
             </Grid.Background>
 
 
@@ -201,13 +202,13 @@
                     <ColumnDefinition Width="75"/>
                 </Grid.ColumnDefinitions>
 
-                <!--Linked LearnRevitAPI Logo-->
+                <!--Linked FFE Inc. Logo-->
                 <TextBlock Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Center">
                     <Hyperlink NavigateUri="https://acc.autodesk.com/home" 
                                TextDecorations="None"
                                RequestNavigate="Hyperlink_RequestNavigate">
                         <Image x:Name="logoImage"
-                               Source="\\172.16.1.7\ffe\Internal Share\Drafting\FFE Logo - Titleblock\FFE Logo-Titleblock-Tagline-WebAddress.png"
+                               Source="https://i.postimg.cc/Px8cCcCs/FFE-Logo-Titleblock-Tagline-Web-Address.png"
                                Height="50" Width="200"
                                Stretch="Uniform"
                                RenderTransformOrigin="0.5,0.5">
@@ -267,7 +268,7 @@
                 <!-- Rounded Card Title -->
                 <DockPanel HorizontalAlignment="Center">
 
-                    <Border Background="#393939" CornerRadius="7" Padding="5" Margin="10" 
+                    <Border Background="#C4C2C2" CornerRadius="7" Padding="5" Margin="10" 
                             BorderBrush="#2341EB" BorderThickness="0" RenderTransformOrigin="0.5,0.5">
 
                         <Border.RenderTransform>
@@ -406,7 +407,7 @@
                                 <!-- VA TIL Collection -->
                                 <Border Style="{StaticResource FFE_card}">
                                     <StackPanel>
-                                        <Image Source="https://i.postimg.cc/mZcHSFJL/VA-TIL.jpg" VerticalAlignment="Center" Style="{StaticResource Thumbnail}"/>
+                                        <Image Source="https://i.postimg.cc/sD36z14R/til.jpg" VerticalAlignment="Center" Style="{StaticResource Thumbnail}"/>
                                         <TextBlock Text="VA TIL Collection" FontSize="16" FontWeight="Bold" Foreground="White" Margin="15,0,15,0"/>
                                         <TextBlock HorizontalAlignment="Center">
                                             <Hyperlink NavigateUri="https://contentcatalog.autodesk.com/browse/MzBGRDBBMDgtNTFGOS00MjZFLUI2NzktMjA1QjMxQTY3QjEw" RequestNavigate="Hyperlink_RequestNavigate">
