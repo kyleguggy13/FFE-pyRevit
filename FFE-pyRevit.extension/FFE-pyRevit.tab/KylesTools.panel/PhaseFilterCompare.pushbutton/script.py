@@ -180,6 +180,7 @@ def compare_phase_filters(host_map, link_map):
 host_title = doc.Title
 host_map = get_phase_filters_map(doc)
 
+# Link data
 link_instances = list(FilteredElementCollector(doc).OfClass(RevitLinkInstance))
 loaded_links = [(li, li.GetLinkDocument()) for li in link_instances if li.GetLinkDocument()]
 
@@ -187,11 +188,13 @@ if not loaded_links:
     TaskDialog.Show(__title__, "No loaded Revit links found in this model.")
     sys.exit()
 
+
 # Header
 output_window.print_md("# Phase Filter Comparison")
 output_window.print_md("## **Host model:** `{}`".format(host_title))
 
-# Host table
+
+### Host table
 host_columns = ["Name", "New", "Existing", "Demolished", "Temporary"]
 host_rows = [
     [n, sanitize(v["New"]), sanitize(v["Existing"]), sanitize(v["Demolished"]), sanitize(v["Temporary"])]
@@ -199,7 +202,7 @@ host_rows = [
 ]
 output_window.print_table(table_data=host_rows, columns=host_columns, title="Host Phase Filters ({})".format(len(host_map)))
 
-# Per-link
+### Per-link
 for li, ldoc in loaded_links:
     link_name = ldoc.Title
     output_window.print_md("---")
