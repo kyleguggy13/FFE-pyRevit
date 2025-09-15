@@ -54,6 +54,11 @@ selection   = uidoc.Selection                       #type: Selection
 output_window = output.get_output()
 
 
+# li = link instance
+# ldoc = link document
+# lmap = link phase filter map
+# hmap = host phase filter map
+
 #____________________________________________________________________ HELPERS
 def md_list(items):
     """Render a Python list as one markdown string (never pass lists to print_md)."""
@@ -171,6 +176,7 @@ def compare_phase_filters(host_map, link_map):
     return missing_in_link, extra_in_link, diffs
 
 #____________________________________________________________________ MAIN
+# Host data
 host_title = doc.Title
 host_map = get_phase_filters_map(doc)
 
@@ -188,8 +194,7 @@ output_window.print_md("## **Host model:** `{}`".format(host_title))
 # Host table
 host_columns = ["Name", "New", "Existing", "Demolished", "Temporary"]
 host_rows = [
-    [n, sanitize(v["New"]), sanitize(v["Existing"]),
-     sanitize(v["Demolished"]), sanitize(v["Temporary"])]
+    [n, sanitize(v["New"]), sanitize(v["Existing"]), sanitize(v["Demolished"]), sanitize(v["Temporary"])]
     for n, v in sorted(host_map.items(), key=lambda kv: kv[0].lower())
 ]
 output_window.print_table(table_data=host_rows, columns=host_columns, title="Host Phase Filters ({})".format(len(host_map)))
@@ -214,8 +219,7 @@ for li, ldoc in loaded_links:
         display_name = u"{} ❌".format(n) if n in mismatch_names else n
         link_rows.append([
             display_name,
-            sanitize(v["New"]), sanitize(v["Existing"]),
-            sanitize(v["Demolished"]), sanitize(v["Temporary"])
+            sanitize(v["New"]), sanitize(v["Existing"]), sanitize(v["Demolished"]), sanitize(v["Temporary"])
         ])
     output_window.print_table(table_data=link_rows, columns=host_columns, title="Link Filters")
     if mismatch_names:
