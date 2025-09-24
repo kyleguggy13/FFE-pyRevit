@@ -7,7 +7,7 @@ import os, json, time
 from pyrevit import forms, revit
 from pyrevit.script import output
 
-output_window = output.get_output()
+# output_window = output.get_output()
 
 doc = revit.doc
 doc_path = doc.PathName or "<Untitled>"
@@ -61,19 +61,20 @@ if not os.path.exists(log_file):
     with open(log_file, 'w') as file:
         # create json structure
         file.write('{"sync": []}')
-    output_window.print_md("### **Created log file:** `{}`".format(log_file))
+    # output_window.print_md("### **Created log file:** `{}`".format(log_file))
 # If it does exist, write to it
 try:
     write_json(dataEntry)
     synclog = True
     # output_window.print_md("### **Logged sync to JSON:** `{}`".format(log_file))
 except Exception as e:
-    output_window.print_md("### **Failed to log sync to JSON:** `{}`".format(e))
+    synclog = False
+    # output_window.print_md("### **Failed to log sync to JSON:** `{}`".format(e))
 
         
 
 # Keep your hook lightweight—toast a quick, non-blocking message.
-if synclog is True:
-    forms.toast("Sync completed at {}".format(time.strftime("%Y-%m-%d %H:%M:%S")), title="pyRevit", appid="pyRevit")
-else:
-    forms.toast("Sync completed", title="pyRevit", appid="pyRevit")
+# if synclog is True:
+#     forms.toast("Sync completed at {}".format(time.strftime("%Y-%m-%d %H:%M:%S")), title="pyRevit", appid="pyRevit")
+# else:
+#     forms.toast("Sync completed", title="pyRevit", appid="pyRevit")
