@@ -14,6 +14,8 @@ doc_path = doc.PathName or "<Untitled>"
 
 host_title = doc.Title
 version_build = doc.Application.VersionBuild
+version_name = doc.Application.VersionName
+version_number = doc.Application.VersionNumber
 username = doc.Application.Username
 
 
@@ -29,6 +31,8 @@ dataEntry = {
     "username": username,
     "doc_title": host_title,
     "doc_path": doc_path,
+    "revit_version": version_name,
+    "revit_version_number": version_number,
     "revit_build": version_build,
     "action": "sync"
 }
