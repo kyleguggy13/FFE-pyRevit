@@ -1,18 +1,22 @@
 # -*- coding: utf-8 -*-
 __title__   = "Copy View Filters"
-__doc__     = """Version = 1.0
+__doc__     = """Version = v1.0
 Date    = 03.06.2025
+________________________________________________________________
+Tested Revit Versions: 2026, 2024
 ________________________________________________________________
 Description:
 
 This buttom will copy view filters from one view to multiple views.
-
 ________________________________________________________________
 How-To:
-
 1. Press the button
 2. Select the view with filters
 3. Select the destination views
+________________________________________________________________
+Last update:
+- [03.06.2025] - v1.0 RELEASE
+- [10.03.2025] - v1.1 Compatible with Revit 2026
 ________________________________________________________________
 Author: Kyle Guggenheim"""
 
@@ -77,7 +81,7 @@ with Transaction(doc, 'Copy View Filters') as t:
 
     for view_to in list_views_to:
 
-        if view_to.ViewTemplateId == ElementId(-1): # Only applies view filters if no template.
+        if view_to.ViewTemplateId == ElementId.InvalidElementId: # Only applies view filters if no template.
             for v_filter in sel_filters:
             
                 # 1. Copy Filters
