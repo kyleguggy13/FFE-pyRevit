@@ -58,7 +58,7 @@
                 <TextBlock Margin="5,0,0,0">
                     <Hyperlink
                         RequestNavigate="Hyperlink_RequestNavigate"
-                        NavigateUri="https://www.ffeinc.us/"
+                        NavigateUri="https://ffeinc.sharepoint.com/sites/RevitUsers/SitePages/FFE-pyRevit.aspx"
                         FontSize="14px"
                         FontWeight="Heavy"
                         Foreground="{StaticResource text_white}">
@@ -239,19 +239,6 @@
                         Foreground="{StaticResource text_gray}"
                 />
 
-            <!-- PATREON
-            <TextBlock  Grid.Column="2"
-                        VerticalAlignment="Center"
-                        HorizontalAlignment="Right"
-                        Margin="0,0,10,0">
-                    <Hyperlink
-                        RequestNavigate="Hyperlink_RequestNavigate"
-                        NavigateUri="https://www.patreon.com/ErikFrits"
-                        FontWeight="Medium"
-                        Foreground="{StaticResource footer_donate}">
-                        Donate
-                    </Hyperlink>
-            </TextBlock> -->
 
 
         </Grid>

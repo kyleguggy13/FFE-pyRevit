@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 __title__     = "Transfer ViewTemplates"
-__version__   = 'Version = 1.0'
-__doc__       = """Version = 1.0
+__version__   = 'Version = v1.0'
+__doc__       = """Version = v1.0
 Date    = 03.25.2025
 _____________________________________________________________________
 Description:
-
 You can transfer selected ViewTemplates between Project A/B.
 There is an option to override ViewTemplate if same name exists.
 Otherwise it will duplicate it by adding a number in the end.
@@ -19,7 +18,7 @@ How-to:
 -> Click on Transfer ViewTemplates
 _____________________________________________________________________
 Last update:
-- [03.25.2025] - 1.0 RELEASE
+- [03.25.2025] - v1.0 RELEASE
 _____________________________________________________________________
 Author: Kyle Guggenheim"""
 
