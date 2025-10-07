@@ -12,7 +12,7 @@ from pyrevit.script import output
 doc = revit.doc
 doc_path = doc.PathName or "<Untitled>"
 
-host_title = doc.Title
+doc_title = doc.Title
 version_build = doc.Application.VersionBuild
 version_name = doc.Application.VersionName
 version_number = doc.Application.VersionNumber
@@ -29,7 +29,7 @@ log_file = os.path.join(log_dir, username + "_revit_log.json")
 dataEntry = {
     "datetime": time.strftime("%Y-%m-%d %H:%M:%S"),
     "username": username,
-    "doc_title": host_title,
+    "doc_title": doc_title,
     "doc_path": doc_path,
     "revit_version": version_name,
     "revit_version_number": version_number,
