@@ -9,7 +9,7 @@ from pyrevit import forms, revit
 from pyrevit.script import output
 from pyrevit import EXEC_PARAMS
 
-output_window = output.get_output()
+# output_window = output.get_output()
 
 doc = revit.doc
 doc_path = doc.PathName or "<Untitled>"
@@ -95,10 +95,10 @@ with open(log_file,'r+') as file:
 try:
     write_json(dataEntry)
     synclog = True
-    output_window.print_md("### **Logged sync to JSON:** `{}`".format(log_file))
+    # output_window.print_md("### **Logged sync to JSON:** `{}`".format(log_file))
 except Exception as e:
     synclog = False
-    output_window.print_md("### **Failed to log sync to JSON:** `{}`".format(e))
+    # output_window.print_md("### **Failed to log sync to JSON:** `{}`".format(e))
 # """
 
 
