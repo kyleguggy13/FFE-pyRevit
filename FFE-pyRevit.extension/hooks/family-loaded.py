@@ -1,25 +1,32 @@
 # -*- coding: UTF-8 -*-
-# doc-synced.py
-# This hook runs after a document is synced to central.
-# It logs the sync event to a JSON file.
+# -------------------------------------------
+# This hook runs after a family is loaded into a Revit project.
+# Log the family-loaded event to a JSON file.
+# -------------------------------------------
 from calendar import c
 import os, json, time
 
+# import pyrevit modules
 from pyrevit import forms, revit
 from pyrevit.script import output
 from pyrevit import EXEC_PARAMS
 
 # output_window = output.get_output()
 
+# Gather doc info
 doc = revit.doc
 doc_path = doc.PathName or "<Untitled>"
-
 doc_title = doc.Title
+
+# Gather Revit info
 version_build = doc.Application.VersionBuild
 version_name = doc.Application.VersionName
 version_number = doc.Application.VersionNumber
+
+# Gather user info
 username = doc.Application.Username
 
+# Gather family info
 family_name = EXEC_PARAMS.event_args.FamilyName
 family_path = EXEC_PARAMS.event_args.FamilyPath
 
@@ -32,6 +39,7 @@ log_dir = os.path.join(os.path.expanduser("~"), "FFE Inc", "FFE Revit Users - Do
 log_file = os.path.join(log_dir, username + "_revit_log.json")
 
 
+# Determine family origin based on path
 if "AppData" in family_path:
     family_orgin = "Content Catalog"
 elif "172.16.1.7" in family_path:
@@ -43,6 +51,7 @@ else:
     family_orgin = "Local"
 
 
+# Create data entry
 dataEntry = {
     "datetime": time.strftime("%Y-%m-%d %H:%M:%S"),
     "username": username,
@@ -100,10 +109,3 @@ except Exception as e:
     synclog = False
     # output_window.print_md("### **Failed to log sync to JSON:** `{}`".format(e))
 # """
-
-
-# Keep your hook lightweight—toast a quick, non-blocking message.
-# if synclog is True:
-#     forms.toast("Sync completed at {}".format(time.strftime("%Y-%m-%d %H:%M:%S")), title="pyRevit", appid="pyRevit")
-# else:
-#     forms.toast("Sync completed", title="pyRevit", appid="pyRevit")
