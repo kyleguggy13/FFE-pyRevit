@@ -15,28 +15,22 @@ Last update:
 - [22.08.2022] - 1.0 RELEASE
 _____________________________________________________________________
 """
-# ╦╔╦╗╔═╗╔═╗╦═╗╔╦╗╔═╗
-# ║║║║╠═╝║ ║╠╦╝ ║ ╚═╗
-# ╩╩ ╩╩  ╚═╝╩╚═ ╩ ╚═╝ IMPORTS
-# ==================================================
+ 
+# __________________________________________________ IMPORTS
 import clr
 clr.AddReference("System")
 from System.Collections.Generic import List
 from Autodesk.Revit.DB import *
 
-# ╦  ╦╔═╗╦═╗╦╔═╗╔╗ ╦  ╔═╗╔═╗
-# ╚╗╔╝╠═╣╠╦╝║╠═╣╠╩╗║  ║╣ ╚═╗
-#  ╚╝ ╩ ╩╩╚═╩╩ ╩╚═╝╩═╝╚═╝╚═╝
-# ==================================================
+
+# __________________________________________________ VARIABLES
 # doc   = __revit__.ActiveUIDocument.Document
 # uidoc = __revit__.ActiveUIDocument
 app     = __revit__.Application
 rvt_year = int(app.VersionNumber)
 
-# ╔═╗╦ ╦╔╗╔╔═╗╔╦╗╦╔═╗╔╗╔
-# ╠╣ ║ ║║║║║   ║ ║║ ║║║║
-# ╚  ╚═╝╝╚╝╚═╝ ╩ ╩╚═╝╝╚╝ FUNCTION
-# ==================================================
+
+# __________________________________________________ FUNCTION
 def select_similar_by_family(uidoc, mode):
     doc = uidoc.Document
     selected_elements = uidoc.Selection.GetElementIds()
