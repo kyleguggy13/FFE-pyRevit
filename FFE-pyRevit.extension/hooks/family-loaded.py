@@ -40,15 +40,17 @@ log_file = os.path.join(log_dir, username + "_revit_log.json")
 
 
 # Determine family origin based on path
-if "AppData" in family_path:
-    family_orgin = "Content Catalog"
+if family_path is None:
+    family_origin = "Family Editor"
+elif "AppData" in family_path:
+    family_origin = "Content Catalog"
 elif "172.16.1.7" in family_path:
     if "Drafting" in family_path:
-        family_orgin = "FFE Server - Revit Library"
+        family_origin = "FFE Server - Revit Library"
     else:
-        family_orgin = "FFE Server"
+        family_origin = "FFE Server"
 else:
-    family_orgin = "Local"
+    family_origin = "Local"
 
 
 # Create data entry
@@ -63,7 +65,7 @@ dataEntry = {
     "action": "family-loaded",
     "family_name": family_name,
     "family_path": family_path,
-    "family_orgin": family_orgin
+    "family_origin": family_origin
 }
 
 
