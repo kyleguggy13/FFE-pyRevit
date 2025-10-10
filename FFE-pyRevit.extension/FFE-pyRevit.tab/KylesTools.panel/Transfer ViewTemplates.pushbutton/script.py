@@ -10,7 +10,6 @@ There is an option to override ViewTemplate if same name exists.
 Otherwise it will duplicate it by adding a number in the end.
 _____________________________________________________________________
 How-to:
-
 -> Click on the button
 -> Select Project A/B
 -> Choose Override or not

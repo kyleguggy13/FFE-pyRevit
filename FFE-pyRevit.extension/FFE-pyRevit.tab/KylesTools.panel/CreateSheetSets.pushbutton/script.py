@@ -3,24 +3,22 @@ __title__     = "Create Sheet Sets"
 __version__   = 'Version = 1.0'
 __doc__       = """Version = 1.0
 Date    = 04.21.2025
-# ___________________________________________________________________
-# Description:
+___________________________________________________________________
+Description:
+This will create sheet sets that can be used for exporting to PDF and for publishing to ACC.
+___________________________________________________________________
+How-to:
+-> Click on the button
+-> Review existing print sets
+-> Select SHEETS or a DISCIPLINE
+-> Review the output in the console
 
-# This will create sheet sets that can be used for exporting to PDF and for publishing to ACC.
-# ___________________________________________________________________
-# How-to:
-
-# -> Click on the button
-# -> Review existing print sets
-# -> Select SHEETS or a DISCIPLINE
-# -> Review the output in the console
-#
-# -> NOTE: Only sheets with the "Appears In Sheet List" parameter checked on will be included in the sheet set.
-# ___________________________________________________________________
-# Last update:
-# - [05.22.2025] - 0.1 BETA RELEASE
-# - [07.25.2025] - 1.0 RELEASE
-# ___________________________________________________________________
+-> NOTE: Only sheets with the "Appears In Sheet List" parameter checked on will be included in the sheet set.
+___________________________________________________________________
+Last update:
+- [05.22.2025] - 0.1 BETA RELEASE
+- [07.25.2025] - 1.0 RELEASE
+___________________________________________________________________
 Author: Kyle Guggenheim"""
 
 

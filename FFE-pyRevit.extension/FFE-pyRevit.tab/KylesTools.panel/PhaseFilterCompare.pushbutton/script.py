@@ -7,15 +7,12 @@ ________________________________________________________________
 Tested Revit Versions: 2026, 2024
 ______________________________________________________________
 Description:
- ->
- ->
+This tool will compare the phase filters in the host model to the phase filters in the linked Revit models.
 ______________________________________________________________
 How-to:
  -> Click the button
- -> 
- -> 
- -> 
-   
+ -> Review the output for each link in the console
+ -> Select the open in browser button to open the output in your web browser for easier reading
 ______________________________________________________________
 Last update:
  - [09.13.2025] - v0.1 Beta Release
