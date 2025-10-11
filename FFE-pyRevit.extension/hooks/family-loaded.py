@@ -39,6 +39,30 @@ log_dir = os.path.join(os.path.expanduser("~"), "FFE Inc", "FFE Revit Users - Do
 log_file = os.path.join(log_dir, username + "_revit_log.json")
 
 
+### TEST THIS ###
+# Define origin types and keywords
+# origin_types = {
+#     "Family Editor": [], 
+#     "Content Catalog": ['AppData'], 
+#     "FFE Server": ["172.16.1.7"], 
+#     "FFE Server - Revit Library": ["172.16.1.7", "Drafting"],
+#     "Local": []
+#     }
+
+# family_origin = None
+# # Determine family origin based on path and keywords
+# if family_path is None:
+#     family_origin = "Family Editor"
+# else:
+#     for origin, keywords in origin_types.items():
+#         if all(keyword in family_path for keyword in keywords):
+#             family_origin = origin
+#             break
+#     if family_origin is None:
+#         family_origin = "Local"
+### TEST THIS ###
+
+
 # Determine family origin based on path
 if family_path is None:
     family_origin = "Family Editor"
