@@ -68,7 +68,7 @@ if family_path is None:
     family_origin = "Family Editor"
 elif "AppData" in family_path:
     family_origin = "Content Catalog"
-elif "172.16.1.7" in family_path:
+elif "Internal Share" in family_path:
     if "Drafting" in family_path:
         family_origin = "FFE Server - Revit Library"
     else:
