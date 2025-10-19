@@ -1,8 +1,23 @@
 # -*- coding: UTF-8 -*-
 # -------------------------------------------
-# This hook runs after a family is loaded into a Revit project.
-# Log the family-loaded event to a JSON file.
-# -------------------------------------------
+"""
+__title__   = "Copy View Filters"
+__doc__     = Version = v1.2
+Date    = 03.06.2025
+________________________________________________________________
+Tested Revit Versions: 
+________________________________________________________________
+Description:
+- This hook runs after a family is loaded into a Revit project.
+- Log the family-loaded event to a JSON file.
+________________________________________________________________
+Last update:
+- [10.07.2025] - v1.0 RELEASE
+- [10.08.2025] - v1.1 added Family Editor origin; corrected origin
+- [12.06.2024] - v1.2 changed server address from IP to "Internal Share"
+________________________________________________________________
+"""
+#____________________________________________________________________ IMPORTS
 from calendar import c
 import os, json, time
 
