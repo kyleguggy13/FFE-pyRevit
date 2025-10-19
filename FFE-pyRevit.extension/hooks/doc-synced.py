@@ -1,7 +1,25 @@
 # -*- coding: UTF-8 -*-
-# doc-synced.py
+# -------------------------------------------
+"""
+__title__   = "doc-synced"
+__doc__     = Version = v1.3
+Date    = 10.19.2025
+________________________________________________________________
+Tested Revit Versions: 
+________________________________________________________________
+Description:
 # This hook runs after a document is synced to central.
 # It logs the sync event to a JSON file.
+________________________________________________________________
+Last update:
+- [09.19.2025] - v0.1 BETA
+- [09.23.2025] - v1.0 RELEASE
+- [09.24.2025] - v1.1 added revit version to log
+- [10.07.2025] - v1.2 added doc title to log 
+- [10.19.2025] - v1.3 removed redundant revit version info 
+________________________________________________________________
+"""
+#____________________________________________________________________ IMPORTS
 import os, json, time
 
 from pyrevit import forms, revit
@@ -14,9 +32,9 @@ doc_path = doc.PathName or "<Untitled>"
 
 doc_title = doc.Title
 version_build = doc.Application.VersionBuild
-version_name = doc.Application.VersionName
 version_number = doc.Application.VersionNumber
 username = doc.Application.Username
+filesize = doc.GetDocumentSize()
 
 
 # json log location
@@ -31,7 +49,6 @@ dataEntry = {
     "username": username,
     "doc_title": doc_title,
     "doc_path": doc_path,
-    "revit_version": version_name,
     "revit_version_number": version_number,
     "revit_build": version_build,
     "action": "sync"

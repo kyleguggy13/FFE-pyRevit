@@ -1,9 +1,9 @@
 # -*- coding: UTF-8 -*-
 # -------------------------------------------
 """
-__title__   = "Copy View Filters"
+__title__   = "family-loaded"
 __doc__     = Version = v1.2
-Date    = 03.06.2025
+Date    = 10.07.2025
 ________________________________________________________________
 Tested Revit Versions: 
 ________________________________________________________________
@@ -12,9 +12,10 @@ Description:
 - Log the family-loaded event to a JSON file.
 ________________________________________________________________
 Last update:
-- [10.07.2025] - v1.0 RELEASE
-- [10.08.2025] - v1.1 added Family Editor origin; corrected origin
-- [12.06.2024] - v1.2 changed server address from IP to "Internal Share"
+- [10.07.2025]  - v1.0 RELEASE
+- [10.08.2025]  - v1.1 added Family Editor origin; corrected origin
+- [10.19.2025]  - v1.2 changed server address from IP to "Internal Share"
+                - removed redundant revit version info
 ________________________________________________________________
 """
 #____________________________________________________________________ IMPORTS
@@ -35,7 +36,6 @@ doc_title = doc.Title
 
 # Gather Revit info
 version_build = doc.Application.VersionBuild
-version_name = doc.Application.VersionName
 version_number = doc.Application.VersionNumber
 
 # Gather user info
@@ -98,7 +98,6 @@ dataEntry = {
     "username": username,
     "doc_title": doc_title,
     "doc_path": doc_path,
-    "revit_version": version_name,
     "revit_version_number": version_number,
     "revit_build": version_build,
     "action": "family-loaded",
