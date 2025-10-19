@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 __title__   = "Copy View Filters"
-__doc__     = """Version = v1.0
+__doc__     = """Version = v1.1
 Date    = 03.06.2025
 ________________________________________________________________
 Tested Revit Versions: 2026, 2024
