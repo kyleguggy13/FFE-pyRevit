@@ -57,7 +57,7 @@ output_window = output.get_output()
 # lmap = link phase filter map
 # hmap = host phase filter map
 
-#____________________________________________________________________ HELPERS
+#____________________________________________________________________ FUNCTIONS
 def md_list(items):
     """Render a Python list as one markdown string (never pass lists to print_md)."""
     try:

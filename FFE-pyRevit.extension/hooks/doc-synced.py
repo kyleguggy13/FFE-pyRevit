@@ -34,7 +34,7 @@ doc_title = doc.Title
 version_build = doc.Application.VersionBuild
 version_number = doc.Application.VersionNumber
 username = doc.Application.Username
-filesize = doc.GetDocumentSize()
+# filesize = doc.GetDocumentSize()
 
 
 # json log location
