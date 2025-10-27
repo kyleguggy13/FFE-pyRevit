@@ -1,4 +1,5 @@
 layout:
   - col2
   - ContentCatalog
-
+  - PDFExportTutorial
+  - CADExportTutorial
