@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 __title__     = "Phase Filter\nComparison"
-__version__   = 'Version = v1.0'
-__doc__       = """Version = v1.0
-Date    = 09.13.2025
+__version__   = 'Version = v1.1'
+__doc__       = """Version = v1.1
+Date    = 10.31.2025
 ________________________________________________________________
 Tested Revit Versions: 2026, 2024
 ______________________________________________________________
@@ -17,6 +17,7 @@ ______________________________________________________________
 Last update:
  - [09.13.2025] - v0.1 Beta Release
  - [09.14.2025] - v1.0 First Release
+ - [10.31.2025] - v1.1 Updated logging to include status of action
 ______________________________________________________________
 Author: Kyle Guggenheim"""
 
@@ -50,6 +51,7 @@ uidoc       = __revit__.ActiveUIDocument
 doc         = __revit__.ActiveUIDocument.Document   #type: Document
 selection   = uidoc.Selection                       #type: Selection
 
+log_status = ""
 
 output_window = output.get_output()
 
@@ -178,78 +180,6 @@ def compare_phase_filters(host_map, link_map):
     return missing_in_link, extra_in_link, diffs
 
 
-def log_action(action):
-    """Log action to user JSON log file."""
-    #____________________________________________________________________ IMPORTS
-    import os, json, time
-
-    from pyrevit import revit
-
-    doc = revit.doc
-    doc_path = doc.PathName or "<Untitled>"
-
-    doc_title = doc.Title
-    version_build = doc.Application.VersionBuild
-    version_number = doc.Application.VersionNumber
-    username = doc.Application.Username
-    action = action
-
-    # json log location
-    # \FFE Inc\FFE Revit Users - Documents\00-General\Revit_Add-Ins\FFE-pyRevit\Logs
-    # C:\Users\kyleg\FFE Inc\FFE Revit Users - Documents\00-General\Revit_Add-Ins\FFE-pyRevit\Logs
-    log_dir = os.path.join(os.path.expanduser("~"), "FFE Inc", "FFE Revit Users - Documents", "00-General", "Revit_Add-Ins", "FFE-pyRevit", "Logs")
-
-    log_file = os.path.join(log_dir, username + "_revit_log.json")
-
-    dataEntry = {
-        "datetime": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "username": username,
-        "doc_title": doc_title,
-        "doc_path": doc_path,
-        "revit_version_number": version_number,
-        "revit_build": version_build,
-        "action": action
-    }
-
-    # Function to write JSON data
-    def write_json(dataEntry, filename=log_file):
-        with open(filename,'r+') as file:
-            file_data = json.load(file)                 # First we load existing data into a dict.   
-            file_data['action'].append(dataEntry)       # Join new_data with file_data inside emp_details
-            file.seek(0)                                # Sets file's current position at offset.
-            json.dump(file_data, file, indent = 4)      # convert back to json.
-
-
-    # Check if log file exists, if not create it
-    logcheck = False
-    if not os.path.exists(log_file):
-        if not os.path.exists(log_dir):
-            os.makedirs(log_dir)
-        with open(log_file, 'w') as file:    
-            file.write('{"action": []}')                # create json structure
-        
-        output_window.print_md("### **Created log file:** `{}`".format(log_file))
-
-    with open(log_file,'r+') as file:
-        file_data = json.load(file)
-        if 'action' not in file_data:
-            file_data['action'] = []
-            file.seek(0)
-            json.dump(file_data, file, indent = 4)
-
-    try:
-        write_json(dataEntry)
-        logcheck = True
-        output_window.print_md("### **Logged sync to JSON:** `{}`".format(log_file))
-    except Exception as e:
-        logcheck = False
-
-    return dataEntry
-
-
-
-output_window.print_md("Logging action: {}".format(log_action(action)))
-
 
 #____________________________________________________________________ MAIN
 # Host data
@@ -327,7 +257,74 @@ for li, ldoc in loaded_links:
 
 
 
+log_status = "Success"
 
-#_____________________________________________________________________ 🏃‍➡️ RUN 
+#______________________________________________________ LOG ACTION
+action = "Phase Filter Comparison"
+def log_action(action, log_status):
+    """Log action to user JSON log file."""
+    import os, json, time
+    from pyrevit import revit
+
+    doc = revit.doc
+    doc_path = doc.PathName or "<Untitled>"
+
+    doc_title = doc.Title
+    version_build = doc.Application.VersionBuild
+    version_number = doc.Application.VersionNumber
+    username = doc.Application.Username
+    action = action
+
+    # json log location
+    # \FFE Inc\FFE Revit Users - Documents\00-General\Revit_Add-Ins\FFE-pyRevit\Logs
+    log_dir = os.path.join(os.path.expanduser("~"), "FFE Inc", "FFE Revit Users - Documents", "00-General", "Revit_Add-Ins", "FFE-pyRevit", "Logs")
+    log_file = os.path.join(log_dir, username + "_revit_log.json")
+
+    dataEntry = {
+        "datetime": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "username": username,
+        "doc_title": doc_title,
+        "doc_path": doc_path,
+        "revit_version_number": version_number,
+        "revit_build": version_build,
+        "action": action,
+        "status": log_status
+    }
+
+    # Function to write JSON data
+    def write_json(dataEntry, filename=log_file):
+        with open(filename,'r+') as file:
+            file_data = json.load(file)                 # First we load existing data into a dict.   
+            file_data['action'].append(dataEntry)       # Join new_data with file_data inside emp_details
+            file.seek(0)                                # Sets file's current position at offset.
+            json.dump(file_data, file, indent = 4)      # convert back to json.
 
 
+    # Check if log file exists, if not create it
+    logcheck = False
+    if not os.path.exists(log_file):
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        with open(log_file, 'w') as file:    
+            file.write('{"action": []}')                # create json structure
+        
+        # output_window.print_md("### **Created log file:** `{}`".format(log_file))
+
+    with open(log_file,'r+') as file:
+        file_data = json.load(file)
+        if 'action' not in file_data:
+            file_data['action'] = []
+            file.seek(0)
+            json.dump(file_data, file, indent = 4)
+
+    try:
+        write_json(dataEntry)
+        logcheck = True
+        # output_window.print_md("### **Logged sync to JSON:** `{}`".format(log_file))
+    except Exception as e:
+        logcheck = False
+
+    return dataEntry
+
+# log_action(action, log_status)
+output_window.print_md("Logging action: {}".format(log_action(action, log_status)))
