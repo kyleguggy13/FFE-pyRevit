@@ -184,7 +184,6 @@ def log_action(action):
     import os, json, time
 
     from pyrevit import revit
-    # from Snippets import _FunctionLogger as func_logger
 
     doc = revit.doc
     doc_path = doc.PathName or "<Untitled>"
@@ -212,19 +211,13 @@ def log_action(action):
         "action": action
     }
 
-    # func_logger.write_json(dataEntry, filename=log_file)
-
     # Function to write JSON data
     def write_json(dataEntry, filename=log_file):
         with open(filename,'r+') as file:
-            # First we load existing data into a dict.
-            file_data = json.load(file)
-            # Join new_data with file_data inside emp_details
-            file_data['action'].append(dataEntry)
-            # Sets file's current position at offset.
-            file.seek(0)
-            # convert back to json.
-            json.dump(file_data, file, indent = 4)
+            file_data = json.load(file)                 # First we load existing data into a dict.   
+            file_data['action'].append(dataEntry)       # Join new_data with file_data inside emp_details
+            file.seek(0)                                # Sets file's current position at offset.
+            json.dump(file_data, file, indent = 4)      # convert back to json.
 
 
     # Check if log file exists, if not create it
@@ -232,9 +225,9 @@ def log_action(action):
     if not os.path.exists(log_file):
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
-        with open(log_file, 'w') as file:
-            # create json structure
-            file.write('{"action": []}')
+        with open(log_file, 'w') as file:    
+            file.write('{"action": []}')                # create json structure
+        
         output_window.print_md("### **Created log file:** `{}`".format(log_file))
 
     with open(log_file,'r+') as file:
