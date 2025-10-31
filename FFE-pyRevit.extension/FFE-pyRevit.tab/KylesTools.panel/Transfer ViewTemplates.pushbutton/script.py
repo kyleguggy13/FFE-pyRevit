@@ -21,10 +21,8 @@ Last update:
 _____________________________________________________________________
 Author: Kyle Guggenheim"""
 
-# ╦╔╦╗╔═╗╔═╗╦═╗╔╦╗╔═╗
-# ║║║║╠═╝║ ║╠╦╝ ║ ╚═╗
-# ╩╩ ╩╩  ╚═╝╩╚═ ╩ ╚═╝ IMPORTS
-# ==================================================
+
+#____________________________________________________________________ IMPORTS
 # Regular + Autodesk
 import os, sys, math, datetime, time
 from collections import defaultdict
@@ -47,10 +45,8 @@ from System.Windows.Controls import ComboBoxItem
 from System.Windows          import Visibility
 import wpf
 
-# ╦  ╦╔═╗╦═╗╦╔═╗╔╗ ╦  ╔═╗╔═╗
-# ╚╗╔╝╠═╣╠╦╝║╠═╣╠╩╗║  ║╣ ╚═╗
-#  ╚╝ ╩ ╩╩╚═╩╩ ╩╚═╝╩═╝╚═╝╚═╝ VARIABLES
-# ==================================================
+
+#____________________________________________________________________ VARIABLES
 doc     = __revit__.ActiveUIDocument.Document
 uidoc   = __revit__.ActiveUIDocument
 app     = __revit__.Application
@@ -59,10 +55,8 @@ PATH_SCRIPT = os.path.dirname(__file__)
 # GLOBAL VARIABLES
 dict_projects = {d.Title:d for d in app.Documents if not d.IsFamilyDocument and not d.IsLinked}
 
-# ╔═╗╦  ╔═╗╔═╗╔═╗╔═╗╔═╗
-# ║  ║  ╠═╣╚═╗╚═╗║╣ ╚═╗
-# ╚═╝╩═╝╩ ╩╚═╝╚═╝╚═╝╚═╝ CLASSES
-# ==================================================
+
+#____________________________________________________________________ CLASSES
 class CopyViewTemplate(my_WPF):
     doc_from            = None
     doc_to              = None
@@ -106,10 +100,8 @@ class CopyViewTemplate(my_WPF):
             self.UI_CopyFrom.Items.Add(item)
             self.UI_CopyTo.Items.Add(item2)
 
-    # ╔═╗╦ ╦╔╗╔╔═╗╔╦╗╦╔═╗╔╗╔╔═╗
-    # ╠╣ ║ ║║║║║   ║ ║║ ║║║║╚═╗
-    # ╚  ╚═╝╝╚╝╚═╝ ╩ ╩╚═╝╝╚╝╚═╝ FUNCTIONS
-    # ==================================================
+
+#____________________________________________________________________ FUNCTIONS
     def remove_viewtemplate_same_name(self, selected_viewtemplates_names):
         """This function will scan Project where ViewTemplates is being copied to for ViewTemplates with the same name.
         If there are any matches, it will return a dictionary of a ViewTemplate name and views it is assigned to
@@ -158,12 +150,8 @@ class CopyViewTemplate(my_WPF):
                 view = self.doc_to.GetElement(view_id)
                 view.ViewTemplateId = new_vt.Id
 
-    # ╔═╗╦ ╦╦  ╔═╗╦  ╦╔═╗╔╗╔╔╦╗╔═╗
-    # ║ ╦║ ║║  ║╣ ╚╗╔╝║╣ ║║║ ║ ╚═╗
-    # ╚═╝╚═╝╩  ╚═╝ ╚╝ ╚═╝╝╚╝ ╩ ╚═╝ GUI EVENTS
-    #==================================================
-
-
+    
+    #____________________________________________________________________ GUI EVENTS
     def UIe_text_filter_updated(self, sender,e):
         List_filtered_items = List[type(ListItem())]()
         filter_keyword = self.UI_TextBox_Filter.Text
@@ -223,10 +211,8 @@ class CopyViewTemplate(my_WPF):
                 self.UI_ListBox_ViewTemplates.ItemsSource = List_viewtemplates
 
 
-    # ╔╗ ╦ ╦╔╦╗╔╦╗╔═╗╔╗╔╔═╗
-    # ╠╩╗║ ║ ║  ║ ║ ║║║║╚═╗
-    # ╚═╝╚═╝ ╩  ╩ ╚═╝╝╚╝╚═╝ BUTTONS
-    #==================================================
+    
+    #____________________________________________________________________ BUTTONS
     def select_mode(self, mode):
         """Helper function for following buttons:
         - button_select_all
@@ -303,9 +289,7 @@ class CopyViewTemplate(my_WPF):
         was_were = 'ViewTemplates were' if len(selected_viewtemplates) > 1 else 'ViewTemplate was'
         print('Script is complete.\n {} {} Transfered.'.format(len(selected_viewtemplates),was_were))
 
-# ╔╦╗╔═╗╦╔╗╔
-# ║║║╠═╣║║║║
-# ╩ ╩╩ ╩╩╝╚╝ MAIN
-# ==================================================
+
+#____________________________________________________________________ MAIN
 if __name__ == '__main__':
     CopyViewTemplate()
