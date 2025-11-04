@@ -3,3 +3,4 @@ layout:
   - Transfer ViewTemplates
   - CreateSheetSets
   - PhaseFilterCompare
+  - ProjectInfoCompare
