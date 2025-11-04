@@ -310,6 +310,8 @@ def log_action(action, log_status):
         
         # output_window.print_md("### **Created log file:** `{}`".format(log_file))
 
+    # If it does exist, write to it
+    # Check if "action" key exists, if not create it
     with open(log_file,'r+') as file:
         file_data = json.load(file)
         if 'action' not in file_data:

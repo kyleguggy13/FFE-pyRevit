@@ -111,41 +111,36 @@ dataEntry = {
 # Function to write JSON data
 def write_json(dataEntry, filename=log_file):
     with open(filename,'r+') as file:
-        # First we load existing data into a dict.
-        file_data = json.load(file)
-        # Join new_data with file_data inside emp_details
-        file_data['family-loaded'].append(dataEntry)
-        # Sets file's current position at offset.
-        file.seek(0)
-        # convert back to json.
-        json.dump(file_data, file, indent = 4)
+        file_data = json.load(file)                 # First we load existing data into a dict.
+        file_data['action'].append(dataEntry)       # Join new_data with file_data inside emp_details
+        file.seek(0)                                # Sets file's current position at offset.
+        json.dump(file_data, file, indent = 4)      # convert back to json.
 
 
-# """
 # Check if log file exists, if not create it
-synclog = False
+logcheck = False
 if not os.path.exists(log_file):
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
     with open(log_file, 'w') as file:
-        # create json structure
-        file.write('{"family-loaded": []}')
+        file.write('{"action": []}')                # create json structure
+
     # output_window.print_md("### **Created log file:** `{}`".format(log_file))
 
+
 # If it does exist, write to it
-# Check if "family-loaded" key exists, if not create it
+# Check if "action" key exists, if not create it
 with open(log_file,'r+') as file:
     file_data = json.load(file)
-    if 'family-loaded' not in file_data:
-        file_data['family-loaded'] = []
+    if 'action' not in file_data:
+        file_data['action'] = []
         file.seek(0)
         json.dump(file_data, file, indent = 4)
 
 try:
     write_json(dataEntry)
-    synclog = True
+    logcheck = True
     # output_window.print_md("### **Logged sync to JSON:** `{}`".format(log_file))
 except Exception as e:
-    synclog = False
+    logcheck = False
     # output_window.print_md("### **Failed to log sync to JSON:** `{}`".format(e))
-# """
