@@ -328,5 +328,5 @@ def log_action(action, log_status):
 
     return dataEntry
 
-# log_action(action, log_status)
-output_window.print_md("Logging action: {}".format(log_action(action, log_status)))
+log_action(action, log_status)
+# output_window.print_md("Logging action: {}".format(log_action(action, log_status)))
