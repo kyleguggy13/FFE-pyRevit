@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-__title__   = "FFE-pyRevit \nv1.6.2"
-__doc__ = """Version = v1.6.2
-Date    = 10.29.2025
+__title__   = "FFE-pyRevit \nv1.7.0"
+__doc__ = """Version = v1.7.0
+Date    = 11.04.2025
 _____________________________________________________________________
 Description:
 pyRevit About Form
@@ -19,6 +19,7 @@ Last update:
 - [09.22.2025] - v1.5.1 Updated version numbering
 - [10.08.2025] - v1.6.0 Added hooks
 - [10.29.2025] - v1.6.2 Added Tutorials links
+- [11.04.2025] - v1.7.0 Added Project Info Comparison Tool
 _____________________________________________________________________
 Author: Kyle Guggenheim from FFE Inc."""
 
