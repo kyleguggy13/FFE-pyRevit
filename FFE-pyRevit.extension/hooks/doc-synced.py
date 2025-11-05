@@ -2,8 +2,8 @@
 # -------------------------------------------
 """
 __title__   = "doc-synced"
-__doc__     = Version = v1.3
-Date    = 10.19.2025
+__doc__     = Version = v1.4
+Date    = 11.05.2025
 ________________________________________________________________
 Tested Revit Versions: 
 ________________________________________________________________
@@ -16,7 +16,8 @@ Last update:
 - [09.23.2025] - v1.0 RELEASE
 - [09.24.2025] - v1.1 added revit version to log
 - [10.07.2025] - v1.2 added doc title to log 
-- [10.19.2025] - v1.3 removed redundant revit version info 
+- [10.19.2025] - v1.3 removed redundant revit version info
+- [11.05.2025] - v1.4 changed log structure to have action as main key
 ________________________________________________________________
 """
 #____________________________________________________________________ IMPORTS
@@ -60,28 +61,38 @@ dataEntry = {
 def write_json(dataEntry, filename=log_file):
     with open(filename,'r+') as file:
         file_data = json.load(file)                 # First we load existing data into a dict.
-        file_data['sync'].append(dataEntry)         # Join new_data with file_data inside emp_details.
+        file_data['action'].append(dataEntry)       # Join new_data with file_data inside emp_details.
         file.seek(0)                                # Sets file's current position at offset.
         json.dump(file_data, file, indent = 4)      # convert back to json.
 
 
 
 # Check if log file exists, if not create it
-synclog = False
+logcheck = False
 if not os.path.exists(log_file):
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
     with open(log_file, 'w') as file:
-        file.write('{"sync": []}')                  # create json structure
+        file.write('{"action": []}')                # create json structure
 
     # output_window.print_md("### **Created log file:** `{}`".format(log_file))
 
 
 # If it does exist, write to it
+# Check if "action" key exists, if not create it
+with open(log_file,'r+') as file:
+    file_data = json.load(file)
+    if 'action' not in file_data:
+        file_data['action'] = []
+        file.seek(0)
+        json.dump(file_data, file, indent = 4)
+        
+
+# If it does exist, write to it
 try:
     write_json(dataEntry)
-    synclog = True
+    logcheck = True
     # output_window.print_md("### **Logged sync to JSON:** `{}`".format(log_file))
 except Exception as e:
-    synclog = False
+    logcheck = False
     # output_window.print_md("### **Failed to log sync to JSON:** `{}`".format(e))
