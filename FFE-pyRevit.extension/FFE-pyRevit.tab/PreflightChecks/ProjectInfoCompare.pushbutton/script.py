@@ -28,7 +28,7 @@ import clr
 clr.AddReference("System")
 from Autodesk.Revit.DB import *
 from Autodesk.Revit.UI import TaskDialog
-from Autodesk.Revit.DB import FilteredElementCollector, RevitLinkInstance, PhaseFilter
+from Autodesk.Revit.DB import FilteredElementCollector, RevitLinkInstance
 
 
 #____________________________________________________________________ IMPORTS (PYREVIT)
@@ -44,10 +44,10 @@ doc         = __revit__.ActiveUIDocument.Document   #type: Document
 selection   = uidoc.Selection                       #type: Selection
 
 log_status = ""
+action = "Project Info Comparison"
 
 output_window = output.get_output()
 
-action = "Project Info Comparison"
 
 #____________________________________________________________________ FUNCTIONS
 def get_project_info_elements(document):
