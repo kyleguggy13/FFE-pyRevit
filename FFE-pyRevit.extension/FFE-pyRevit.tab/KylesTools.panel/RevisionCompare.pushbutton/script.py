@@ -63,18 +63,19 @@ def get_revisions(document):
     rev_collector = FilteredElementCollector(document).OfClass(Revision)
     rev_numbering_sequence = FilteredElementCollector(document).OfClass(RevisionNumberingSequence)
 
+    # Create a dictionary of Revision Numbering Sequences for easy lookup
     NumberingSequence = {}
     for rev_seq in rev_numbering_sequence:    
         NumberingSequence[rev_seq.Id.ToString()] = rev_seq.Name
 
+    # Collect revision data
     for rev in rev_collector:
         revisions = {}
-
         rev_num_seq = rev.RevisionNumberingSequenceId.ToString()
         
         revisions['Sequence Number'] = rev.SequenceNumber
         revisions['Revision Number'] = rev.RevisionNumber
-        revisions['Numbering'] = NumberingSequence[rev.RevisionNumberingSequenceId.ToString()] if rev.RevisionNumberingSequenceId.ToString() in NumberingSequence else "None"
+        revisions['Numbering'] = NumberingSequence[rev_num_seq] if rev_num_seq in NumberingSequence else "None"
         revisions['Revision Date'] = rev.RevisionDate
         revisions['Description'] = rev.Description
         revisions['Issued'] = rev.Issued
@@ -82,21 +83,28 @@ def get_revisions(document):
         revisions['Issued By'] = rev.IssuedBy
         revisions['Show'] = rev.Visibility
 
-        # revisions_list.append(revisions)
         data[rev.SequenceNumber] = revisions
-
+    
     return data
 
 
-
 #____________________________________________________________________ MAIN
-revisions = get_revisions(doc)
+# Host Data
+host_title = doc.Title
+host_revisions = get_revisions(doc)
 
-# for rev in revisions:
-#     for key, value in rev.items():
-#         output_window.print_md("- **{key}**: {value}".format(key=key, value=value))
-    
-#     output_window.print_md("---")
+# Link Data
+link_instances = list(FilteredElementCollector(doc).OfClass(RevitLinkInstance))
+loaded_links = [(li, li.GetLinkDocument()) for li in link_instances if li.GetLinkDocument()]
+
+# Exit if no links found
+if not loaded_links:
+    TaskDialog.Show(__title__, "No loaded Revit links found in this model.")
+    sys.exit()
+
+#Header
+output_window.print_md("# {action}".format(action=action))
+output_window.print_md("## **Host Model:** `{host_title}`".format(host_title=host_title))
 
 
 ### Host table
@@ -104,11 +112,11 @@ host_columns = ["Sequence Number", "Revision Number", "Numbering", "Revision Dat
 
 host_rows = [
     [v["Sequence Number"], v["Revision Number"], v["Numbering"], v["Revision Date"], v["Description"], v["Issued"], v["Issued To"], v["Issued By"], v["Show"]]
-    for n, v in sorted(revisions.items(), key=lambda item: item[0])]
+    for n, v in sorted(host_revisions.items(), key=lambda item: item[0])]
 
-output_window.print_table(table_data=host_rows, columns=host_columns, title="Host Phase Filters ({})".format(len(revisions)))
+output_window.print_table(table_data=host_rows, columns=host_columns, title="Host Phase Filters ({})".format(len(host_revisions)))
 
-# output_window.print_md(host_rows)
+
 
 #____________________________________________________________________ RUN
 
