@@ -1,7 +1,4 @@
 layout:
-  - CopyViewFilters
-  - Transfer ViewTemplates
-  - CreateSheetSets
   - PhaseFilterCompare
   - ProjectInfoCompare
   - RevisionCompare
