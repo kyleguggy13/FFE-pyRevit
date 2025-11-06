@@ -20,6 +20,7 @@ ______________________________________________________________
 Author: Kyle Guggenheim"""
 
 #____________________________________________________________________ IMPORTS (SYSTEM)
+from logging import Filter
 import re
 import sys
 from collections import OrderedDict
@@ -28,7 +29,7 @@ import clr
 clr.AddReference("System")
 from Autodesk.Revit.DB import *
 from Autodesk.Revit.UI import TaskDialog
-from Autodesk.Revit.DB import FilteredElementCollector, RevitLinkInstance
+from Autodesk.Revit.DB import FilteredElementCollector, RevitLinkInstance, Revision
 
 #____________________________________________________________________ IMPORTS (PYREVIT)
 from pyrevit import revit, DB
@@ -48,19 +49,72 @@ output_window = output.get_output()
 
 
 #____________________________________________________________________ FUNCTIONS
+def sanitize(v):
+    """Return a friendly string for table cells."""
+    if v is True:  return "True"
+    if v is False: return "False"
+    if v is None:  return "N/A"
+    return str(v)
 
+
+def get_revisions(document):
+    """Get Revisions from the given document."""
+    data = OrderedDict()
+    rev_collector = FilteredElementCollector(document).OfClass(Revision)
+    rev_numbering_sequence = FilteredElementCollector(document).OfClass(RevisionNumberingSequence)
+
+    NumberingSequence = {}
+    for rev_seq in rev_numbering_sequence:    
+        NumberingSequence[rev_seq.Id.ToString()] = rev_seq.Name
+
+    for rev in rev_collector:
+        revisions = {}
+
+        rev_num_seq = rev.RevisionNumberingSequenceId.ToString()
+        
+        revisions['Sequence Number'] = rev.SequenceNumber
+        revisions['Revision Number'] = rev.RevisionNumber
+        revisions['Numbering'] = NumberingSequence[rev.RevisionNumberingSequenceId.ToString()] if rev.RevisionNumberingSequenceId.ToString() in NumberingSequence else "None"
+        revisions['Revision Date'] = rev.RevisionDate
+        revisions['Description'] = rev.Description
+        revisions['Issued'] = rev.Issued
+        revisions['Issued To'] = rev.IssuedTo
+        revisions['Issued By'] = rev.IssuedBy
+        revisions['Show'] = rev.Visibility
+
+        # revisions_list.append(revisions)
+        data[rev.SequenceNumber] = revisions
+
+    return data
 
 
 
 #____________________________________________________________________ MAIN
+revisions = get_revisions(doc)
+
+# for rev in revisions:
+#     for key, value in rev.items():
+#         output_window.print_md("- **{key}**: {value}".format(key=key, value=value))
+    
+#     output_window.print_md("---")
 
 
+### Host table
+host_columns = ["Sequence Number", "Revision Number", "Numbering", "Revision Date", "Description", "Issued", "Issued To", "Issued By", "Show"]
+
+host_rows = [
+    [v["Sequence Number"], v["Revision Number"], v["Numbering"], v["Revision Date"], v["Description"], v["Issued"], v["Issued To"], v["Issued By"], v["Show"]]
+    for n, v in sorted(revisions.items(), key=lambda item: item[0])]
+
+output_window.print_table(table_data=host_rows, columns=host_columns, title="Host Phase Filters ({})".format(len(revisions)))
+
+# output_window.print_md(host_rows)
 
 #____________________________________________________________________ RUN
 
 
 
-
+log_status = "Success"
 #______________________________________________________ LOG ACTION
 def log_action(action, log_status):
     """Log action to user JSON log file."""
@@ -129,5 +183,5 @@ def log_action(action, log_status):
 
     return dataEntry
 
-log_action(action, log_status)
+# log_action(action, log_status)
 # output_window.print_md("Logging action: {}".format(log_action(action, log_status)))
