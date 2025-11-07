@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-__title__   = "FFE-pyRevit \nv1.7.0"
-__doc__ = """Version = v1.7.0
-Date    = 11.04.2025
+__title__   = "FFE-pyRevit \nv1.8.0"
+__doc__ = """Version = v1.8.0
+Date    = 11.07.2025
 _____________________________________________________________________
 Description:
 pyRevit About Form
