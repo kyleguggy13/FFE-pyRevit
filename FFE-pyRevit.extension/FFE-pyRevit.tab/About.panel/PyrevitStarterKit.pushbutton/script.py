@@ -20,6 +20,7 @@ Last update:
 - [10.08.2025] - v1.6.0 Added hooks
 - [10.29.2025] - v1.6.2 Added Tutorials links
 - [11.04.2025] - v1.7.0 Added Project Info Comparison Tool
+- [11.07.2025] - v1.8.0 Added Revision Comparison Tool
 _____________________________________________________________________
 Author: Kyle Guggenheim from FFE Inc."""
 
