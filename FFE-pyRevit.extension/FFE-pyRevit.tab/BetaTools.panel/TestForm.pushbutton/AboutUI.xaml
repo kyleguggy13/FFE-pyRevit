@@ -1,0 +1,140 @@
+<Window x:Class="SheetIssuesRevisionsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Sheet Issues/Revisions"
+        Width="1420" Height="720"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="CanResize">
+    <Window.Resources>
+        <!-- Revit-like chrome -->
+        <Style TargetType="GroupBox">
+            <Setter Property="Margin" Value="0,8,0,0"/>
+            <Setter Property="Padding" Value="8"/>
+        </Style>
+
+        <Style TargetType="Button">
+            <Setter Property="Margin" Value="0,6,0,0"/>
+            <Setter Property="MinWidth" Value="120"/>
+            <Setter Property="Height" Value="28"/>
+        </Style>
+
+        <Style TargetType="RadioButton">
+            <Setter Property="Margin" Value="0,4,0,0"/>
+        </Style>
+
+        <!-- Placeholder items so the DataGrid renders nicely in the designer -->
+        <x:Array x:Key="SampleItems" Type="{x:Type sys:Object}" xmlns:sys="clr-namespace:System;assembly=mscorlib">
+            <sys:Object/>
+        </x:Array>
+    </Window.Resources>
+
+    <DockPanel LastChildFill="True" Margin="10">
+        <!-- Footer buttons -->
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0" >
+            <Button Content="OK" Width="110" Margin="0,0,8,0"/>
+            <Button Content="Cancel" Width="110" Margin="0,0,8,0"/>
+            <Button Content="Apply" Width="110" IsEnabled="False"/>
+        </StackPanel>
+
+        <!-- Main content area -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="290"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Left: Data grid -->
+            <Grid Grid.Column="0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <!-- Header row mimicking the title bar line -->
+                <Border Grid.Row="0" BorderBrush="#D0D0D0" BorderThickness="0,0,0,1" Padding="2,0,0,6">
+                    <TextBlock Text="Sheet Issues/Revisions" FontWeight="Bold" Opacity="0" />
+                </Border>
+
+                <DataGrid Grid.Row="1"
+                          ItemsSource="{StaticResource SampleItems}"
+                          AutoGenerateColumns="False"
+                          HeadersVisibility="Column"
+                          CanUserAddRows="False"
+                          CanUserDeleteRows="False"
+                          CanUserReorderColumns="False"
+                          CanUserResizeRows="False"
+                          GridLinesVisibility="All"
+                          SelectionMode="Single"
+                          SelectionUnit="FullRow"
+                          Margin="0"
+                          IsReadOnly="False">
+                    <DataGrid.Resources>
+                        <Style TargetType="DataGridColumnHeader">
+                            <Setter Property="FontWeight" Value="Normal"/>
+                        </Style>
+                        <Style TargetType="DataGridRow">
+                            <Setter Property="Height" Value="24"/>
+                        </Style>
+                    </DataGrid.Resources>
+
+                    <!-- Columns -->
+                    <DataGridTextColumn Header="Sequence" Binding="{Binding Sequence}" Width="60"/>
+                    <DataGridTextColumn Header="Revision Number" Binding="{Binding RevisionNumber}" Width="110"/>
+                    <DataGridTextColumn Header="Numbering" Binding="{Binding Numbering}" Width="110"/>
+                    <DataGridTextColumn Header="Date" Binding="{Binding Date}" Width="110"/>
+                    <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="250"/>
+                    <DataGridCheckBoxColumn Header="Issued" Binding="{Binding Issued}" Width="70"/>
+                    <DataGridTextColumn Header="Issued to" Binding="{Binding IssuedTo}" Width="*"/>
+                    <DataGridTextColumn Header="Issued by" Binding="{Binding IssuedBy}" Width="120"/>
+                    <DataGridTextColumn Header="Show" Binding="{Binding Show}" Width="100"/>
+                </DataGrid>
+            </Grid>
+
+            <!-- Right: Controls panel -->
+            <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Stretch" >
+                    <Button Content="Add" Width="120"/>
+                    <Button Content="Delete" Width="120" Margin="10,0,0,0"/>
+                </StackPanel>
+
+                <GroupBox Header="Numbering">
+                    <StackPanel>
+                        <RadioButton Content="Per Project" IsChecked="True" GroupName="NumberingScope"/>
+                        <RadioButton Content="Per Sheet" GroupName="NumberingScope"/>
+                    </StackPanel>
+                </GroupBox>
+
+                <GroupBox Header="Row">
+                    <StackPanel>
+                        <Button Content="Move Up"/>
+                        <Button Content="Move Down"/>
+                        <Button Content="Merge Up"/>
+                        <Button Content="Merge Down"/>
+                    </StackPanel>
+                </GroupBox>
+
+                <GroupBox Header="Customize Numbering">
+                    <StackPanel>
+                        <Button Content="Numbering…" />
+                    </StackPanel>
+                </GroupBox>
+
+                <GroupBox Header="Arc length">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <TextBox Grid.Column="0" IsEnabled="False" Height="26" Margin="0,0,8,0" />
+                        <TextBlock Grid.Column="1" VerticalAlignment="Center" Text="0' 0 3/4&quot;" />
+                    </Grid>
+                </GroupBox>
+
+                <StackPanel Margin="0,8,0,0">
+                    <!-- spacer to push content up if needed -->
+                </StackPanel>
+            </StackPanel>
+        </Grid>
+    </DockPanel>
+</Window>
