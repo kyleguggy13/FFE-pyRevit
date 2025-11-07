@@ -2,7 +2,7 @@
 __title__     = "Revision\nComparison"
 __version__   = 'Version = v1.0'
 __doc__       = """Version = v1.0
-Date    = 11.06.2025
+Date    = 11.07.2025
 ________________________________________________________________
 Tested Revit Versions: 
 ______________________________________________________________
@@ -15,13 +15,12 @@ How-to:
  -> Select the open in browser button to open the output in your web browser for easier reading
 ______________________________________________________________
 Last update:
- - [11.06.2025] - v1.0 RELEASE
+ - [11.07.2025] - v1.0 RELEASE
 ______________________________________________________________
 Author: Kyle Guggenheim"""
 
 #____________________________________________________________________ IMPORTS (SYSTEM)
 from json import load
-from logging import Filter
 import re
 import sys
 from collections import OrderedDict
@@ -89,6 +88,28 @@ def get_revisions(document):
     return data
 
 
+def compare_revisions(host_revisions, link_revisions):
+    """Compare Revisions between host and link documents."""
+    comparison = []
+    all_keys = set(host_revisions.keys()).union(set(link_revisions.keys()))
+
+    for key in all_keys:
+        host_rev = host_revisions.get(key)
+        link_rev = link_revisions.get(key)
+
+        if host_rev != link_rev:
+            comparison.append((key, host_rev, link_rev))
+    
+    return comparison
+
+
+def compare_values(host_value, link_value):
+    """Compare two values and return a status icon."""
+    if host_value != link_value:
+        return "{} ❌".format(link_value)
+    else:
+        return "{} ✅".format(link_value)
+
 #____________________________________________________________________ MAIN
 # Host Data
 host_title = doc.Title
@@ -103,7 +124,7 @@ if not loaded_links:
     TaskDialog.Show(__title__, "No loaded Revit links found in this model.")
     sys.exit()
 
-#Header
+# Header
 output_window.print_md("# {action}".format(action=action))
 output_window.print_md("## **Host Model:** `{host_title}`".format(host_title=host_title))
 
@@ -113,19 +134,46 @@ host_columns = ["Sequence Number", "Revision Number", "Numbering", "Revision Dat
 
 host_rows = [
     [v["Sequence Number"], v["Revision Number"], v["Numbering"], v["Revision Date"], v["Description"], v["Issued"], v["Issued To"], v["Issued By"], v["Show"]]
-    for n, v in sorted(host_revisions.items(), key=lambda item: item[0])]
+    for n, v in sorted(host_revisions.items(), key=lambda item: item[0])
+    ]
 
 # Print Host Revisions Table
-output_window.print_table(table_data=host_rows, columns=host_columns, title="Host Phase Filters ({})".format(len(host_revisions)))
+output_window.print_table(table_data=host_rows, columns=host_columns, title="Host Revisions ({})".format(len(host_revisions)))
 
 
 ### Per-Link
 for li, ldoc in loaded_links:
     link_name = ldoc.Title
     output_window.print_md("---")
-    output_window.print_md("## **Link: `{}`".format(link_name))
-
     
+    # Link Header
+    output_window.print_md("## Link: `{}`".format(link_name))
+    
+    # Get Link Revisions
+    link_revisions = get_revisions(ldoc)
+    # output_window.print_md("**Link Revisions ({}):**".format(len(link_revisions)))
+
+    # Compute Differences early so we can tag mismatches in the table
+    comparison = compare_revisions(host_revisions, link_revisions)
+    
+
+    link_rows = [
+        [
+            str(compare_values(host_revisions[n]["Sequence Number"] if n in host_revisions.keys() else "None",  v["Sequence Number"])), 
+            compare_values(host_revisions[n]["Revision Number"] if n in host_revisions.keys() else "None",      v["Revision Number"]), 
+            compare_values(host_revisions[n]["Numbering"] if n in host_revisions.keys() else "None",            v["Numbering"]), 
+            compare_values(host_revisions[n]["Revision Date"] if n in host_revisions.keys() else "None",        v["Revision Date"]), 
+            compare_values(host_revisions[n]["Description"] if n in host_revisions.keys() else "None",          v["Description"]), 
+            compare_values(host_revisions[n]["Issued"] if n in host_revisions.keys() else "None",               v["Issued"]), 
+            compare_values(host_revisions[n]["Issued To"] if n in host_revisions.keys() else "None",            v["Issued To"]), 
+            compare_values(host_revisions[n]["Issued By"] if n in host_revisions.keys() else "None",            v["Issued By"]), 
+            compare_values(host_revisions[n]["Show"] if n in host_revisions.keys() else "None",                 v["Show"]), 
+            ]
+        for n, v in sorted(link_revisions.items(), key=lambda item: item[0])
+        ]
+    
+    
+    output_window.print_table(table_data=link_rows, columns=host_columns, title="Link Revisions ({})".format(len(link_revisions)))
 
 
 
@@ -202,5 +250,5 @@ def log_action(action, log_status):
 
     return dataEntry
 
-# log_action(action, log_status)
+log_action(action, log_status)
 # output_window.print_md("Logging action: {}".format(log_action(action, log_status)))
