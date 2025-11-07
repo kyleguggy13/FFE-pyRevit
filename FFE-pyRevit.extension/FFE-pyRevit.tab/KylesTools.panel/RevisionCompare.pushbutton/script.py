@@ -20,6 +20,7 @@ ______________________________________________________________
 Author: Kyle Guggenheim"""
 
 #____________________________________________________________________ IMPORTS (SYSTEM)
+from json import load
 from logging import Filter
 import re
 import sys
@@ -114,7 +115,17 @@ host_rows = [
     [v["Sequence Number"], v["Revision Number"], v["Numbering"], v["Revision Date"], v["Description"], v["Issued"], v["Issued To"], v["Issued By"], v["Show"]]
     for n, v in sorted(host_revisions.items(), key=lambda item: item[0])]
 
+# Print Host Revisions Table
 output_window.print_table(table_data=host_rows, columns=host_columns, title="Host Phase Filters ({})".format(len(host_revisions)))
+
+
+### Per-Link
+for li, ldoc in loaded_links:
+    link_name = ldoc.Title
+    output_window.print_md("---")
+    output_window.print_md("## **Link: `{}`".format(link_name))
+
+    
 
 
 
