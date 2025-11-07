@@ -78,7 +78,7 @@ def main():
         return
 
     output_window.print_md("# {action}".format(action=action))
-    output_window.print_md("## Host Model Project Information:")
+    output_window.print_md("## Host Model Project Information: {}".format(doc.Title))
     for key, value in host_project_info.items():
         output_window.print_md("- **{key}:** {value}".format(key=key, value=value))
 
@@ -93,13 +93,14 @@ def main():
                 host_value = host_project_info.get(key, "N/A")
                 link_value = link_project_info.get(key, "N/A")
                 if host_value != link_value:
-                    output_window.print_md("- **{key}:** Host = {host_value} | (❌) | Link = {link_value}".format(key=key, host_value=host_value, link_value=link_value))
+                    # output_window.print_md("- **{key}:** Host = {host_value} | (❌) | Link = {link_value}".format(key=key, host_value=host_value, link_value=link_value))
+                    output_window.print_md("- **{key}:** {link_value} | ❌ | Host = {host_value}".format(key=key, host_value=host_value, link_value=link_value))
                 else:
-                    output_window.print_md("- **{key}:** {host_value} (✅)".format(key=key, host_value=host_value))
+                    output_window.print_md("- **{key}:** {link_value} | ✅".format(key=key, link_value=link_value))
 
     log_status = "Success"
     output_window.print_md("---")
-    output_window.print_md("### {action} - {log_status}".format(action=action, log_status=log_status))
+    # output_window.print_md("### {action} - {log_status}".format(action=action, log_status=log_status))
 
 
 #____________________________________________________________________ RUN
@@ -109,7 +110,7 @@ if __name__ == "__main__":
 
 
 #______________________________________________________ LOG ACTION
-action = "Project Info Comparison"
+# action = "Project Info Comparison"
 def log_action(action, log_status):
     """Log action to user JSON log file."""
     import os, json, time
