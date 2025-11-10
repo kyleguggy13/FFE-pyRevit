@@ -16,6 +16,7 @@ How-to:
 ______________________________________________________________
 Last update:
  - [11.07.2025] - v1.0 RELEASE
+ - [11.10.2025] - v1.0.1 Temporarily updated to handle models set to "Per Sheet".
 ______________________________________________________________
 Author: Kyle Guggenheim"""
 
@@ -56,6 +57,12 @@ def sanitize(v):
     if v is None:  return "N/A"
     return str(v)
 
+def check_revision_settings(document):
+    """ Check if the document is set to by project or by sheet."""
+    rev_settings = FilteredElementCollector(document).OfClass(RevisionSettings).FirstElement()
+    if rev_settings:
+        return rev_settings.RevisionNumbering
+    return None
 
 def get_revisions(document):
     """Get Revisions from the given document."""
@@ -111,6 +118,15 @@ def compare_values(host_value, link_value):
         return "{} ✅".format(link_value)
 
 #____________________________________________________________________ MAIN
+rev_numbering = check_revision_settings(doc)
+# print(check_revision_settings(doc))
+# print(type(rev_numbering.ToString()))
+if rev_numbering.ToString() == "PerSheet":
+    TaskDialog.Show(
+        __title__, 
+        "This tool currently only works with models that have their Revision settings set to 'Per Project'.")
+    sys.exit()
+
 # Host Data
 host_title = doc.Title
 host_revisions = get_revisions(doc)
