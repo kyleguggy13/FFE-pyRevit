@@ -25,10 +25,7 @@ _____________________________________________________________________
 Author: Kyle Guggenheim from FFE Inc."""
 
 
-# ╦╔╦╗╔═╗╔═╗╦═╗╔╦╗╔═╗
-# ║║║║╠═╝║ ║╠╦╝ ║ ╚═╗
-# ╩╩ ╩╩  ╚═╝╩╚═ ╩ ╚═╝ IMPORTS
-#====================================================================================================
+#____________________________________________________________________ IMPORTS
 from Autodesk.Revit.DB import *
 from pyrevit import forms   # By importing forms you also get references to WPF package! Very IMPORTANT
 import wpf, os, clr         # wpf can be imported only after pyrevit.forms!
@@ -43,19 +40,15 @@ from System.Windows.Window import DragMove
 from System.Windows.Input import MouseButtonState
 from System import Uri
 
-# ╦  ╦╔═╗╦═╗╦╔═╗╔╗ ╦  ╔═╗╔═╗
-# ╚╗╔╝╠═╣╠╦╝║╠═╣╠╩╗║  ║╣ ╚═╗
-#  ╚╝ ╩ ╩╩╚═╩╩ ╩╚═╝╩═╝╚═╝╚═╝ VARIABLES
-#====================================================================================================
+
+#____________________________________________________________________ VARIABLES
 PATH_SCRIPT = os.path.dirname(__file__)
 uidoc   = __revit__.ActiveUIDocument
 app     = __revit__.Application
 doc     = __revit__.ActiveUIDocument.Document #type: Document
 
-# ╔═╗╦  ╔═╗╔═╗╔═╗╔═╗╔═╗
-# ║  ║  ╠═╣╚═╗╚═╗║╣ ╚═╗
-# ╚═╝╩═╝╩ ╩╚═╝╚═╝╚═╝╚═╝
-#====================================================================================================
+
+#____________________________________________________________________ CLASSES
 class ListItem:
     """Helper Class for defining items in the ListBox."""
     def __init__(self,  Name='Unnamed', element = None, checked = False):
@@ -66,10 +59,8 @@ class ListItem:
     def __str__(self):
         return self.Name
 
-# ╔╦╗╔═╗╦╔╗╔  ╔═╗╔═╗╦═╗╔╦╗
-# ║║║╠═╣║║║║  ╠╣ ║ ║╠╦╝║║║
-# ╩ ╩╩ ╩╩╝╚╝  ╚  ╚═╝╩╚═╩ ╩ MAIN FORM
-#====================================================================================================
+
+#____________________________________________________________________ MAIN FORM
 class AboutForm(Window):
 
     def __init__(self):
@@ -80,10 +71,8 @@ class AboutForm(Window):
         # Show Form
         self.ShowDialog()
 
-    # ╔═╗╦  ╦╔═╗╔╗╔╔╦╗╔═╗
-    # ║╣ ╚╗╔╝║╣ ║║║ ║ ╚═╗
-    # ╚═╝ ╚╝ ╚═╝╝╚╝ ╩ ╚═╝
-    #====================================================================================================
+    
+    #____________________________________________________________________ EVENTS
     def button_close(self, sender, e):
         """Stop application by clicking on a <Close> button in the top right corner."""
         self.Close()
@@ -99,10 +88,7 @@ class AboutForm(Window):
 
 
 
-# ╦ ╦╔═╗╔═╗  ╔═╗╔═╗╦═╗╔╦╗
-# ║ ║╚═╗║╣   ╠╣ ║ ║╠╦╝║║║
-# ╚═╝╚═╝╚═╝  ╚  ╚═╝╩╚═╩ ╩
-#====================================================================================================
+#____________________________________________________________________ USE FORM
 
 # Show form to the user
 UI = AboutForm()
