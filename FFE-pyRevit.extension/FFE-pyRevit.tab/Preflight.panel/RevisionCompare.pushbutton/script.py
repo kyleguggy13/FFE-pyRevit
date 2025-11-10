@@ -94,6 +94,36 @@ def get_revisions(document):
     
     return data
 
+def get_revisions_PerSheet(document):
+    """Get Revisions from the given document."""
+    data = OrderedDict()
+    rev_collector = FilteredElementCollector(document).OfClass(Revision)
+    rev_numbering_sequence = FilteredElementCollector(document).OfClass(RevisionNumberingSequence)
+
+    # Create a dictionary of Revision Numbering Sequences for easy lookup
+    NumberingSequence = {}
+    for rev_seq in rev_numbering_sequence:    
+        NumberingSequence[rev_seq.Id.ToString()] = rev_seq.Name
+
+    # Collect revision data
+    for rev in rev_collector:
+        revisions = {}
+        rev_num_seq = rev.RevisionNumberingSequenceId.ToString()
+        
+        revisions['Sequence Number'] = rev.SequenceNumber
+        # revisions['Revision Number'] = rev.RevisionNumber
+        revisions['Numbering'] = NumberingSequence[rev_num_seq] if rev_num_seq in NumberingSequence else "None"
+        revisions['Revision Date'] = rev.RevisionDate
+        revisions['Description'] = rev.Description
+        revisions['Issued'] = rev.Issued
+        revisions['Issued To'] = rev.IssuedTo
+        revisions['Issued By'] = rev.IssuedBy
+        revisions['Show'] = rev.Visibility
+
+        data[rev.SequenceNumber] = revisions
+    
+    return data
+
 
 def compare_revisions(host_revisions, link_revisions):
     """Compare Revisions between host and link documents."""
@@ -118,14 +148,13 @@ def compare_values(host_value, link_value):
         return "{} ✅".format(link_value)
 
 #____________________________________________________________________ MAIN
-rev_numbering = check_revision_settings(doc)
-# print(check_revision_settings(doc))
-# print(type(rev_numbering.ToString()))
-if rev_numbering.ToString() == "PerSheet":
+rev_numbering = check_revision_settings(doc).ToString()
+if rev_numbering == "PerSheet":
     TaskDialog.Show(
         __title__, 
         "This tool currently only works with models that have their Revision settings set to 'Per Project'.")
     sys.exit()
+
 
 # Host Data
 host_title = doc.Title
@@ -143,7 +172,7 @@ if not loaded_links:
 # Header
 output_window.print_md("# {action}".format(action=action))
 output_window.print_md("## **Host Model:** `{host_title}`".format(host_title=host_title))
-
+output_window.print_md("**Revision Numbering Settings:** `{rev_numbering}`".format(rev_numbering=rev_numbering))
 
 ### Host table
 host_columns = ["Sequence Number", "Revision Number", "Numbering", "Revision Date", "Description", "Issued", "Issued To", "Issued By", "Show"]
