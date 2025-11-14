@@ -410,7 +410,7 @@
             </GroupBox>
             <!-- CHANGELOG END -->
 <!--FOOTER START-->
-            <TextBlock  Text="FFE-pyRevit Version: 1.7.0 | © FFE Inc. 2025" 
+            <TextBlock  Text="FFE-pyRevit Version: v1.8.1 | © FFE Inc. 2025" 
                             Grid.Column="1"
                             FontSize="14"        Foreground="#95999D" Opacity="0.6"
                             TextWrapping="Wrap"   Grid.Row="3"
