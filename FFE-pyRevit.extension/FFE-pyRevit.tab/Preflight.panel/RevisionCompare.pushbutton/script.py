@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 __title__     = "Revision\nComparison"
-__version__   = 'Version = v1.0'
-__doc__       = """Version = v1.0
+__version__   = 'Version = v1.1'
+__doc__       = """Version = v1.1
 Date    = 11.07.2025
 ________________________________________________________________
 Tested Revit Versions: 
@@ -17,6 +17,7 @@ ______________________________________________________________
 Last update:
  - [11.07.2025] - v1.0 RELEASE
  - [11.10.2025] - v1.0.1 Temporarily updated to handle models set to "Per Sheet".
+ - [11.14.2025] - v1.1 Updated to fully support "Per Sheet" revision numbering.
 ______________________________________________________________
 Author: Kyle Guggenheim"""
 
@@ -65,7 +66,7 @@ def check_revision_settings(document):
     return None
 
 def get_revisions(document):
-    """Get Revisions from the given document."""
+    """Get Revisions from the given document for Per Project numbering."""
     data = OrderedDict()
     rev_collector = FilteredElementCollector(document).OfClass(Revision)
     rev_numbering_sequence = FilteredElementCollector(document).OfClass(RevisionNumberingSequence)
@@ -95,7 +96,7 @@ def get_revisions(document):
     return data
 
 def get_revisions_PerSheet(document):
-    """Get Revisions from the given document."""
+    """Get Revisions from the given document for Per Sheet numbering."""
     data = OrderedDict()
     rev_collector = FilteredElementCollector(document).OfClass(Revision)
     rev_numbering_sequence = FilteredElementCollector(document).OfClass(RevisionNumberingSequence)
@@ -148,82 +149,162 @@ def compare_values(host_value, link_value):
         return "{} ✅".format(link_value)
 
 #____________________________________________________________________ MAIN
-rev_numbering = check_revision_settings(doc).ToString()
-if rev_numbering == "PerSheet":
-    TaskDialog.Show(
-        __title__, 
-        "This tool currently only works with models that have their Revision settings set to 'Per Project'.")
-    sys.exit()
 
+def Main_PerProject():
+    # Host Data
+    host_title = doc.Title
+    host_revisions = get_revisions(doc)
 
-# Host Data
-host_title = doc.Title
-host_revisions = get_revisions(doc)
+    # Link Data
+    link_instances = list(FilteredElementCollector(doc).OfClass(RevitLinkInstance))
+    loaded_links = [(li, li.GetLinkDocument()) for li in link_instances if li.GetLinkDocument()]
 
-# Link Data
-link_instances = list(FilteredElementCollector(doc).OfClass(RevitLinkInstance))
-loaded_links = [(li, li.GetLinkDocument()) for li in link_instances if li.GetLinkDocument()]
+    # Exit if no links found
+    if not loaded_links:
+        TaskDialog.Show(__title__, "No loaded Revit links found in this model.")
+        sys.exit()
 
-# Exit if no links found
-if not loaded_links:
-    TaskDialog.Show(__title__, "No loaded Revit links found in this model.")
-    sys.exit()
+    # Header
+    output_window.print_md("# {action}".format(action=action))
+    output_window.print_md("## **Host Model:** `{host_title}`".format(host_title=host_title))
+    output_window.print_md("**Revision Numbering Settings:** `{rev_numbering}`".format(rev_numbering=rev_numbering))
 
-# Header
-output_window.print_md("# {action}".format(action=action))
-output_window.print_md("## **Host Model:** `{host_title}`".format(host_title=host_title))
-output_window.print_md("**Revision Numbering Settings:** `{rev_numbering}`".format(rev_numbering=rev_numbering))
+    ### Host table
+    host_columns = ["Sequence Number", "Revision Number", "Numbering", "Revision Date", "Description", "Issued", "Issued To", "Issued By", "Show"]
 
-### Host table
-host_columns = ["Sequence Number", "Revision Number", "Numbering", "Revision Date", "Description", "Issued", "Issued To", "Issued By", "Show"]
-
-host_rows = [
-    [v["Sequence Number"], v["Revision Number"], v["Numbering"], v["Revision Date"], v["Description"], v["Issued"], v["Issued To"], v["Issued By"], v["Show"]]
-    for n, v in sorted(host_revisions.items(), key=lambda item: item[0])
-    ]
-
-# Print Host Revisions Table
-output_window.print_table(table_data=host_rows, columns=host_columns, title="Host Revisions ({})".format(len(host_revisions)))
-
-
-### Per-Link
-for li, ldoc in loaded_links:
-    link_name = ldoc.Title
-    output_window.print_md("---")
-    
-    # Link Header
-    output_window.print_md("## Link: `{}`".format(link_name))
-    
-    # Get Link Revisions
-    link_revisions = get_revisions(ldoc)
-    # output_window.print_md("**Link Revisions ({}):**".format(len(link_revisions)))
-
-    # Compute Differences early so we can tag mismatches in the table
-    comparison = compare_revisions(host_revisions, link_revisions)
-    
-
-    link_rows = [
-        [
-            str(compare_values(host_revisions[n]["Sequence Number"] if n in host_revisions.keys() else "None",  v["Sequence Number"])), 
-            compare_values(host_revisions[n]["Revision Number"] if n in host_revisions.keys() else "None",      v["Revision Number"]), 
-            compare_values(host_revisions[n]["Numbering"] if n in host_revisions.keys() else "None",            v["Numbering"]), 
-            compare_values(host_revisions[n]["Revision Date"] if n in host_revisions.keys() else "None",        v["Revision Date"]), 
-            compare_values(host_revisions[n]["Description"] if n in host_revisions.keys() else "None",          v["Description"]), 
-            compare_values(host_revisions[n]["Issued"] if n in host_revisions.keys() else "None",               v["Issued"]), 
-            compare_values(host_revisions[n]["Issued To"] if n in host_revisions.keys() else "None",            v["Issued To"]), 
-            compare_values(host_revisions[n]["Issued By"] if n in host_revisions.keys() else "None",            v["Issued By"]), 
-            compare_values(host_revisions[n]["Show"] if n in host_revisions.keys() else "None",                 v["Show"]), 
-            ]
-        for n, v in sorted(link_revisions.items(), key=lambda item: item[0])
+    host_rows = [
+        [v["Sequence Number"], v["Revision Number"], v["Numbering"], v["Revision Date"], v["Description"], v["Issued"], v["Issued To"], v["Issued By"], v["Show"]]
+        for n, v in sorted(host_revisions.items(), key=lambda item: item[0])
         ]
-    
-    
-    output_window.print_table(table_data=link_rows, columns=host_columns, title="Link Revisions ({})".format(len(link_revisions)))
+
+    # Print Host Revisions Table
+    output_window.print_table(table_data=host_rows, columns=host_columns, title="Host Revisions ({})".format(len(host_revisions)))
+
+
+    ### Per-Link
+    for li, ldoc in loaded_links:
+        link_name = ldoc.Title
+        
+        link_rev_numbering = check_revision_settings(ldoc).ToString()
+        if link_rev_numbering == "PerSheet":
+            output_window.print_md("---")
+            output_window.print_md("## Link: `{}` Revision Settings is set to 'PerSheet'".format(link_name))
+        else:
+            output_window.print_md("---")
+            
+            # Link Header
+            output_window.print_md("## Link: `{}`".format(link_name))
+            
+            # Get Link Revisions
+            link_revisions = get_revisions(ldoc)
+            # output_window.print_md("**Link Revisions ({}):**".format(len(link_revisions)))
+
+            # Compute Differences early so we can tag mismatches in the table
+            comparison = compare_revisions(host_revisions, link_revisions)
+            
+
+            link_rows = [
+                [
+                    str(compare_values(host_revisions[n]["Sequence Number"] if n in host_revisions.keys() else "None",  v["Sequence Number"])), 
+                    compare_values(host_revisions[n]["Revision Number"] if n in host_revisions.keys() else "None",      v["Revision Number"]), 
+                    compare_values(host_revisions[n]["Numbering"] if n in host_revisions.keys() else "None",            v["Numbering"]), 
+                    compare_values(host_revisions[n]["Revision Date"] if n in host_revisions.keys() else "None",        v["Revision Date"]), 
+                    compare_values(host_revisions[n]["Description"] if n in host_revisions.keys() else "None",          v["Description"]), 
+                    compare_values(host_revisions[n]["Issued"] if n in host_revisions.keys() else "None",               v["Issued"]), 
+                    compare_values(host_revisions[n]["Issued To"] if n in host_revisions.keys() else "None",            v["Issued To"]), 
+                    compare_values(host_revisions[n]["Issued By"] if n in host_revisions.keys() else "None",            v["Issued By"]), 
+                    compare_values(host_revisions[n]["Show"] if n in host_revisions.keys() else "None",                 v["Show"]), 
+                    ]
+                for n, v in sorted(link_revisions.items(), key=lambda item: item[0])
+                ]
+            
+            
+            output_window.print_table(table_data=link_rows, columns=host_columns, title="Link Revisions ({}), ({})".format(len(link_revisions), link_rev_numbering))
+
+
+def Main_PerSheet():
+    # Host Data
+    host_title = doc.Title
+    host_revisions = get_revisions_PerSheet(doc)
+
+    # Link Data
+    link_instances = list(FilteredElementCollector(doc).OfClass(RevitLinkInstance))
+    loaded_links = [(li, li.GetLinkDocument()) for li in link_instances if li.GetLinkDocument()]
+
+    # Exit if no links found
+    if not loaded_links:
+        TaskDialog.Show(__title__, "No loaded Revit links found in this model.")
+        sys.exit()
+
+    # Header
+    output_window.print_md("# {action}".format(action=action))
+    output_window.print_md("## **Host Model:** `{host_title}`".format(host_title=host_title))
+    output_window.print_md("**Revision Numbering Settings:** `{rev_numbering}`".format(rev_numbering=rev_numbering))
+
+    ### Host table
+    host_columns = ["Sequence Number", "Numbering", "Revision Date", "Description", "Issued", "Issued To", "Issued By", "Show"]
+
+    host_rows = [
+        [v["Sequence Number"], v["Numbering"], v["Revision Date"], v["Description"], v["Issued"], v["Issued To"], v["Issued By"], v["Show"]]
+        for n, v in sorted(host_revisions.items(), key=lambda item: item[0])
+        ]
+
+    # Print Host Revisions Table
+    output_window.print_table(table_data=host_rows, columns=host_columns, title="Host Revisions ({})".format(len(host_revisions)))
+
+
+    ### Per-Link
+    for li, ldoc in loaded_links:
+        link_name = ldoc.Title
+
+        link_rev_numbering = check_revision_settings(ldoc).ToString()
+        if link_rev_numbering == "PerProject":
+            output_window.print_md("---")
+            output_window.print_md("## Link: `{}` Revision Settings is set to 'PerSheet'".format(link_name))
+        else:
+            output_window.print_md("---")
+            
+            # Link Header
+            output_window.print_md("## Link: `{}`".format(link_name))
+            
+            # Get Link Revisions
+            link_revisions = get_revisions_PerSheet(ldoc)
+            # output_window.print_md("**Link Revisions ({}):**".format(len(link_revisions)))
+
+            # Compute Differences early so we can tag mismatches in the table
+            comparison = compare_revisions(host_revisions, link_revisions)
+            
+
+            link_rows = [
+                [
+                    str(compare_values(host_revisions[n]["Sequence Number"] if n in host_revisions.keys() else "None",  v["Sequence Number"])), 
+                    compare_values(host_revisions[n]["Numbering"] if n in host_revisions.keys() else "None",            v["Numbering"]), 
+                    compare_values(host_revisions[n]["Revision Date"] if n in host_revisions.keys() else "None",        v["Revision Date"]), 
+                    compare_values(host_revisions[n]["Description"] if n in host_revisions.keys() else "None",          v["Description"]), 
+                    compare_values(host_revisions[n]["Issued"] if n in host_revisions.keys() else "None",               v["Issued"]), 
+                    compare_values(host_revisions[n]["Issued To"] if n in host_revisions.keys() else "None",            v["Issued To"]), 
+                    compare_values(host_revisions[n]["Issued By"] if n in host_revisions.keys() else "None",            v["Issued By"]), 
+                    compare_values(host_revisions[n]["Show"] if n in host_revisions.keys() else "None",                 v["Show"]), 
+                    ]
+                for n, v in sorted(link_revisions.items(), key=lambda item: item[0])
+                ]
+            
+            
+            output_window.print_table(table_data=link_rows, columns=host_columns, title="Link Revisions ({}), ({})".format(len(link_revisions), link_rev_numbering))
 
 
 
 #____________________________________________________________________ RUN
-
+# Check Revision Settings
+rev_numbering = check_revision_settings(doc).ToString()
+if rev_numbering == "PerSheet":
+    Main_PerSheet()
+else:
+    Main_PerProject()
+    # TaskDialog.Show(
+    #     __title__, 
+    #     "This tool currently only works with models that have their Revision settings set to 'Per Project'.")
+    # sys.exit()
 
 
 log_status = "Success"
