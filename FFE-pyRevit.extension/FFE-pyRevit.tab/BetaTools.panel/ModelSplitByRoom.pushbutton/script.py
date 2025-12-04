@@ -35,32 +35,12 @@ Last update:
 ___________________________________________________________________
 Author: Kyle Guggenheim"""
 
-"""
-Split current model into a per-SEPS-Code layout model.
 
-Workflow:
-1. Assumes a project/shared parameter "SEPS Code" exists on:
-   - Rooms
-   - Views (including schedules)
-   - Sheets
-   - (Optionally) model elements you want to tag per layout
-2. Reads all distinct SEPS Codes from Rooms.
-3. Lets user pick one SEPS Code.
-4. Prompts user for a target .rvt file name.
-5. Saves current document as that file (Save As).
-6. In the newly saved model, deletes all elements that DO NOT belong
-   to that SEPS layout.
-
-Belonging to the layout is defined as:
-- element has "SEPS Code" == selected code, OR
-- element's bounding box intersects the union bounding box of
-  all Rooms whose "SEPS Code" == selected code.
-"""
-
+#____________________________________________________________________ IMPORTS (PYREVIT)
 from pyrevit import revit, DB, forms, script
 
-# ---------------- CONFIGURATION -------------------------------------------
 
+#____________________________________________________________________ CONSTANTS
 # Name of the shared / project parameter used for grouping.
 SEPS_PARAM_NAME = "SEPS Code"
 
@@ -93,8 +73,7 @@ USE_ROOM_BBOX_FILTER = True
 ROOM_BBOX_BUFFER_FT = 1.0
 
 
-# ---------------- HELPERS --------------------------------------------------
-
+#____________________________________________________________________ FUNCTIONS
 
 def get_param_str(elem, param_name):
     """Return the string value of a parameter by name, or None."""
@@ -217,7 +196,7 @@ def element_belongs_to_layout(elem, seps_code, layout_min, layout_max):
     return False
 
 
-# ---------------- MAIN LOGIC -----------------------------------------------
+#____________________________________________________________________ MAIN
 
 doc = revit.doc
 logger = script.get_logger()
@@ -271,10 +250,12 @@ save_options.OverwriteExistingFile = True
 logger.info("Saving new SEPS layout model to: {}".format(save_path))
 doc.SaveAs(save_path, save_options)
 
+
 # ----------------------------------------------------------------------------
 # After SaveAs, we are now operating on the NEW file.
 # Delete everything that does not belong to the chosen SEPS layout.
 # ----------------------------------------------------------------------------
+
 
 from System.Collections.Generic import List as DotNetList
 
