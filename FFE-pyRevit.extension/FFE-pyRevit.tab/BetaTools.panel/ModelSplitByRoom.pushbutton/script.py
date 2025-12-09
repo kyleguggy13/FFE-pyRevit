@@ -101,15 +101,23 @@ def element_has_seps(elem, seps_code):
 
 def collect_seps_codes_from_rooms(doc):
     """Collect distinct non-empty SEPS Codes from Rooms."""
-    rooms = (DB.FilteredElementCollector(doc)
-             .OfCategory(DB.BuiltInCategory.OST_Rooms)
-             .WhereElementIsNotElementType())
+    rooms = (DB.FilteredElementCollector(doc).OfCategory(DB.BuiltInCategory.OST_Rooms).WhereElementIsNotElementType())
     keys = set()
     for r in rooms:
         val = get_param_str(r, SEPS_PARAM_NAME)
         if val:
             keys.add(val.strip())
     return sorted(keys)
+
+def collect_seps_codes_from_sheets(doc):
+    """Collect distinct non-empty SEPS Codes from sheets."""
+    sheets = DB.FilteredElementCollector(doc).OfClass(DB.ViewSheet)
+    codes = set()
+    for s in sheets:
+        val = get_param_str(s, SEPS_PARAM_NAME)
+        if val:
+            codes.add(val.strip())
+    return sorted(codes)
 
 
 def get_layout_bbox_from_rooms(doc, seps_code, buffer_ft=1.0):
@@ -284,18 +292,14 @@ for s in sheets_collector:
         to_delete.Add(s.Id)
 
 # 7. Prune rooms
-rooms_collector = (DB.FilteredElementCollector(doc)
-                   .OfCategory(DB.BuiltInCategory.OST_Rooms)
-                   .WhereElementIsNotElementType())
+rooms_collector = (DB.FilteredElementCollector(doc).OfCategory(DB.BuiltInCategory.OST_Rooms).WhereElementIsNotElementType())
 for r in rooms_collector:
     if not element_belongs_to_layout(r, seps_code, layout_min, layout_max):
         to_delete.Add(r.Id)
 
 # 8. Prune model instance elements in configured categories
 for bic in MODEL_INSTANCE_CATEGORIES:
-    elems = (DB.FilteredElementCollector(doc)
-             .OfCategory(bic)
-             .WhereElementIsNotElementType())
+    elems = (DB.FilteredElementCollector(doc).OfCategory(bic).WhereElementIsNotElementType())
     for e in elems:
         if not element_belongs_to_layout(e, seps_code, layout_min, layout_max):
             to_delete.Add(e.Id)
