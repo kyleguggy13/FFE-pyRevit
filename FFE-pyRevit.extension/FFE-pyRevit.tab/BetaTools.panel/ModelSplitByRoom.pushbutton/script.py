@@ -73,6 +73,10 @@ USE_ROOM_BBOX_FILTER = True
 ROOM_BBOX_BUFFER_FT = 1.0
 
 
+#____________________________________________________________________ VARIABLES
+output = script.get_output()
+
+
 #____________________________________________________________________ FUNCTIONS
 
 def get_param_str(elem, param_name):
@@ -99,15 +103,16 @@ def element_has_seps(elem, seps_code):
     return val.strip() == seps_code.strip()
 
 
-def collect_seps_codes_from_rooms(doc):
-    """Collect distinct non-empty SEPS Codes from Rooms."""
-    rooms = (DB.FilteredElementCollector(doc).OfCategory(DB.BuiltInCategory.OST_Rooms).WhereElementIsNotElementType())
-    keys = set()
-    for r in rooms:
-        val = get_param_str(r, SEPS_PARAM_NAME)
-        if val:
-            keys.add(val.strip())
-    return sorted(keys)
+# def collect_seps_codes_from_rooms(doc):
+#     """Collect distinct non-empty SEPS Codes from Rooms."""
+#     rooms = (DB.FilteredElementCollector(doc).OfCategory(DB.BuiltInCategory.OST_Rooms).WhereElementIsNotElementType())
+#     keys = set()
+#     for r in rooms:
+#         val = get_param_str(r, SEPS_PARAM_NAME)
+#         if val:
+#             keys.add(val.strip())
+#     return sorted(keys)
+
 
 def collect_seps_codes_from_sheets(doc):
     """Collect distinct non-empty SEPS Codes from sheets."""
@@ -118,6 +123,38 @@ def collect_seps_codes_from_sheets(doc):
         if val:
             codes.add(val.strip())
     return sorted(codes)
+
+
+
+def get_scopebox_bbox(doc, seps_code, buffer_ft=1.0):
+    """
+    Get bounding box (XYZ min, XYZ max) of Scope Box tagged with SEPS Code.
+    Returns (min_xyz, max_xyz) or (None, None) if not found.
+    """
+    scopeboxes = (DB.FilteredElementCollector(doc)
+                  .OfClass(DB.VolumeOfInterest)
+                  .WhereElementIsNotElementType())
+    
+    # Find scope box with matching SEPS Code in Name parameter
+    for sb in scopeboxes:
+        name_param = sb.LookupParameter("Name")
+        if name_param and name_param.HasValue:
+            name_val = name_param.AsString()
+            if name_val and name_val.strip() == seps_code.strip():
+                bb = sb.get_BoundingBox(None)
+                if not bb:
+                    continue
+                min_pt = bb.Min
+                max_pt = bb.Max
+
+                # Expand by buffer in XY; small buffer in Z
+                buf = buffer_ft
+                min_pt = DB.XYZ(min_pt.X - buf, min_pt.Y - buf, min_pt.Z - buf)
+                max_pt = DB.XYZ(max_pt.X + buf, max_pt.Y + buf, max_pt.Z + buf)
+
+                output.print_md(min_pt, max_pt)
+
+                return min_pt, max_pt
 
 
 def get_layout_bbox_from_rooms(doc, seps_code, buffer_ft=1.0):
@@ -207,10 +244,11 @@ def element_belongs_to_layout(elem, seps_code, layout_min, layout_max):
 #____________________________________________________________________ MAIN
 
 doc = revit.doc
-logger = script.get_logger()
+logger = script.get_logger() # Logger for output messages
 
 # 1. Collect SEPS Codes from rooms
-seps_codes = collect_seps_codes_from_rooms(doc)
+# seps_codes = collect_seps_codes_from_rooms(doc)
+seps_codes = collect_seps_codes_from_sheets(doc)
 
 if not seps_codes:
     forms.alert(
@@ -237,9 +275,12 @@ seps_code = selected_code
 # 3. Compute bounding box of Rooms for that SEPS Code (for spatial filtering)
 layout_min, layout_max = (None, None)
 if USE_ROOM_BBOX_FILTER:
-    layout_min, layout_max = get_layout_bbox_from_rooms(
+    layout_min, layout_max = get_scopebox_bbox(
         doc, seps_code, ROOM_BBOX_BUFFER_FT
     )
+    # layout_min, layout_max = get_layout_bbox_from_rooms(
+    #     doc, seps_code, ROOM_BBOX_BUFFER_FT
+    # )
 
 # 4. Prompt for Save As path
 default_filename = "{}_{}.rvt".format(doc.Title, seps_code)
