@@ -38,6 +38,7 @@ Author: Kyle Guggenheim"""
 
 #____________________________________________________________________ IMPORTS (AUTODESK)
 from logging import Filter
+
 from Autodesk.Revit.DB import *
 from Autodesk.Revit.DB import Transaction, TransactionGroup, FilteredElementCollector
 
@@ -249,12 +250,12 @@ def element_belongs_to_layout(elem, seps_code, layout_min, layout_max):
     return False
 
 
-def centralmodel(doc):
-    """ Get the central model path as string """
-    from Autodesk.Revit.DB import ModelPathUtils
-    central_model = doc.GetWorksharingCentralModelPath()
-    path_string = ModelPathUtils.ConvertModelPathToUserVisiblePath(central_model)
-    return path_string
+# def centralmodel(doc):
+#     """ Get the central model path as string """
+#     from Autodesk.Revit.DB import ModelPathUtils
+#     central_model = doc.GetWorksharingCentralModelPath()
+#     path_string = ModelPathUtils.ConvertModelPathToUserVisiblePath(central_model)
+#     return path_string
 
 
 #____________________________________________________________________ MAIN
@@ -263,10 +264,9 @@ doc = revit.doc
 logger = script.get_logger() # Logger for output messages
 
 ### PRINT CENTRAL MODEL PATH FOR DEBUGGING ###
-output_window.print_md(centralmodel(doc))
+# output_window.print_md(centralmodel(doc))
 
-# 1. Collect SEPS Codes from rooms
-# seps_codes = collect_seps_codes_from_rooms(doc)
+# 1. Collect SEPS Codes from Sheets
 seps_codes = collect_seps_codes_from_sheets(doc)
 
 if not seps_codes:
@@ -299,7 +299,7 @@ if USE_SCOPEBOX_FILTER:
 
 
 # 4. Prompt for Save As path
-# default_filename = "{}_{}.rvt".format(doc.Title, seps_code)
+### To-Do: wrap in try to catch workshared model vs non-workshared model
 default_filename = "{}.rvt".format(seps_code)
 save_path = forms.save_file(
     file_ext="rvt",
@@ -313,9 +313,12 @@ if not save_path:
 save_options = DB.SaveAsOptions()
 save_options.OverwriteExistingFile = True
 
+# ws_options = DB.WorksharingSaveAsOptions()
+# ws_options.SaveAsCentral = False
+# save_options.SetWorksharingOptions(ws_options)
+
 logger.info("Saving new SEPS layout model to: {}".format(save_path))
 doc.SaveAs(save_path, save_options)
-
 
 output_window.print_md("Model saved to: **{}**".format(save_path))
 
@@ -326,22 +329,19 @@ output_window.print_md("Model saved to: **{}**".format(save_path))
 
 doc = revit.doc
 
-### PRINT CENTRAL MODEL PATH FOR DEBUGGING ###
-output_window.print_md(centralmodel(doc))
-
 
 from System.Collections.Generic import List as DotNetList
 
-# tgroup = TransactionGroup(doc, "Prune to SEPS Layout: {}".format(seps_code))
-# tgroup.Start()
+tgroup = TransactionGroup(doc, "Prune to SEPS Layout: {}".format(seps_code))
+tgroup.Start()
 
-to_delete = DotNetList[DB.ElementId]()
-to_not_delete = DotNetList[DB.ElementId]()
+to_delete       = DotNetList[DB.ElementId]()
+to_not_delete   = DotNetList[DB.ElementId]()
 
 
 # 5. Collect Starting View for protecting
-legend_collector = [v for v in FilteredElementCollector(doc).OfClass(View).ToElements() if v.ViewType.ToString() == "Legend"]
-StartingView = FilteredElementCollector(doc).OfClass(View)
+legend_collector    = [v for v in FilteredElementCollector(doc).OfClass(View).ToElements() if v.ViewType.ToString() == "Legend"]
+StartingView        = FilteredElementCollector(doc).OfClass(View)
 for l in legend_collector:
     if l.Name == "Starting View":
         to_not_delete.Add(l.Id)
@@ -349,24 +349,39 @@ for l in legend_collector:
 
 # 6. Prune sheets
 sheet_collector = FilteredElementCollector(doc).OfClass(ViewSheet)
+to_delete_sheets = []
 for s in sheet_collector:
-    if not element_belongs_to_layout(s, seps_code, layout_min, layout_max):
-        to_delete.Add(s.Id)
+    s_param = s.LookupParameter("SEPS Code")
+    if s_param and s_param.HasValue:
+        s_val = s_param.AsString()
+        if s_val.strip() != seps_code.strip():
+            to_delete.Add(s.Id)
+            to_delete_sheets.append(s.Id)
+    # if not element_belongs_to_layout(s, seps_code, layout_min, layout_max):
+    #     to_delete.Add(s.Id)
 
 
 
 # 7. Prune views (including schedules)
 view_collector = FilteredElementCollector(doc).OfClass(View)
+to_delete_views = []
 for v in view_collector:
     if v.IsTemplate:
         # You may or may not want to keep templates; currently we delete those
         # that are not tagged with the selected SEPS Code.
-        if not element_belongs_to_layout(v, seps_code, layout_min, layout_max):
-            to_delete.Add(v.Id)
+        # if not element_belongs_to_layout(v, seps_code, layout_min, layout_max):
+        #     to_delete.Add(v.Id)
         continue
+    
+    v_param = v.LookupParameter("SEPS Code")
+    if v_param and v_param.HasValue:
+        v_val = v_param.AsString()
+        if v_val.strip() != seps_code.strip():
+            to_delete.Add(v.Id)
+            to_delete_views.append(v.Id)
 
-    if not element_belongs_to_layout(v, seps_code, layout_min, layout_max):
-        to_delete.Add(v.Id)
+    # if not element_belongs_to_layout(v, seps_code, layout_min, layout_max):
+    #     to_delete.Add(v.Id)
 
 """
 # 8. Prune rooms
@@ -384,14 +399,24 @@ for bic in MODEL_INSTANCE_CATEGORIES:
             to_delete.Add(e.Id)
 """
 
-"""
+#____________________________________________________ DEBUGGING OUTPUT
+output_window.print_md("### DEBUG INFO:")
+output_window.print_md("- Selected SEPS Code: **{}**".format(seps_code))
+output_window.print_md("- Layout BBox Min: **{}**".format(layout_min))
+output_window.print_md("- Layout BBox Max: **{}**".format(layout_max))
+output_window.print_md("- Elements to Delete: **{}**".format(to_delete.Count))
+output_window.print_md("- Elements to Delete (Sheets): **{}**".format(len(to_delete_sheets)))
+output_window.print_md("- Elements to Delete (Views): **{}**".format(len(to_delete_views)))
+output_window.print_md("- Elements to Keep: **{}**".format(to_not_delete.Count))
+output_window.print_md("---")
+
+
 # 10. Execute deletions
 if to_delete.Count > 0:
     t = Transaction(doc, "Delete Non-SEPS Elements")
     t.Start()
     try:
-        logger.info("Deleting {} elements not in SEPS layout '{}'"
-                    .format(to_delete.Count, seps_code))
+        logger.info("Deleting {} elements not in SEPS layout '{}'".format(to_delete.Count, seps_code))
         doc.Delete(to_delete)
         t.Commit()
     except Exception as ex:
@@ -401,22 +426,13 @@ if to_delete.Count > 0:
 # 11. Complete transaction group
 # tgroup.Assimilate()
 tgroup.Commit()
-"""
 
-#____________________________________________________ DEBUGGING OUTPUT
-output_window.print_md("### DEBUG INFO:")
-output_window.print_md("- Selected SEPS Code: **{}**".format(seps_code))
-output_window.print_md("- Layout BBox Min: **{}**".format(layout_min))
-output_window.print_md("- Layout BBox Max: **{}**".format(layout_max))
-output_window.print_md("- Elements to Delete: **{}**".format(to_delete.Count))
-output_window.print_md("- Elements to Keep: **{}**".format(to_not_delete.Count))
-output_window.print_md("---")
 
 
 
 #____________________________________________________ COMPLETED
-# forms.alert(
-#     "SEPS layout '{0}' exported.\nNew model saved to:\n{1}".format(
-#         seps_code, save_path),
-#     title="Split by SEPS Code"
-# )
+forms.alert(
+    "SEPS layout '{0}' exported.\nNew model saved to:\n{1}".format(
+        seps_code, save_path),
+    title="Split by SEPS Code"
+)
