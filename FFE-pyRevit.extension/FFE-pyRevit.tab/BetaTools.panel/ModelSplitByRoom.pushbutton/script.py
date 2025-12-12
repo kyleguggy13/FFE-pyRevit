@@ -8,22 +8,25 @@ Description:
 Split current model into a per-SEPS-Code layout model.
 
 Workflow:
-1. Assumes a project/shared parameter "SEPS Code" exists on:
+1. Open Revit model detached and discard worksets.
+2. Run this script.
+3. Assumes a project/shared parameter "SEPS Code" exists on:
    - Rooms
    - Views (including schedules)
    - Sheets
    - (Optionally) model elements you want to tag per layout
-2. Reads all distinct SEPS Codes from Rooms.
-3. Lets user pick one SEPS Code.
-4. Prompts user for a target .rvt file name.
-5. Saves current document as that file (Save As).
-6. In the newly saved model, deletes all elements that DO NOT belong
+4. Reads all distinct SEPS Codes from Sheets.
+5. Lets user pick one SEPS Code.
+6. Prompts user for a target .rvt file name.
+7. Saves current document as that file (Save As).
+8. In the newly saved model, deletes all elements that DO NOT belong
    to that SEPS layout.
 
 Belonging to the layout is defined as:
-- element has "SEPS Code" == selected code, OR
-- element's bounding box intersects the union bounding box of
-  all Rooms whose "SEPS Code" == selected code.
+- Sheet has "SEPS Code" == selected code.
+- View is on a Sheet with "SEPS Code" == selected code.
+- Element's bounding box intersects the bounding box of the Scope
+  Box whose "SEPS Code" == selected code.
 ___________________________________________________________________
 How-to:
 -> Click on the button
@@ -114,17 +117,6 @@ def element_has_seps(elem, seps_code):
     return val.strip() == seps_code.strip()
 
 
-# def collect_seps_codes_from_rooms(doc):
-#     """Collect distinct non-empty SEPS Codes from Rooms."""
-#     rooms = (DB.FilteredElementCollector(doc).OfCategory(DB.BuiltInCategory.OST_Rooms).WhereElementIsNotElementType())
-#     keys = set()
-#     for r in rooms:
-#         val = get_param_str(r, SEPS_PARAM_NAME)
-#         if val:
-#             keys.add(val.strip())
-#     return sorted(keys)
-
-
 def collect_seps_codes_from_sheets(doc):
     """Collect distinct non-empty SEPS Codes from sheets."""
     sheets = FilteredElementCollector(doc).OfClass(ViewSheet)
@@ -134,7 +126,6 @@ def collect_seps_codes_from_sheets(doc):
         if val:
             codes.add(val.strip())
     return sorted(codes)
-
 
 
 def get_scopebox_bbox(doc, seps_code, buffer_ft=1.0):
@@ -371,6 +362,8 @@ for v in view_collector:
         # that are not tagged with the selected SEPS Code.
         # if not element_belongs_to_layout(v, seps_code, layout_min, layout_max):
         #     to_delete.Add(v.Id)
+        continue
+    if v.ViewType.ToString() == "DrawingSheet":
         continue
     
     v_param = v.LookupParameter("SEPS Code")
