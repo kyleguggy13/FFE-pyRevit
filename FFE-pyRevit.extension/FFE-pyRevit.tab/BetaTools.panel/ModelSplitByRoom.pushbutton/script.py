@@ -327,15 +327,15 @@ tgroup = TransactionGroup(doc, "Prune to SEPS Layout: {}".format(seps_code))
 tgroup.Start()
 
 to_delete       = DotNetList[DB.ElementId]()
-to_not_delete   = DotNetList[DB.ElementId]()
+# to_not_delete   = DotNetList[DB.ElementId]()
 
 
 # 5. Collect Starting View for protecting
-legend_collector    = [v for v in FilteredElementCollector(doc).OfClass(View).ToElements() if v.ViewType.ToString() == "Legend"]
-StartingView        = FilteredElementCollector(doc).OfClass(View)
-for l in legend_collector:
-    if l.Name == "Starting View":
-        to_not_delete.Add(l.Id)
+# legend_collector    = [v for v in FilteredElementCollector(doc).OfClass(View).ToElements() if v.ViewType.ToString() == "Legend"]
+# StartingView        = FilteredElementCollector(doc).OfClass(View)
+# for l in legend_collector:
+#     if l.Name == "Starting View":
+#         to_not_delete.Add(l.Id)
 
 
 # 6. Prune sheets
@@ -348,33 +348,31 @@ for s in sheet_collector:
         if s_val.strip() != seps_code.strip():
             to_delete.Add(s.Id)
             to_delete_sheets.append(s.Id)
-    # if not element_belongs_to_layout(s, seps_code, layout_min, layout_max):
-    #     to_delete.Add(s.Id)
 
 
 
 # 7. Prune views (including schedules)
 view_collector = FilteredElementCollector(doc).OfClass(View)
+filteredViewTypes = [
+	"CostReport","Internal","LoadsReport",
+    "PresureLossReport","ProjectBrowser","Report",
+	"SystemBrowser","SystemsAnalysisReport","Undefined", "DrawingSheet"
+	]
 to_delete_views = []
 for v in view_collector:
-    if v.IsTemplate:
-        # You may or may not want to keep templates; currently we delete those
-        # that are not tagged with the selected SEPS Code.
-        # if not element_belongs_to_layout(v, seps_code, layout_min, layout_max):
-        #     to_delete.Add(v.Id)
-        continue
-    if v.ViewType.ToString() == "DrawingSheet":
-        continue
-    
-    v_param = v.LookupParameter("SEPS Code")
-    if v_param and v_param.HasValue:
-        v_val = v_param.AsString()
-        if v_val.strip() != seps_code.strip():
-            to_delete.Add(v.Id)
-            to_delete_views.append(v.Id)
+    if not v.IsTemplate:                                        # Exclude template views
+        if v.ViewType.ToString() not in filteredViewTypes:      # Exclude certain view types
+            if v.Name != "Starting View":                       # Exclude "Starting View"
+                v_param = v.LookupParameter("SEPS Code")
+                if v_param and v_param.HasValue:                # Check SEPS Code parameter
+                    v_val = v_param.AsString()
+                    if v_val.strip() != seps_code.strip():      # If SEPS Code does not match
+                        to_delete.Add(v.Id)
+                        to_delete_views.append(v.Id)
+                else:
+                    to_delete.Add(v.Id)
+                    to_delete_views.append(v.Id)
 
-    # if not element_belongs_to_layout(v, seps_code, layout_min, layout_max):
-    #     to_delete.Add(v.Id)
 
 """
 # 8. Prune rooms
@@ -400,7 +398,7 @@ output_window.print_md("- Layout BBox Max: **{}**".format(layout_max))
 output_window.print_md("- Elements to Delete: **{}**".format(to_delete.Count))
 output_window.print_md("- Elements to Delete (Sheets): **{}**".format(len(to_delete_sheets)))
 output_window.print_md("- Elements to Delete (Views): **{}**".format(len(to_delete_views)))
-output_window.print_md("- Elements to Keep: **{}**".format(to_not_delete.Count))
+# output_window.print_md("- Elements to Keep: **{}**".format(to_not_delete.Count))
 output_window.print_md("---")
 
 
