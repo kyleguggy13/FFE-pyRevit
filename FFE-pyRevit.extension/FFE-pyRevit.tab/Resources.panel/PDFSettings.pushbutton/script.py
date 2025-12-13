@@ -40,15 +40,7 @@ from Autodesk.Revit.DB import (
 clr.AddReference("RevitServices")
 from RevitServices.Persistence import DocumentManager
 
-# Optional: pyRevit console (kept minimal per request; no sheet names)
-# try:
-#     from pyrevit import script
-#     out = script.get_output()
-#     print_md = out.print_md
-# except Exception:
-#     def print_md(x): print(x)
 
-# doc = DocumentManager.Instance.CurrentDBDocument
 
 #____________________________________________________________________ IMPORTS (PYREVIT)
 from pyrevit import revit, DB
