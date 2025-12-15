@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
-__title__     = "Model Split By Room"
+__title__     = "Design Guide \nModel Splitter"
 __version__   = 'Version = v1.0'
 __doc__       = """Version = v1.0
 Date    = 12.15.2025
-___________________________________________________________________
+_________________________________________________________________
 Description:
 Split current model into a per-SEPS-Code layout model.
 
-___________________________________________________________________
+_________________________________________________________________
 How-to:
 1. Open Revit model detached and discard worksets.
 2. Run this script.
@@ -28,11 +28,11 @@ Belonging to the layout is defined as:
 - View/Schedule has "SEPS Code" == selected code.
 - Element's bounding box intersects the bounding box of the Scope
   Box whose "SEPS Code" == selected code.
-___________________________________________________________________
+_________________________________________________________________
 Last update:
 - [12.01.2025] - v0.1 BETA RELEASE
 - [12.15.2025] - v1.0 RELEASE
-___________________________________________________________________
+_________________________________________________________________
 Author: Kyle Guggenheim"""
 
 
@@ -80,11 +80,9 @@ MODEL_INSTANCE_CATEGORIES = [
 # Use room bounding boxes to keep geometry that sits inside the layout area
 # even if the elements do not have a SEPS Code parameter.
 USE_SCOPEBOX_FILTER = True
-# USE_ROOM_BBOX_FILTER = True
 
 # Buffer around room bounding box, in feet
 SCOPEBOX_BBOX_BUFFER_FT = 1.0
-# ROOM_BBOX_BUFFER_FT = 1.0
 
 #____________________________________________________________________ VARIABLES
 output_window = output.get_output()
@@ -156,48 +154,6 @@ def get_scopebox_bbox(doc, seps_code, buffer_ft=1.0):
                 return min_pt, max_pt
 
 
-def get_layout_bbox_from_rooms(doc, seps_code, buffer_ft=1.0):
-    """
-    Get a union bounding box (XYZ min, XYZ max) of all Rooms with the SEPS Code.
-    Returns (min_xyz, max_xyz) or (None, None) if no rooms found.
-    """
-    rooms = (DB.FilteredElementCollector(doc)
-             .OfCategory(DB.BuiltInCategory.OST_Rooms)
-             .WhereElementIsNotElementType())
-
-    bbox_min = None
-    bbox_max = None
-
-    for r in rooms:
-        if not element_has_seps(r, seps_code):
-            continue
-        bb = r.get_BoundingBox(None)
-        if not bb:
-            continue
-        min_pt = bb.Min
-        max_pt = bb.Max
-
-        if bbox_min is None:
-            bbox_min = DB.XYZ(min_pt.X, min_pt.Y, min_pt.Z)
-            bbox_max = DB.XYZ(max_pt.X, max_pt.Y, max_pt.Z)
-        else:
-            bbox_min = DB.XYZ(min(bbox_min.X, min_pt.X),
-                              min(bbox_min.Y, min_pt.Y),
-                              min(bbox_min.Z, min_pt.Z))
-            bbox_max = DB.XYZ(max(bbox_max.X, max_pt.X),
-                              max(bbox_max.Y, max_pt.Y),
-                              max(bbox_max.Z, max_pt.Z))
-
-    if bbox_min is None or bbox_max is None:
-        return None, None
-
-    # Expand by buffer in XY; small buffer in Z
-    buf = buffer_ft
-    bbox_min = DB.XYZ(bbox_min.X - buf, bbox_min.Y - buf, bbox_min.Z - buf)
-    bbox_max = DB.XYZ(bbox_max.X + buf, bbox_max.Y + buf, bbox_max.Z + buf)
-
-    return bbox_min, bbox_max
-
 
 def bbox_intersects(elem_bbox, layout_min, layout_max):
     """Simple AABB intersection test in model coordinates."""
@@ -253,8 +209,6 @@ def element_belongs_to_layout(elem, seps_code, layout_min, layout_max):
 doc = revit.doc
 logger = script.get_logger() # Logger for output messages
 
-### PRINT CENTRAL MODEL PATH FOR DEBUGGING ###
-# output_window.print_md(centralmodel(doc))
 
 # 1. Collect SEPS Codes from Sheets
 seps_codes = collect_seps_codes_from_sheets(doc)
@@ -289,7 +243,16 @@ if USE_SCOPEBOX_FILTER:
 
 
 # 4. Prompt for Save As path
-### To-Do: wrap in try to catch workshared model vs non-workshared model
+# Checl if model is workshared
+if doc.IsWorkshared:
+    forms.alert(
+        "This model is workshared.\n"
+        "Please detach the model and discard worksets before running this script.",
+        title="Split by SEPS Code",
+        exitscript=True
+    )
+
+# Set default filename based on selected SEPS Code
 default_filename = "{}.rvt".format(seps_code)
 save_path = forms.save_file(
     file_ext="rvt",
@@ -297,16 +260,15 @@ save_path = forms.save_file(
     title="Save SEPS Layout Model As"
 )
 
+# Exit if user cancels the save dialog
 if not save_path:
     script.exit()
 
+# Set save options
 save_options = DB.SaveAsOptions()
 save_options.OverwriteExistingFile = True
 
-# ws_options = DB.WorksharingSaveAsOptions()
-# ws_options.SaveAsCentral = False
-# save_options.SetWorksharingOptions(ws_options)
-
+# Save the document as a new file
 logger.info("Saving new SEPS layout model to: {}".format(save_path))
 doc.SaveAs(save_path, save_options)
 
@@ -326,18 +288,9 @@ tgroup = TransactionGroup(doc, "Prune to SEPS Layout: {}".format(seps_code))
 tgroup.Start()
 
 to_delete       = DotNetList[DB.ElementId]()
-# to_not_delete   = DotNetList[DB.ElementId]()
 
 
-# 5. Collect Starting View for protecting
-# legend_collector    = [v for v in FilteredElementCollector(doc).OfClass(View).ToElements() if v.ViewType.ToString() == "Legend"]
-# StartingView        = FilteredElementCollector(doc).OfClass(View)
-# for l in legend_collector:
-#     if l.Name == "Starting View":
-#         to_not_delete.Add(l.Id)
-
-
-# 6. Prune sheets
+# 5. Prune sheets
 sheet_collector = FilteredElementCollector(doc).OfClass(ViewSheet)
 sheets = []
 to_delete_sheets = []
@@ -352,9 +305,7 @@ for s in sheet_collector:
             sheets.append(s.Id)
 
 
-
-
-# 7. Prune views (including schedules)
+# 6. Prune views (including schedules)
 view_collector = FilteredElementCollector(doc).OfClass(View)
 filteredViewTypes = [
 	"CostReport","Internal","LoadsReport",
@@ -402,14 +353,14 @@ for v in view_collector:
 
 
 
-# 8. Prune rooms
+# 7. Prune rooms
 rooms_collector = (DB.FilteredElementCollector(doc).OfCategory(DB.BuiltInCategory.OST_Rooms).WhereElementIsNotElementType())
 for r in rooms_collector:
     if not element_belongs_to_layout(r, seps_code, layout_min, layout_max):
         to_delete.Add(r.Id)
 
 
-# 9. Prune model instance elements in configured categories
+# 8. Prune model instance elements in configured categories
 to_delete_elements = []
 for bic in MODEL_INSTANCE_CATEGORIES:
     elems = (DB.FilteredElementCollector(doc).OfCategory(bic).WhereElementIsNotElementType())
@@ -431,7 +382,7 @@ output_window.print_md("- Elements to Delete (Elements): **{}**".format(len(to_d
 output_window.print_md("---")
 
 
-# 10. Execute deletions
+# 9. Execute deletions
 if to_delete.Count > 0:
     t = Transaction(doc, "Delete Non-SEPS Elements")
     t.Start()
@@ -443,7 +394,7 @@ if to_delete.Count > 0:
         logger.error("Error deleting elements: {}".format(ex))
         t.RollBack()
 
-# 11. Complete transaction group
+# 10. Complete transaction group
 # tgroup.Assimilate()
 tgroup.Commit()
 
