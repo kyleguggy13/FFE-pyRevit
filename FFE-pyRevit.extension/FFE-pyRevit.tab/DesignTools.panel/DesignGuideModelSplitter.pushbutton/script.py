@@ -181,7 +181,6 @@ def get_scopebox_bbox(doc, seps_code, buffer_ft=1.0):
                 # min_pt = DB.XYZ(min_pt.X - buf, min_pt.Y - buf, min_pt.Z - buf)
                 # max_pt = DB.XYZ(max_pt.X + buf, max_pt.Y + buf, max_pt.Z + buf)
 
-                # output.print_md([min_pt, max_pt])
 
                 return min_pt, max_pt
 
@@ -319,7 +318,7 @@ from System.Collections.Generic import List as DotNetList
 tgroup = TransactionGroup(doc, "Prune to SEPS Layout: {}".format(seps_code))
 tgroup.Start()
 
-to_delete       = DotNetList[DB.ElementId]()
+to_delete = DotNetList[DB.ElementId]()
 
 
 # 5. Prune sheets
