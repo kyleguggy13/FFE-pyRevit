@@ -44,7 +44,7 @@ from Autodesk.Revit.DB import Transaction, TransactionGroup, FilteredElementColl
 
 
 #____________________________________________________________________ IMPORTS (PYREVIT)
-from pyrevit import revit, DB, forms, script
+from pyrevit import revit, DB, forms, script, HOST_APP
 
 from pyrevit.script import output
 
@@ -87,8 +87,37 @@ SCOPEBOX_BBOX_BUFFER_FT = 1.0
 #____________________________________________________________________ VARIABLES
 output_window = output.get_output()
 
+#____________________________________________________________________ OPEN DETACHED
+# OpenAndActivateDocument and detach
+
+doc = revit.doc
+output = script.get_output()
+output.close_others()
+
+app = HOST_APP.uiapp
+
+open_options = DB.OpenOptions()
+open_options.DetachFromCentralOption = DB.DetachFromCentralOption.DetachAndDiscardWorksets
+
+try:
+    file = forms.pick_file()
+    if file:
+        if file.endswith(".rvt"):
+            model_path = DB.ModelPathUtils.ConvertUserVisiblePathToModelPath(
+                file)
+            document = app.OpenAndActivateDocument(
+                model_path, open_options, False)
+            output.print_md('### Open and detach from central (discard worksets)')
+            output.print_md(
+                "- Document **{}** processed".format(file.split("\\")[-1]))
+        else:
+            pass
+except Exception as e:
+    print(e)
+
 
 #____________________________________________________________________ FUNCTIONS
+
 
 def get_param_str(elem, param_name):
     """Return the string value of a parameter by name, or None."""
@@ -272,7 +301,7 @@ save_options.OverwriteExistingFile = True
 logger.info("Saving new SEPS layout model to: {}".format(save_path))
 doc.SaveAs(save_path, save_options)
 
-output_window.print_md("Model saved to: **{}**".format(save_path))
+output_window.print_md("- Model saved to: **{}**".format(save_path))
 
 # ----------------------------------------------------------------------------
 # After SaveAs, we are now operating on the NEW file.
