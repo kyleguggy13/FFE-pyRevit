@@ -326,14 +326,22 @@ sheet_collector = FilteredElementCollector(doc).OfClass(ViewSheet)
 sheets = []
 to_delete_sheets = []
 for s in sheet_collector:
-    s_param = s.LookupParameter("SEPS Code")
-    if s_param and s_param.HasValue:                # Check SEPS Code parameter has value
-        s_val = s_param.AsString()
-        if s_val.strip() != seps_code.strip():      # If SEPS Code does not match
-            to_delete.Add(s.Id)
-            to_delete_sheets.append(s.Id)
-        else:
-            sheets.append(s.Id)
+    if element_has_seps(s, seps_code):
+        sheets.append(s.Id)
+    else:
+        to_delete.Add(s.Id)
+        to_delete_sheets.append(s.Id)
+
+
+# for s in sheet_collector:
+#     s_param = s.LookupParameter(SEPS_PARAM_NAME)
+#     if s_param and s_param.HasValue:                # Check SEPS Code parameter has value
+#         s_val = s_param.AsString()
+#         if s_val.strip() != seps_code.strip():      # If SEPS Code does not match
+#             to_delete.Add(s.Id)
+#             to_delete_sheets.append(s.Id)
+#         else:
+#             sheets.append(s.Id)
 
 
 # 6. Prune views (including schedules)
@@ -348,7 +356,7 @@ for v in view_collector:
     if not v.IsTemplate:                                        # Exclude template views
         if v.ViewType.ToString() not in filteredViewTypes:      # Exclude certain view types
             if v.Name != "Starting View":                       # Exclude "Starting View"
-                v_param = v.LookupParameter("SEPS Code")
+                v_param = v.LookupParameter(SEPS_PARAM_NAME)
                 if v_param and v_param.HasValue:                # Check SEPS Code parameter has value
                     v_val = v_param.AsString()
                     if v_val.strip() != seps_code.strip():      # If SEPS Code does not match
