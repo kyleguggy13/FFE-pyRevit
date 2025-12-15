@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 __title__     = "Model Split By Room"
-__version__   = 'Version = v0.1'
-__doc__       = """Version = v0.1
-Date    = 12.03.2025
+__version__   = 'Version = v1.0'
+__doc__       = """Version = v1.0
+Date    = 12.15.2025
 ___________________________________________________________________
 Description:
 Split current model into a per-SEPS-Code layout model.
@@ -14,7 +14,7 @@ Workflow:
    - Rooms
    - Views (including schedules)
    - Sheets
-   - (Optionally) model elements you want to tag per layout
+   - Scope Boxes
 4. Reads all distinct SEPS Codes from Sheets.
 5. Lets user pick one SEPS Code.
 6. Prompts user for a target .rvt file name.
@@ -24,7 +24,7 @@ Workflow:
 
 Belonging to the layout is defined as:
 - Sheet has "SEPS Code" == selected code.
-- View is on a Sheet with "SEPS Code" == selected code.
+- View/Schedule has "SEPS Code" == selected code.
 - Element's bounding box intersects the bounding box of the Scope
   Box whose "SEPS Code" == selected code.
 ___________________________________________________________________
@@ -34,6 +34,7 @@ How-to:
 ___________________________________________________________________
 Last update:
 - [12.01.2025] - v0.1 BETA RELEASE
+- [12.15.2025] - v1.0 RELEASE
 
 ___________________________________________________________________
 Author: Kyle Guggenheim"""
@@ -75,7 +76,9 @@ MODEL_INSTANCE_CATEGORIES = [
     DB.BuiltInCategory.OST_Floors,
     DB.BuiltInCategory.OST_IOSModelGroups,
     DB.BuiltInCategory.OST_Lines,
-    DB.BuiltInCategory.OST_VolumeOfInterest
+    DB.BuiltInCategory.OST_VolumeOfInterest,
+    DB.BuiltInCategory.OST_Grids,
+    DB.BuiltInCategory.OST_RoomSeparationLines,
 ]
 
 # Use room bounding boxes to keep geometry that sits inside the layout area
@@ -340,14 +343,18 @@ to_delete       = DotNetList[DB.ElementId]()
 
 # 6. Prune sheets
 sheet_collector = FilteredElementCollector(doc).OfClass(ViewSheet)
+sheets = []
 to_delete_sheets = []
 for s in sheet_collector:
     s_param = s.LookupParameter("SEPS Code")
-    if s_param and s_param.HasValue:
+    if s_param and s_param.HasValue:                # Check SEPS Code parameter has value
         s_val = s_param.AsString()
-        if s_val.strip() != seps_code.strip():
+        if s_val.strip() != seps_code.strip():      # If SEPS Code does not match
             to_delete.Add(s.Id)
             to_delete_sheets.append(s.Id)
+        else:
+            sheets.append(s.Id)
+
 
 
 
@@ -364,17 +371,41 @@ for v in view_collector:
         if v.ViewType.ToString() not in filteredViewTypes:      # Exclude certain view types
             if v.Name != "Starting View":                       # Exclude "Starting View"
                 v_param = v.LookupParameter("SEPS Code")
-                if v_param and v_param.HasValue:                # Check SEPS Code parameter
+                if v_param and v_param.HasValue:                # Check SEPS Code parameter has value
                     v_val = v_param.AsString()
                     if v_val.strip() != seps_code.strip():      # If SEPS Code does not match
                         to_delete.Add(v.Id)
                         to_delete_views.append(v.Id)
-                else:
+                else:                                           # If SEPS Code parameter is empty
                     to_delete.Add(v.Id)
                     to_delete_views.append(v.Id)
 
 
-"""
+# viewport_collector = FilteredElementCollector(doc).OfClass(Viewport)
+# to_delete_views_alt = []
+# views = []
+# for vp in viewport_collector:
+#     s_id = vp.SheetId
+#     if s_id in sheets:
+#         views.append(vp.ViewId)
+#     else:
+#         to_delete_views_alt.append(vp.ViewId)
+#         to_delete.Add(vp.ViewId)
+
+
+# schedule_collector = FilteredElementCollector(doc).OfClass(ScheduleSheetInstance)
+# to_delete_schedules = []
+# schedules = []
+# for sch in schedule_collector:
+#     sch_owner = sch.OwnerViewId
+#     if sch_owner in sheets:
+#         schedules.append(sch.ScheduleId)
+#     else:
+#         to_delete_schedules.append(sch.ScheduleId)
+#         to_delete.Add(sch.ScheduleId)
+
+
+
 # 8. Prune rooms
 rooms_collector = (DB.FilteredElementCollector(doc).OfCategory(DB.BuiltInCategory.OST_Rooms).WhereElementIsNotElementType())
 for r in rooms_collector:
@@ -383,12 +414,14 @@ for r in rooms_collector:
 
 
 # 9. Prune model instance elements in configured categories
+to_delete_elements = []
 for bic in MODEL_INSTANCE_CATEGORIES:
     elems = (DB.FilteredElementCollector(doc).OfCategory(bic).WhereElementIsNotElementType())
     for e in elems:
         if not element_belongs_to_layout(e, seps_code, layout_min, layout_max):
             to_delete.Add(e.Id)
-"""
+            to_delete_elements.append(e.Id)
+
 
 #____________________________________________________ DEBUGGING OUTPUT
 output_window.print_md("### DEBUG INFO:")
@@ -398,7 +431,7 @@ output_window.print_md("- Layout BBox Max: **{}**".format(layout_max))
 output_window.print_md("- Elements to Delete: **{}**".format(to_delete.Count))
 output_window.print_md("- Elements to Delete (Sheets): **{}**".format(len(to_delete_sheets)))
 output_window.print_md("- Elements to Delete (Views): **{}**".format(len(to_delete_views)))
-# output_window.print_md("- Elements to Keep: **{}**".format(to_not_delete.Count))
+output_window.print_md("- Elements to Delete (Elements): **{}**".format(len(to_delete_elements)))
 output_window.print_md("---")
 
 
