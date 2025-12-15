@@ -7,7 +7,8 @@ ___________________________________________________________________
 Description:
 Split current model into a per-SEPS-Code layout model.
 
-Workflow:
+___________________________________________________________________
+How-to:
 1. Open Revit model detached and discard worksets.
 2. Run this script.
 3. Assumes a project/shared parameter "SEPS Code" exists on:
@@ -28,14 +29,9 @@ Belonging to the layout is defined as:
 - Element's bounding box intersects the bounding box of the Scope
   Box whose "SEPS Code" == selected code.
 ___________________________________________________________________
-How-to:
--> Click on the button
-
-___________________________________________________________________
 Last update:
 - [12.01.2025] - v0.1 BETA RELEASE
 - [12.15.2025] - v1.0 RELEASE
-
 ___________________________________________________________________
 Author: Kyle Guggenheim"""
 
