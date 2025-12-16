@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
-__title__   = "FFE-pyRevit \nv1.8.1"
-__doc__ = """Version = v1.8.1
-Date    = 11.14.2025
-_____________________________________________________________________
+__title__   = "FFE-pyRevit \nv1.9.0"
+__doc__ = """Version = v1.9.0
+Date    = 12.15.2025
+__________________________________________________________________
 Description:
 pyRevit About Form
-_____________________________________________________________________
+__________________________________________________________________
 How-To:
 - Click the Button
-_____________________________________________________________________
+__________________________________________________________________
 Last update:
 - [03.06.2025] - v1.0 RELEASE
 - [03.25.2025] - v1.1 RELEASE
@@ -22,7 +22,8 @@ Last update:
 - [11.04.2025] - v1.7.0 Added Project Info Comparison Tool
 - [11.07.2025] - v1.8.0 Added Revision Comparison Tool
 - [11.14.2025] - RevisionCompare: v1.8.1 Updated to fully support "Per Sheet" revision numbering.
-_____________________________________________________________________
+- [12.15.2025] - v1.9.0 Added Design Guide Model Splitter Tool
+__________________________________________________________________
 Author: Kyle Guggenheim from FFE Inc."""
 # ↑ This module docstring doubles as the default changelog text.
 
