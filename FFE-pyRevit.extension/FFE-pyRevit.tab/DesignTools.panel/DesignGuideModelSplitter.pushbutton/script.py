@@ -94,8 +94,8 @@ action = "Design Guide Model Splitter"
 # OpenAndActivateDocument and detach
 
 doc = revit.doc
-output = script.get_output()
-output.close_others()
+# output = script.get_output()
+output_window.close_others()
 
 app = HOST_APP.uiapp
 
@@ -110,8 +110,8 @@ try:
                 file)
             document = app.OpenAndActivateDocument(
                 model_path, open_options, False)
-            output.print_md('### Open and detach from central (discard worksets)')
-            output.print_md(
+            output_window.print_md('### Open and detach from central (discard worksets)')
+            output_window.print_md(
                 "- Document **{}** processed".format(file.split("\\")[-1]))
         else:
             pass
@@ -238,6 +238,7 @@ def element_belongs_to_layout(elem, seps_code, layout_min, layout_max):
 #____________________________________________________________________ MAIN
 
 doc = revit.doc
+output_window.print_md("### Collecting From: {}".format(doc.Title))
 logger = script.get_logger() # Logger for output messages
 
 
@@ -247,7 +248,7 @@ seps_codes = collect_seps_codes_from_sheets(doc)
 if not seps_codes:
     forms.alert(
         "No Rooms found with parameter '{0}'.\n"
-        "Please ensure Rooms have this parameter populated per SEPS layout."
+        "Please ensure Sheets have this parameter populated per SEPS layout."
         .format(SEPS_PARAM_NAME),
         title="Split by SEPS Code",
         exitscript=True
@@ -274,7 +275,7 @@ if USE_SCOPEBOX_FILTER:
 
 
 # 4. Prompt for Save As path
-# Checl if model is workshared
+# Check if model is workshared
 if doc.IsWorkshared:
     forms.alert(
         "This model is workshared.\n"
@@ -312,9 +313,9 @@ output_window.print_md("- Model saved to: **{}**".format(save_path))
 
 doc = revit.doc
 
-
 from System.Collections.Generic import List as DotNetList
 
+#____________________________________________________________________ TRANSACTION START
 tgroup = TransactionGroup(doc, "Prune to SEPS Layout: {}".format(seps_code))
 tgroup.Start()
 
@@ -436,7 +437,7 @@ if to_delete.Count > 0:
 # 10. Complete transaction group
 # tgroup.Assimilate()
 tgroup.Commit()
-
+#____________________________________________________________________ TRANSACTION END
 
 
 
