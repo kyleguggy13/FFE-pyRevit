@@ -3,40 +3,42 @@ __title__     = "Transfer ViewTemplates"
 __version__   = 'Version = v1.0'
 __doc__       = """Version = v1.0
 Date    = 03.25.2025
-_____________________________________________________________________
+_________________________________________________________________
 Description:
 You can transfer selected ViewTemplates between Project A/B.
 There is an option to override ViewTemplate if same name exists.
 Otherwise it will duplicate it by adding a number in the end.
-_____________________________________________________________________
+_________________________________________________________________
 How-to:
 -> Click on the button
 -> Select Project A/B
 -> Choose Override or not
 -> Select ViewTemplates
 -> Click on Transfer ViewTemplates
-_____________________________________________________________________
+_________________________________________________________________
 Last update:
 - [03.25.2025] - v1.0 RELEASE
-_____________________________________________________________________
+_________________________________________________________________
 Author: Kyle Guggenheim"""
 
 
-#____________________________________________________________________ IMPORTS
+#____________________________________________________________________ IMPORTS (SYSTEM)
 # Regular + Autodesk
 import os, sys, math, datetime, time
 from collections import defaultdict
+
+#____________________________________________________________________ IMPORTS (AUTODESK)
 from Autodesk.Revit.DB import *
 from Autodesk.Revit.DB import Transaction, FilteredElementCollector
 
-# pyRevit
+#____________________________________________________________________ IMPORTS (PYREVIT)
 from pyrevit import forms
 
-# Custom Imports
+#____________________________________________________________________ IMPORTS (CUSTOM)
 from GUI.forms import my_WPF, ListItem
 from Snippets._context_manager import ef_Transaction
 
-#>>>>>>>>>> .NET IMPORTS
+#____________________________________________________________________ IMPORTS (.NET)
 import clr
 clr.AddReference("System.Windows.Forms")
 clr.AddReference("System")
