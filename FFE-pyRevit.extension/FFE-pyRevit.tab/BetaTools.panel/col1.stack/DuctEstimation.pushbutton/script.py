@@ -1,23 +1,20 @@
 # -*- coding: utf-8 -*-
 __title__     = "Duct Estimation"
-__version__   = 'Version = 1.0'
-__doc__       = """Version = 1.0
+__version__   = 'Version = 0.1'
+__doc__       = """Version = 0.1
 Date    = 07.09.2025
-# ______________________________________________________________
-# Description:
-# -> Estimates total surface area & volume of sheet metal.
-#
-# -> Estimates total surface area & volume of insulation.
-# 
-# ______________________________________________________________
-# How-to:
-#
-# -> Click the button
-#   
-# ______________________________________________________________
-# Last update:
-# 
-# ______________________________________________________________
+______________________________________________________________
+Description:
+-> Estimates total surface area & volume of sheet metal.
+
+-> Estimates total surface area & volume of insulation.
+______________________________________________________________
+How-to:
+-> Click the button
+______________________________________________________________
+Last update:
+- [07.08.2025] - v0.1 BETA RELEASE
+______________________________________________________________
 Author: Kyle Guggenheim"""
 
 #____________________________________________________________________ IMPORTS (AUTODESK)
@@ -30,7 +27,7 @@ from Autodesk.Revit.DB import FilteredElementCollector, Mechanical, Transaction,
 
 #____________________________________________________________________ IMPORTS (PYREVIT)
 
-from pyrevit import revit, DB
+from pyrevit import revit, DB, UI, script
 from pyrevit.script import output
 from pyrevit import forms
 
@@ -81,7 +78,8 @@ output_window.print_md("### 📋 Selected Element IDs:"
 #             ductinstance_Name = DB.Element.Name.__get__(duct)
 #             ductinstance_ID = DB.Element.Id.__get__(duct)
 #             output_window.print_md("### ✅ Found Duct Instance: {}, {}".format(ductinstance_Name, ductinstance_ID))
-#             break
+#         else:
+#             output_window.print_md()
 ##################
 
 ### Steps:
@@ -105,6 +103,38 @@ output_window.print_md("### 📋 Selected Element IDs:"
 # output_window.print_md("### ✅ Found Duct Network with {} elements.".format(len(DuctNetwork)))
 
 
+
+
+# A simplified example for traversing from a selected element
+# from pyrevit import revit, DB, UI
+
+uidoc = revit.uidoc
+doc = revit.doc
+
+# Select one duct element first
+try:
+    ref = uidoc.Selection.PickObject(UI.Selection.ObjectType.Element, "Select a duct or fitting.")
+    start_element = doc.GetElement(ref)
+except:
+    script.exit()
+
+connected_elements = set()
+# Use a function to recursively find all connected parts (a full script is complex)
+# The core idea is using element.ConnectorManager.Lookup(other_connector_id) to confirm connections
+# Or simply using the built-in system.GetElementIds() if the system is properly defined in Revit
+
+# If the element belongs to a system, this is the easiest way to get all connected elements:
+if hasattr(start_element, 'MEPSystem'):
+    mep_system = start_element.MEPSystem
+    if mep_system:
+        # Get all elements related to that logical system
+        all_system_elements = mep_system.DuctNetwork
+        output_window.print_md("Found {} elements in the system '{}'.".format(all_system_elements, mep_system.Name))
+
+
+
+
+
 ### Revit Schedule Calculations (Reference)
 # Density               = 0.294
 # Gauge_Sq              = if(not((Width + Height) > 2'  6"), 24, if(not((Width + Height) > 4'  6"), 22, if(not((Width + Height) > 7'), 20, if((Width + Height) > 7', 18, 0))))
@@ -123,21 +153,26 @@ duct_collector = FilteredElementCollector(doc)\
                     .OfCategory(BuiltInCategory.OST_DuctCurves)\
                     .WhereElementIsNotElementType()
 
-# Print header
-output_window.print_md("### Duct Elements Found")
-output_window.print_table(
-    table_data=[
-        ["Id", "Type Name", "System Name", "Length (ft)", "Level"]
-    ] + [
-        [
-            duct.Id.ToString(),
-            duct.Name,
-            duct.MEPSystem.Name if duct.MEPSystem else "N/A",
-            "{:.2f}".format(duct.get_Parameter(BuiltInParameter.CURVE_ELEM_LENGTH).AsDouble()) if duct.get_Parameter(BuiltInParameter.CURVE_ELEM_LENGTH) else "N/A",
-            doc.GetElement(duct.LevelId).Name if duct.LevelId != ElementId.InvalidElementId else "N/A"
-        ]
-        for duct in duct_collector
-    ],
-    title="Ducts in Model"
-)
-#==================================================
+
+
+#_____________________________________________________________________ 📊 TABLE
+table_columns = ["Id", "Type Name", "System Name", "Length (ft)", "Level"]
+
+
+table_rows=[
+    [
+        duct.Id.ToString(),     # ID to string
+        duct.Name,              # Duct Name
+        duct.MEPSystem.Name if duct.MEPSystem else "N/A",       # Duct's System Name
+        "{:.2f}".format(duct.get_Parameter(BuiltInParameter.CURVE_ELEM_LENGTH).AsDouble()) if duct.get_Parameter(BuiltInParameter.CURVE_ELEM_LENGTH) else "N/A",    # Duct Length
+        doc.GetElement(duct.LevelId).Name if duct.LevelId != ElementId.InvalidElementId else "N/A"  # Duct Reference Level
+    ]
+    for duct in duct_collector  
+]
+
+
+
+# Print Table
+# output_window.print_md("### Duct Elements Found")
+
+# output_window.print_table(table_data=table_rows, columns=table_columns, title="Ducts in Model")
