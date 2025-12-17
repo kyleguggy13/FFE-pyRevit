@@ -32,8 +32,12 @@ _________________________________________________________________
 Last update:
 - [12.01.2025] - v0.1 BETA RELEASE
 - [12.15.2025] - v1.0 RELEASE
+- [12.17.2025] - v1.1 Added SafeFileName Function
 _________________________________________________________________
 Author: Kyle Guggenheim"""
+
+#____________________________________________________________________ IMPORTS (SYSTEM)
+import re
 
 
 #____________________________________________________________________ IMPORTS (AUTODESK)
@@ -120,6 +124,9 @@ except Exception as e:
 
 
 #____________________________________________________________________ FUNCTIONS
+
+def safe_filename(s):
+    return re.sub(r'[<>:"/\\|?*]', "-", s)
 
 
 def get_param_str(elem, param_name):
@@ -286,6 +293,7 @@ if doc.IsWorkshared:
 
 # Set default filename based on selected SEPS Code
 default_filename = "{}.rvt".format(seps_code)
+default_filename = safe_filename(default_filename)
 save_path = forms.save_file(
     file_ext="rvt",
     default_name=default_filename,
