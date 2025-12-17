@@ -332,23 +332,23 @@ for bic in KEY_EQUIP_CATEGORIES:
             except Exception:
                 pass
 
-            mark = ""
+            jsn = ""
             try:
-                p = fi.LookupParameter("Mark")
+                p = fi.LookupParameter("JSN")
                 if p and p.HasValue:
-                    mark = p.AsString()
+                    jsn = p.AsString()
             except Exception:
                 pass
 
             label = fam or "Equipment"
             if typ:
                 label = "{}: {}".format(label, typ)
-            if mark:
-                label = "{} [{}]".format(label, mark)
+            if jsn:
+                label = "{} [{}]".format(label, jsn)
 
             add_node(
                 ekey, "equip", label, el=fi,
-                props={"family": fam, "type": typ, "mark": mark, "category": str(fi.Category.Name if fi.Category else "")},
+                props={"family": fam, "type": typ, "JSN": jsn, "category": str(fi.Category.Name if fi.Category else "")},
                 pos=next_pos("equip")
             )
 
