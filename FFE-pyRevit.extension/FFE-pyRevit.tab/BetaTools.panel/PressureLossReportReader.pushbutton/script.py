@@ -1,4 +1,21 @@
 # -*- coding: utf-8 -*-
+__title__     = "Pressure Loss \nReport Reader"
+__version__   = 'Version = v0.1'
+__doc__       = """Version = v0.1
+Date    = 12.17.2025
+_________________________________________________________________
+Description:
+Read Pressure Loss Report HTML file.
+
+_________________________________________________________________
+How-to:
+
+_________________________________________________________________
+Last update:
+- [12.17.2025] - v0.1 BETA RELEASE
+- [12.19.2025] - v0.5 BETA RELEASE
+_________________________________________________________________
+Author: Kyle Guggenheim"""
 """
 Extract ONLY these 3 report tables from the Pressure Loss Report HTML:
 
@@ -6,34 +23,32 @@ Table1 = 'Detail Information of Straight Segment by Sections'
 Table2 = 'Fitting and Accessory Loss Coefficient Summary by Sections'
 Table3 = 'Total Pressure Loss Calculations by Sections'
 
-This report stores the title INSIDE the outer table (as a <th colspan="3"> row).
-So we identify the correct outer table by searching its own cells for the title.
-
 Outputs (written next to the selected .html file):
 - <name>__straight_segments.csv
 - <name>__fittings_accessories.csv
 - <name>__total_pressure_loss.csv
-
-Also prints debug counts to pyRevit output so you can confirm matches.
 """
 
 from __future__ import print_function
 
+#____________________________________________________________________ IMPORTS (SYSTEM)
 import os
 import re
 import csv
 import codecs
 from HTMLParser import HTMLParser  # IronPython 2.7 compatible
 
+#____________________________________________________________________ IMPORTS (PYREVIT)
 from pyrevit import script
 from pyrevit.script import output
 
+#____________________________________________________________________ VARIABLES
 output_window = output.get_output()
 
-# ----------------------------
-# Utilities
-# ----------------------------
+log_status = ""
+action = "Pressure Loss Report Reader"
 
+#____________________________________________________________________ UTILITIES
 _ws_re = re.compile(r"\s+", re.UNICODE)
 
 def clean_text(s):
@@ -76,9 +91,8 @@ def dicts_to_rows(dicts, preferred_order=None):
         rows.append([d.get(k, u"") for k in keys])
     return keys, rows
 
-# ----------------------------
-# Table model + parser
-# ----------------------------
+
+#____________________________________________________________________ TABLE MODEL + PARSER
 
 class TableNode(object):
     def __init__(self, depth):
@@ -174,9 +188,8 @@ class ReportHTMLParser(HTMLParser):
         except:
             pass
 
-# ----------------------------
-# Extraction logic
-# ----------------------------
+
+#____________________________________________________________________ EXTRACTION LOGIC
 
 TABLE1 = "Total Pressure Loss Calculations by Sections"
 TABLE2 = "Detail Information of Straight Segment by Sections"
@@ -251,9 +264,8 @@ def stitch_outer_to_embedded(outer, embedded_tables, section_total_col_name):
 
     return records, len(section_rows), len(embedded_tables), pair_count
 
-# ----------------------------
-# Main
-# ----------------------------
+
+#____________________________________________________________________ MAIN
 
 logger = script.get_logger()
 # output = script.get_output()
@@ -330,11 +342,11 @@ for t in tables:
     n = n + 1
 
 
-# Separate Duct and Fitting Section Tables
+# Get TableNodes for Duct and Fittings
 d_section_tablenode = tables[Duct_HTML_Index+1:Fitting_HTML_Index]
 f_section_tablenode = tables[Fitting_HTML_Index+1:]
 
-
+# Create Duct Report Lists
 DuctReport = []
 for tn, s in zip(d_section_tablenode, Duct_Sections):
     t_rows = tn.rows
@@ -343,6 +355,7 @@ for tn, s in zip(d_section_tablenode, Duct_Sections):
             t.insert(0, s[0])  # Insert Section Number at position 0
             DuctReport.append(t)
 
+# Create Fititngs Report Lists
 FittingsReport = []
 for tn, s in zip(f_section_tablenode, Fitting_Sections):
     t_rows = tn.rows
