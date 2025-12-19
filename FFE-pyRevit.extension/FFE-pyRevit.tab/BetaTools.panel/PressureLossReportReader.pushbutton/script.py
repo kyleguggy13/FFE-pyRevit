@@ -326,56 +326,65 @@ for t in tables:
             Duct_SectionsSummary.append(row)
         if Fitting_HTML_Index is not None:
             Fittings_SectionsSummary.append(row)
+
     n = n + 1
 
 
+# Separate Duct and Fitting Section Tables
+d_section_tablenode = tables[Duct_HTML_Index+1:Fitting_HTML_Index]
+f_section_tablenode = tables[Fitting_HTML_Index+1:]
 
-# Extract Duct and Fitting Tables
+
 DuctReport = []
-d_idx = ""
-for drow in Duct_SectionsSummary:
-    if "Element ID" in drow:
-        d_idx = 1
-    
-    if d_idx == 1:
-        DuctReport.append(drow)
-
+for tn, s in zip(d_section_tablenode, Duct_Sections):
+    t_rows = tn.rows
+    if t_rows not in Duct_Sections:
+        for t in t_rows:
+            t.insert(0, s[0])  # Insert Section Number at position 0
+            DuctReport.append(t)
 
 FittingsReport = []
-f_idx = ""
-for frow in Fittings_SectionsSummary:
-    if "Element ID" in frow:
-        f_idx = 1
-    
-    if f_idx == 1:
-        FittingsReport.append(frow)
+for tn, s in zip(f_section_tablenode, Fitting_Sections):
+    t_rows = tn.rows
+    if t_rows not in Fitting_Sections:
+        for t in t_rows:
+            t.insert(0, s[0])  # Insert Section Number at position 0
+            FittingsReport.append(t)
 
 
 
-output_window.print_table(table_data=Duct_Sections[1:], columns=Duct_Sections[0], title="Duct Sections and Total Pressure Loss")
-# print("Duct Sections and Total Pressure Loss:")
-# print(Duct_Section_TPL)
-
-output_window.print_table(table_data=DuctReport[1:], columns=DuctReport[0], title="Duct Report")
-# print("Duct Table:")
-# print(DuctRows)
-
-output_window.print_table(table_data=Fitting_Sections[1:], columns=Fitting_Sections[0], title="Fitting Sections and Total Pressure Loss")
-# print("Fitting Sections and Total Pressure Loss:")
-# print(Fitting_Section_TPL)
-
-output_window.print_table(table_data=FittingsReport[1:], columns=FittingsReport[0], title="Fitting Report")
-# print("Fitting Table:")
-# print(FittingRows)
+# Create dict
+dict_DuctReport     = {"Header": DuctReport[0], "Data": DuctReport[1:]}
+dict_FittingsReport  = {"Header": FittingsReport[0], "Data": FittingsReport[1:]}
 
 
+"""
+# Use this for inserting Flow values into Fittings Report
+dict_DuctReport["Header"].insert(0, "Section")
+for data_row in dict_DuctReport["Data"]:
+    section_value = ""
+    element_id = data_row[dict_DuctReport["Header"].index("Element ID")]
+    for d_section in Duct_Sections:
+        if element_id in d_section[1]:
+            section_value = d_section[0]
+            break
+    data_row.insert(0, section_value)
+"""
+
+# Insert Category Column
+dict_DuctReport["Header"].insert(1, "Category")
+for data_row in dict_DuctReport["Data"]:
+    data_row.insert(1, "Duct")
+
+dict_FittingsReport["Header"].insert(1, "Category")
+for data_row in dict_FittingsReport["Data"]:
+    data_row.insert(1, "Fittings")
 
 
 
-
-
-
-
+#____________________________________________________________________ OUTPUT TABLES
+output_window.print_table(table_data=dict_DuctReport["Data"], columns=dict_DuctReport["Header"], title="Duct Report")
+output_window.print_table(table_data=dict_FittingsReport["Data"], columns=dict_FittingsReport["Header"], title="Fittings Report")
 
 
 ColumnIndex = ["System Name", "Category", "Element ID", "Type Mark", "ASHRAE Table", "Comments", "Section", "Size", "Flow", "Length", "Velocity", "Friction", "Pressure Loss"]
