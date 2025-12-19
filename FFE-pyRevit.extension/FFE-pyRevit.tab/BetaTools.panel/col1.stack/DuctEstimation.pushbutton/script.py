@@ -23,8 +23,8 @@ import clr
 clr.AddReference("System")
 from Autodesk.Revit.DB import *
 from Autodesk.Revit.UI import *
-from Autodesk.Revit.DB import FilteredElementCollector, Mechanical, Transaction, Family, BuiltInParameter, ElementType, BuiltInCategory, ElementCategoryFilter, ElementId
-
+from Autodesk.Revit.DB import FilteredElementCollector, Mechanical, Transaction, Family, BuiltInParameter, ElementType
+from Autodesk.Revit.DB import BuiltInCategory, ElementCategoryFilter, ElementId, GeometryElement
 #____________________________________________________________________ IMPORTS (PYREVIT)
 
 from pyrevit import revit, DB, UI, script
@@ -52,7 +52,7 @@ output_window.print_md("### 📋 Selected Elements:"
 output_window.print_md("### 📋 Selected Element IDs:"
                        "\n- {}".format(', '.join([str(el.Id) for el in selection.elements])))
 
-
+"""
 # Test duct_collector
 # duct_collector = FilteredElementCollector(doc).OfClass(ElementType).WhereElementIsElementType().ToElements()
 # for duct_type in duct_collector:
@@ -68,7 +68,7 @@ output_window.print_md("### 📋 Selected Element IDs:"
 #         ductinstance_Name = DB.Element.Name.__get__(duct_instance)
 #         ductinstance_ID = DB.Element.Id.__get__(duct_instance)
 #         output_window.print_md("### ✅ Found Duct Instances: {}, {}".format(ductinstance_Name, ductinstance_ID))
-
+"""
 
 ##################
 ### CURRENTLY WORKING:
@@ -82,26 +82,27 @@ output_window.print_md("### 📋 Selected Element IDs:"
 #             output_window.print_md()
 ##################
 
+"""
 ### Steps:
-# 1. Select duct
-# 2. Get "DuctNetwork" property
-    # Property: DuctNetwork
-    # Type: ElementSet
-    # Full type: Autodesk.Revit.DB.ElementSet
-    # Value: ElementSet
-# This gives us the duct network, which contains Duct, DuctInsulation, and FamilyInstance elements.
+1. Select duct
+2. Get "DuctNetwork" property
+    Property: DuctNetwork
+    Type: ElementSet
+    Full type: Autodesk.Revit.DB.ElementSet
+    Value: ElementSet
+This gives us the duct network, which contains Duct, DuctInsulation, and FamilyInstance elements.
 
-# DuctNetwork = []
-# for duct_instance in duct_instance_collector:
-#     if duct_instance.Symbol.FamilyName == "Round Duct" or duct_instance.Symbol.FamilyName == "Rectangular Duct":
-#         duct_network = duct_instance.MEPModel.DuctNetwork
-#         if duct_network:
-#             for element in duct_network:
-#                 if element not in DuctNetwork:
-#                     DuctNetwork.append(element)
+DuctNetwork = []
+for duct_instance in duct_instance_collector:
+    if duct_instance.Symbol.FamilyName == "Round Duct" or duct_instance.Symbol.FamilyName == "Rectangular Duct":
+        duct_network = duct_instance.MEPModel.DuctNetwork
+        if duct_network:
+            for element in duct_network:
+                if element not in DuctNetwork:
+                    DuctNetwork.append(element)
 
-# output_window.print_md("### ✅ Found Duct Network with {} elements.".format(len(DuctNetwork)))
-
+output_window.print_md("### ✅ Found Duct Network with {} elements.".format(len(DuctNetwork)))
+# """
 
 
 
@@ -132,6 +133,37 @@ if hasattr(start_element, 'MEPSystem'):
         output_window.print_md("Found {} elements in the system '{}'.".format(all_system_elements, mep_system.Name))
 
 
+"""
+### Attempt to get GeometryObject from selected reference
+if ref:
+    # 1. Get the host Element (the wall, floor, etc. that the geometry belongs to)
+    element = doc.GetElement(ref.ElementId)
+
+    # 2. Use the GetGeometryObjectFromReference method to get the specific GeometryObject
+    # This method takes the reference and returns the specific geometry part (Solid, Face, Edge, etc.)
+    geometry_object = element.GetGeometryObjectFromReference(ref)
+    
+    if geometry_object:
+        output_window.print_md("Type: {}".format(type(geometry_object).__name__))
+        output_window.print_md("Internal Id: {}".format(geometry_object.Id))
+        output_window.print_md("Geometry Object: {}".format(geometry_object))
+        # forms.alert(
+        #     "Successfully retrieved GeometryObject:\nType: {}\nInternal Id: {}"
+        #     .format(type(geometry_object).__name__, geometry_object.Id),
+        #     "Geometry Object Found"
+        # )
+        # You can now work with the geometry_object (e.g., get area if it's a face)
+        if isinstance(geometry_object, DB.Solid):
+            output_window.print_md("Type: Solid")
+        else:
+            output_window.print_md("The geometry object is not a Solid.")
+            
+    else:
+        output_window.print_md("Could not retrieve the specific geometry object.")
+else:
+    output_window.print_md("No reference was selected.")
+"""
+
 
 
 
@@ -152,17 +184,79 @@ if hasattr(start_element, 'MEPSystem'):
 duct_collector = FilteredElementCollector(doc)\
                     .OfCategory(BuiltInCategory.OST_DuctCurves)\
                     .WhereElementIsNotElementType()
+MEPCurve_collector = FilteredElementCollector(doc).OfClass(MEPCurve).ToElements()
+
+fitting_collector = FilteredElementCollector(doc)\
+                    .OfCategory(BuiltInCategory.OST_DuctFitting)\
+                    .WhereElementIsNotElementType()
+
+# Group ducts by system
+DuctbySystem = {}
+for duct in duct_collector:
+    system_name = duct.MEPSystem.Name if duct.MEPSystem else "No System"
+    if system_name not in DuctbySystem:
+        DuctbySystem[system_name] = []
+    DuctbySystem[system_name].append(duct)
+
+# Group MEP Curves by category
+MEPCurve_Categories = {}
+for curve in MEPCurve_collector:
+    c_category = curve.Category.Name
+    if c_category not in MEPCurve_Categories:
+        MEPCurve_Categories[c_category] = []
+    MEPCurve_Categories[c_category].append(curve)
 
 
+
+# options = Options()
+# options.DetailLevel = ViewDetailLevel.Fine
+
+# Group fittings by Family Name
+fitting_geometry = []
+Fitting_FamilyNames = {}
+for fitting in fitting_collector:
+    family_name = fitting.Symbol.FamilyName
+    fitting_val = fitting.get_Geometry(DB.Options())
+    fitting_geometry.append(fitting_val)
+    if family_name not in Fitting_FamilyNames:
+        Fitting_FamilyNames[family_name] = []
+    Fitting_FamilyNames[family_name].append(fitting)
+
+
+
+
+# print(fitting_geometry[:20])
+
+output_window.print_md("### 📊 MEPCurves Grouped by Category:")
+for cat, cur in MEPCurve_Categories.items():
+    output_window.print_md("### 📊 {}: {}".format(cat, len(cur)))
+
+output_window.print_md("---")
+
+output_window.print_md("### 📊 Duct Fittings Grouped by Family Name:")
+for fam, fits in Fitting_FamilyNames.items():
+    output_window.print_md("### 📊 {}: {}".format(fam, len(fits)))
+
+
+# output_window.print_md("### 📊 Ducts Grouped by System:")
+# for system, ducts in DuctbySystem.items():
+#     if system == "SA_AHU-7_7-VAV-5":  # Example: filter for a specific system
+#         output_window.print_md("#### System: {} | Duct Count: {}".format(system, len(ducts)))
+
+# output_window.print_md("### 📊 Fittings Grouped by System:")
+# for system, fittings in FittingbySystem.items():
+#     if system == "SA_AHU-7_7-VAV-5":  # Example: filter for a specific system
+#         output_window.print_md("#### System: {} | Fitting Count: {}".format(system, len(fittings)))
 
 #_____________________________________________________________________ 📊 TABLE
-table_columns = ["Id", "Type Name", "System Name", "Length (ft)", "Level"]
+table_columns = ["Id", "Type Name", "Geometry", "System Name", "Length (ft)", "Level"]
 
 
 table_rows=[
     [
         duct.Id.ToString(),     # ID to string
         duct.Name,              # Duct Name
+        duct.Geometry,
         duct.MEPSystem.Name if duct.MEPSystem else "N/A",       # Duct's System Name
         "{:.2f}".format(duct.get_Parameter(BuiltInParameter.CURVE_ELEM_LENGTH).AsDouble()) if duct.get_Parameter(BuiltInParameter.CURVE_ELEM_LENGTH) else "N/A",    # Duct Length
         doc.GetElement(duct.LevelId).Name if duct.LevelId != ElementId.InvalidElementId else "N/A"  # Duct Reference Level
