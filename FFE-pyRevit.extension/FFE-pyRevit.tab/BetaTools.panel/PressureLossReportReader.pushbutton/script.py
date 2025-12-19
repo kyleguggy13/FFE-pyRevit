@@ -294,65 +294,96 @@ if not tables:
     script.exit()
 
 
-
+# START WORKING AREA >>>
+######################################################
+######################################################
+######################################################
 TotalLossbySection = tables[2].rows
 
+# Get Critical Paths 
 CriticalPaths = TotalLossbySection[-1][0].split(' ')[3].split('-')
 
-# output_window.print_md("**CP:** {}".format(CriticalPaths))
-# print(type(CriticalPaths))
+output_window.print_md("**CP:** {}".format(CriticalPaths))
 
-# """
-Table_Duct = []
-Table_Fittings = []
-Table_Duct_Index = ""
-Table_Fitting_Index = ""
+
+Duct_SectionsSummary = []
+Fittings_SectionsSummary = []
+Duct_HTML_Index = None
+Fitting_HTML_Index = None
 n=0
+# Extract Duct and Fitting Tables
 for t in tables:
     table_rows = t.rows 
-    # print(n)
-    # print(t.rows)
-    # print("")
     for row in table_rows:
         if "Detail Information of Straight Segment by Sections" in row:
-            print("Duct Details: {}".format(n), row)
-            Duct_Rows = table_rows[1:]
-            print(Duct_Rows)
-            Table_Duct_Index = n
+            Duct_Sections = table_rows[1:]       # Collect Duct Section and Total Pressure Loss Table
+            Duct_HTML_Index = n
         if "Fitting and Accessory Loss Coefficient Summary by Sections" in row:
-            print("Fitting Details: {}".format(n), row)
-            Fitting_Rows = table_rows[1:]
-            print(Fitting_Rows)
-            Table_Fitting_Index = n
+            Fitting_Sections = table_rows[1:]    # Collect Fitting Section and Total Pressure Loss Table
+            Fitting_HTML_Index = n
     
-        # if Table_Duct_Index is not None and Table_Fitting_Index is None:
-        #     Table_Duct.append(row)
-        # if Table_Fitting_Index is not None:
-        #     Table_Fittings.append(row)
-
+        if Duct_HTML_Index is not None and Fitting_HTML_Index is None:
+            Duct_SectionsSummary.append(row)
+        if Fitting_HTML_Index is not None:
+            Fittings_SectionsSummary.append(row)
     n = n + 1
 
 
-print(Table_Duct)
-print(Table_Fittings)
 
-# DuctRows = []
-# d_idx = ""
-# for drow in Table_Duct:
-#     print(drow)
-    # if "Element ID" in drow:
-    #     d_idx = 1
+# Extract Duct and Fitting Tables
+DuctReport = []
+d_idx = ""
+for drow in Duct_SectionsSummary:
+    if "Element ID" in drow:
+        d_idx = 1
     
-    # if d_idx == 1:
-    #     DuctRows.append(drow)
+    if d_idx == 1:
+        DuctReport.append(drow)
 
+
+FittingsReport = []
+f_idx = ""
+for frow in Fittings_SectionsSummary:
+    if "Element ID" in frow:
+        f_idx = 1
+    
+    if f_idx == 1:
+        FittingsReport.append(frow)
+
+
+
+output_window.print_table(table_data=Duct_Sections[1:], columns=Duct_Sections[0], title="Duct Sections and Total Pressure Loss")
+# print("Duct Sections and Total Pressure Loss:")
+# print(Duct_Section_TPL)
+
+output_window.print_table(table_data=DuctReport[1:], columns=DuctReport[0], title="Duct Report")
+# print("Duct Table:")
 # print(DuctRows)
 
-# """
+output_window.print_table(table_data=Fitting_Sections[1:], columns=Fitting_Sections[0], title="Fitting Sections and Total Pressure Loss")
+# print("Fitting Sections and Total Pressure Loss:")
+# print(Fitting_Section_TPL)
+
+output_window.print_table(table_data=FittingsReport[1:], columns=FittingsReport[0], title="Fitting Report")
+# print("Fitting Table:")
+# print(FittingRows)
 
 
 
 
+
+
+
+
+
+
+
+ColumnIndex = ["System Name", "Category", "Element ID", "Type Mark", "ASHRAE Table", "Comments", "Section", "Size", "Flow", "Length", "Velocity", "Friction", "Pressure Loss"]
+
+######################################################
+######################################################
+######################################################
+# <<< END WORKING AREA
 
 
 base_dir = os.path.dirname(html_path)
