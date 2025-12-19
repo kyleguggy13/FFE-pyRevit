@@ -1,21 +1,29 @@
 # 🛠️ FFE-pyRevit 🛠️
 
----
 
 FFE's pyRevit add-in extension.
 
 ---
 
+### Resources:
+- PDF Export Tutorial
+- CAD Export Tutorial
+- Content Catalog
 
-💠 Installation 💠
-
-[Point pyRevit to FFE-pyRevit](https://ffeinc.sharepoint.com/sites/RevitUsers/SitePages/Point-pyRevit-to-FFE-pyRevit.aspx)
-
----
-
-Functions:
+### Design Tools
 - Copy View Filters
 - Transfer View Templates
-- [Create Sheet Sets](https://ffeinc.sharepoint.com/sites/RevitUsers/SitePages/FFE-pyRevit-CreateSheetSets.aspx)
+- Create Sheet Sets
+- Design Guide Model Splitter
+
+### Preflight
+- Phase Filter Comparision
+- Project Info Comparision
+- Revision Comparison
+
+### BetaTools
 - Text Leader Position
 - Keynote Update
+- Duct Estimation
+- Keynote To Symbol
+- Pressure Loss Report Reader
