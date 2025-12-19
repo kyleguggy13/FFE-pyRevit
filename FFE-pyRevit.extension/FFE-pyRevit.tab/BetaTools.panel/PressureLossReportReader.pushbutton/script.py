@@ -29,7 +29,7 @@ Outputs (written next to the selected .html file):
 - <name>__total_pressure_loss.csv
 """
 
-from __future__ import print_function
+# from __future__ import print_function
 
 #____________________________________________________________________ IMPORTS (SYSTEM)
 import os
@@ -392,6 +392,30 @@ for data_row in dict_DuctReport["Data"]:
 dict_FittingsReport["Header"].insert(1, "Category")
 for data_row in dict_FittingsReport["Data"]:
     data_row.insert(1, "Fittings")
+
+
+# Convert Length to decimal feet
+length_index_duct = dict_DuctReport["Header"].index("Length")
+for data_row in dict_DuctReport["Data"]:
+    length_str = data_row[length_index_duct]
+    if "'" in length_str:
+        feet, inches = length_str.split("' - ")
+        feet = float(feet.strip())
+        if "/" in inches:
+            whole, frac = str(inches).split(' ')
+            num, denom = frac.split('/')
+            denom = denom.replace('"', '').strip()
+            inches = float(whole) + (float(num) / float(denom))
+        else:
+            inches = float(inches.replace('"', '').strip()) if inches.strip() else 0.0
+        # Split fractional inches
+            
+        decimal_feet = feet + (inches / 12.0)
+        data_row[length_index_duct] = round(decimal_feet, 4)
+    else:
+        data_row[length_index_duct] = 0.0
+
+
 
 
 
