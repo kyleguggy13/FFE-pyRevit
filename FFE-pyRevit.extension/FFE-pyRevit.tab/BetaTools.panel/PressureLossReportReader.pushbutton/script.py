@@ -7,7 +7,7 @@ Table2 = 'Fitting and Accessory Loss Coefficient Summary by Sections'
 Table3 = 'Total Pressure Loss Calculations by Sections'
 
 This report stores the title INSIDE the outer table (as a <th colspan="3"> row).
-So we identify the correct outer table by searching its own rows for the title.
+So we identify the correct outer table by searching its own cells for the title.
 
 Outputs (written next to the selected .html file):
 - <name>__straight_segments.csv
@@ -85,21 +85,21 @@ class TableNode(object):
         self.depth = depth
         self.rows = []
         self.current_row = None
-        self._row_text = []
+        self._cell_text = []
 
     def start_row(self):
         self.current_row = []
         self.rows.append(self.current_row)
 
-    def start_row(self):
-        self._row_text = []
+    def start_cell(self):
+        self._cell_text = []
 
     def add_text(self, t):
         if t:
-            self._row_text.append(t)
+            self._cell_text.append(t)
 
-    def end_row(self):
-        txt = clean_text("".join(self._row_text))
+    def end_cell(self):
+        txt = clean_text("".join(self._cell_text))
         if self.current_row is None:
             self.start_row()
         self.current_row.append(txt)
@@ -124,7 +124,7 @@ class ReportHTMLParser(HTMLParser):
         HTMLParser.__init__(self)
         self.tables = []
         self._table_stack = []
-        self._in_row = False
+        self._in_cell = False
 
     def handle_starttag(self, tag, attrs):  
         t = tag.lower()
@@ -137,15 +137,15 @@ class ReportHTMLParser(HTMLParser):
             self._table_stack[-1].start_row()
 
         if t in ("td", "th") and self._table_stack:
-            self._in_row = True
-            self._table_stack[-1].start_row()
+            self._in_cell = True
+            self._table_stack[-1].start_cell()
 
     def handle_endtag(self, tag):
         t = tag.lower()
 
-        if t in ("td", "th") and self._table_stack and self._in_row:
-            self._table_stack[-1].end_row()
-            self._in_row = False
+        if t in ("td", "th") and self._table_stack and self._in_cell:
+            self._table_stack[-1].end_cell()
+            self._in_cell = False
 
         if t == "table" and self._table_stack:
             self._table_stack.pop()
@@ -153,7 +153,7 @@ class ReportHTMLParser(HTMLParser):
     def handle_data(self, data):
         if not data:
             return
-        if self._table_stack and self._in_row:
+        if self._table_stack and self._in_cell:
             self._table_stack[-1].add_text(data)
 
     def handle_entityref(self, name):
@@ -182,8 +182,8 @@ TABLE1 = "Total Pressure Loss Calculations by Sections"
 TABLE2 = "Detail Information of Straight Segment by Sections"
 TABLE3 = "Fitting and Accessory Loss Coefficient Summary by Sections"
 
-def find_outer_table_by_title_row(tables, title):
-    """Return (index, table) where any row exactly equals title."""
+def find_outer_table_by_title_cell(tables, title):
+    """Return (index, table) where any cell exactly equals title."""
     for i, t in enumerate(tables):
         if t.contains_text(title):
             return i, t
@@ -302,11 +302,11 @@ CriticalPaths = TotalLossbySection[-1][0].split(' ')[3].split('-')
 # output_window.print_md("**CP:** {}".format(CriticalPaths))
 # print(type(CriticalPaths))
 
-"""
+# """
 Table_Duct = []
 Table_Fittings = []
-Table_Duct_Index = None
-Table_Fitting_Index = None
+Table_Duct_Index = ""
+Table_Fitting_Index = ""
 n=0
 for t in tables:
     table_rows = t.rows 
@@ -336,10 +336,10 @@ for t in tables:
 print(Table_Duct)
 print(Table_Fittings)
 
-DuctRows = []
-d_idx = ""
-for drow in Table_Duct:
-    print(drow)
+# DuctRows = []
+# d_idx = ""
+# for drow in Table_Duct:
+#     print(drow)
     # if "Element ID" in drow:
     #     d_idx = 1
     
@@ -348,7 +348,7 @@ for drow in Table_Duct:
 
 # print(DuctRows)
 
-"""
+# """
 
 
 
@@ -359,7 +359,7 @@ base_dir = os.path.dirname(html_path)
 base_name = safe_filename(os.path.splitext(os.path.basename(html_path))[0])
 
 def extract_one(title, out_suffix, section_total_col_name, preferred_order):
-    idx, outer = find_outer_table_by_title_row(tables, title)
+    idx, outer = find_outer_table_by_title_cell(tables, title)
     # output_window.print_md("**idx:** {}".format(idx))
     # output_window.print_md("**outer:** {}".format(outer))
 
@@ -388,7 +388,7 @@ def extract_one(title, out_suffix, section_total_col_name, preferred_order):
 
     return out_path, sec_cnt, emb_cnt, paired, len(records)
 
-
+"""
 # Table1
 t1_path, t1_sec, t1_emb, t1_paired, t1_rows = extract_one(
     TABLE1,
@@ -399,7 +399,7 @@ t1_path, t1_sec, t1_emb, t1_paired, t1_rows = extract_one(
     # preferred_order=[u"Section", u"Total Pressure Loss", u"Element ID", u"Type Mark", u"Comments", u"Size", u"Flow",
     #                  u"Length", u"Velocity", u"Friction", u"System Name", u"Pressure Loss"]
 )
-"""
+
 # Table2
 t2_path, t2_sec, t2_emb, t2_paired, t2_rows = extract_one(
     TABLE2,
@@ -436,6 +436,6 @@ def report(name, path, sec_cnt, emb_cnt, paired, rows):
     output_window.print_md("  - Section↔Embedded pairs used: **{}**".format(paired))
     output_window.print_md("  - Output rows written: **{}**".format(rows))
 
-report("Table1 (Straight Segments)", t1_path, t1_sec, t1_emb, t1_paired, t1_rows)
-report("Table2 (Fittings/Accessories)", t2_path, t2_sec, t2_emb, t2_paired, t2_rows)
-report("Table3 (Total Pressure Loss)", t3_path, t3_sec, t3_emb, t3_paired, t3_rows)
+# report("Table1 (Straight Segments)", t1_path, t1_sec, t1_emb, t1_paired, t1_rows)
+# report("Table2 (Fittings/Accessories)", t2_path, t2_sec, t2_emb, t2_paired, t2_rows)
+# report("Table3 (Total Pressure Loss)", t3_path, t3_sec, t3_emb, t3_paired, t3_rows)
