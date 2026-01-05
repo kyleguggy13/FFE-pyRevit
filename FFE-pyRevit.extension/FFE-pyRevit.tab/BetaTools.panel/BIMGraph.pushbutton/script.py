@@ -44,25 +44,28 @@ logger = script.get_logger()
 # ----------------------------
 # Helpers
 # ----------------------------
-def eid_int(eid):
+def elementid_int(elementid):
+    """
+    Convert ElementId to int safely.
+    """
     try:
-        return int(eid.IntegerValue)
+        return int(elementid.IntegerValue)
     except Exception:
         return None
 
-def safe_unique_id(el):
+def safe_unique_id(element):
     try:
-        return el.UniqueId
+        return element.UniqueId
     except Exception:
         return None
 
-def node_key(prefix, elid_int):
-    return "{}:{}".format(prefix, elid_int)
+def node_key(prefix, elementid_int):
+    return "{}:{}".format(prefix, elementid_int)
 
 def now_utc_iso():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
-def get_location_point(el):
+def get_location_point(element):
     """
     Return a representative XYZ point for an element.
     Preference order:
@@ -71,17 +74,17 @@ def get_location_point(el):
       - bounding box center (model)
     """
     try:
-        loc = el.Location
-        if loc:
+        location = element.Location
+        if location:
             # LocationPoint
-            p = getattr(loc, "Point", None)
-            if p:
-                return p
+            LocaitonPoint = getattr(location, "Point", None)
+            if LocaitonPoint:
+                return LocaitonPoint
             # LocationCurve
-            crv = getattr(loc, "Curve", None)
-            if crv:
+            LocationCurve = getattr(location, "Curve", None)
+            if LocationCurve:
                 try:
-                    return crv.Evaluate(0.5, True)
+                    return LocationCurve.Evaluate(0.5, True)
                 except Exception:
                     pass
     except Exception:
@@ -89,12 +92,12 @@ def get_location_point(el):
 
     # Bounding box fallback
     try:
-        bb = el.get_BoundingBox(None)
-        if bb and bb.Min and bb.Max:
+        boundingbox = element.get_BoundingBox(None)
+        if boundingbox and boundingbox.Min and boundingbox.Max:
             return XYZ(
-                (bb.Min.X + bb.Max.X) / 2.0,
-                (bb.Min.Y + bb.Max.Y) / 2.0,
-                (bb.Min.Z + bb.Max.Z) / 2.0
+                (boundingbox.Min.X + boundingbox.Max.X) / 2.0,
+                (boundingbox.Min.Y + boundingbox.Max.Y) / 2.0,
+                (boundingbox.Min.Z + boundingbox.Max.Z) / 2.0
             )
     except Exception:
         pass
@@ -113,19 +116,19 @@ def get_level_id_for_view(view):
         pass
     return ElementId.InvalidElementId
 
-def get_level_id_for_instance(fi):
+def get_level_id_for_instance(familyinstance):
     """
     Prefer LevelId when available.
     """
     try:
-        lid = getattr(fi, "LevelId", None)
-        if lid and lid != ElementId.InvalidElementId:
-            return lid
+        level_id = getattr(familyinstance, "LevelId", None)
+        if level_id and level_id != ElementId.InvalidElementId:
+            return level_id
     except Exception:
         pass
     # fallback: try parameter
     try:
-        p = fi.get_Parameter(BuiltInCategory.OST_Levels)  # not correct, but keep safe
+        p = familyinstance.get_Parameter(BuiltInCategory.OST_Levels)  # not correct, but keep safe
     except Exception:
         pass
     return ElementId.InvalidElementId
@@ -155,34 +158,35 @@ edges = []
 node_index = {}  # key -> node dict (dedupe)
 
 
-def add_node(key, ntype, label, el=None, props=None, pos=None):
+def add_node(key, ntype, label, el=None, properties=None, pos=None):
     if key in node_index:
         return node_index[key]
 
-    nd = {
+    # Create node
+    node = {
         "key": key,
         "type": ntype,
         "label": label,
-        "props": props or {},
+        "properties": properties or {},
         "pos": pos or {"x": 0, "y": 0}
     }
     if el is not None:
-        nd["revit"] = {
-            "elementId": eid_int(el.Id),
+        node["revit"] = {
+            "elementId": elementid_int(el.Id),
             "uniqueId": safe_unique_id(el)
         }
 
-    node_index[key] = nd
-    nodes.append(nd)
-    return nd
+    node_index[key] = node
+    nodes.append(node)
+    return node
 
 
-def add_edge(etype, from_key, to_key, props=None):
+def add_edge(element_type, from_key, to_key, properties=None):
     edges.append({
-        "type": etype,
+        "type": element_type,
         "from": from_key,
         "to": to_key,
-        "props": props or {}
+        "properties": properties or {}
     })
 
 
@@ -199,10 +203,14 @@ LANE_X = {
 lane_y = {k: 0 for k in LANE_X.keys()}
 LANE_DY = 60
 
-def next_pos(ntype):
-    x = LANE_X.get(ntype, 0)
-    y = lane_y.get(ntype, 0)
-    lane_y[ntype] = y + LANE_DY
+def next_pos(nodetype):
+    """
+    - nodetype: node type string
+    - Returns: {"x": float, "y": float}
+    """
+    x = LANE_X.get(nodetype, 0)
+    y = lane_y.get(nodetype, 0)
+    lane_y[nodetype] = y + LANE_DY
     return {"x": x, "y": y}
 
 
@@ -217,11 +225,11 @@ all_viewports = list(FilteredElementCollector(doc).OfClass(Viewport))
 views_by_id = {}  # viewId int -> View
 
 for sheet in sheets:
-    skey = node_key("sheet", eid_int(sheet.Id))
+    sheet_key = node_key("sheet", elementid_int(sheet.Id))
     sheet_label = "{} - {}".format(sheet.SheetNumber, sheet.Name)
     add_node(
-        skey, "sheet", sheet_label, el=sheet,
-        props={"sheetNumber": sheet.SheetNumber, "sheetName": sheet.Name},
+        sheet_key, "sheet", sheet_label, el=sheet,
+        properties={"sheetNumber": sheet.SheetNumber, "sheetName": sheet.Name},
         pos=next_pos("sheet")
     )
 
@@ -230,24 +238,24 @@ for sheet in sheets:
         try:
             if vp.SheetId != sheet.Id:
                 continue
-            vid = vp.ViewId
-            view = doc.GetElement(vid)
+            viewid = vp.ViewId
+            view = doc.GetElement(viewid)
             if view is None:
                 continue
-            vid_int = eid_int(vid)
-            vkey = node_key("view", vid_int)
+            viewid_int = elementid_int(viewid)
+            vkey = node_key("view", viewid_int)
 
-            vname = getattr(view, "Name", "View {}".format(vid_int))
+            vname = getattr(view, "Name", "View {}".format(viewid_int))
             vtype = str(getattr(view, "ViewType", ""))
 
             add_node(
                 vkey, "view", vname, el=view,
-                props={"viewType": vtype},
+                properties={"viewType": vtype},
                 pos=next_pos("view")
             )
 
-            views_by_id[vid_int] = view
-            add_edge("sheet_to_view", skey, vkey, props={"via": "Viewport"})
+            views_by_id[viewid_int] = view
+            add_edge("sheet_to_view", sheet_key, vkey, properties={"via": "Viewport"})
         except Exception:
             continue
 
@@ -265,7 +273,7 @@ for r in room_col:
         room = r
         if room is None:
             continue
-        rid = eid_int(room.Id)
+        rid = elementid_int(room.Id)
         rkey = node_key("room", rid)
 
         # Label: Number - Name
@@ -287,11 +295,11 @@ for r in room_col:
             lvlid = room.LevelId
         except Exception:
             pass
-        lvl_int = eid_int(lvlid) if lvlid and lvlid != ElementId.InvalidElementId else None
+        lvl_int = elementid_int(lvlid) if lvlid and lvlid != ElementId.InvalidElementId else None
 
         add_node(
             rkey, "room", rlabel, el=room,
-            props={"number": number, "name": name, "levelId": lvl_int},
+            properties={"number": number, "name": name, "levelId": lvl_int},
             pos=next_pos("room")
         )
 
@@ -307,25 +315,26 @@ for r in room_col:
 # ----------------------------
 equip_instances = []
 
-for bic in KEY_EQUIP_CATEGORIES:
+for built_in_category in KEY_EQUIP_CATEGORIES:
     try:
-        col = FilteredElementCollector(doc).OfCategory(bic).WhereElementIsNotElementType()
-        for el in col:
-            fi = el  # typically FamilyInstance
-            if not isinstance(fi, FamilyInstance):
+        # Collect FamilyInstances in this category
+        familyinstance_collector = FilteredElementCollector(doc).OfCategory(built_in_category).WhereElementIsNotElementType()
+        for element in familyinstance_collector:
+            familyinstance = element  # typically FamilyInstance
+            if not isinstance(familyinstance, FamilyInstance):
                 continue
 
-            pt = get_location_point(fi)
+            pt = get_location_point(familyinstance)
             if pt is None:
                 continue
 
-            eid = eid_int(fi.Id)
+            eid = elementid_int(familyinstance.Id)
             ekey = node_key("equip", eid)
 
             fam = ""
             typ = ""
             try:
-                sym = fi.Symbol
+                sym = familyinstance.Symbol
                 if sym:
                     typ = sym.Name
                     fam = sym.Family.Name if sym.Family else ""
@@ -334,9 +343,10 @@ for bic in KEY_EQUIP_CATEGORIES:
 
             jsn = ""
             try:
-                p = fi.LookupParameter("JSN")
+                p = familyinstance.LookupParameter("JSN")
                 if p and p.HasValue:
                     jsn = p.AsString()
+                    ekey = node_key("equip", jsn)
             except Exception:
                 pass
 
@@ -347,25 +357,25 @@ for bic in KEY_EQUIP_CATEGORIES:
                 label = "{} [{}]".format(label, jsn)
 
             add_node(
-                ekey, "equip", label, el=fi,
-                props={"family": fam, "type": typ, "JSN": jsn, "category": str(fi.Category.Name if fi.Category else "")},
+                ekey, "equip", label, el=familyinstance,
+                properties={"family": fam, "type": typ, "JSN": jsn, "category": str(familyinstance.Category.Name if familyinstance.Category else "")},
                 pos=next_pos("equip")
             )
 
-            equip_instances.append((fi, pt))
+            equip_instances.append((familyinstance, pt))
     except Exception:
         continue
 
 # Room containment edges (Room -> Equip)
 # Optimization: only test rooms on same level when possible.
-for fi, pt in equip_instances:
+for familyinstance, pt in equip_instances:
     try:
         # Determine candidate rooms by level if possible
         lvl_int = None
         try:
-            lid = fi.LevelId
+            lid = familyinstance.LevelId
             if lid and lid != ElementId.InvalidElementId:
-                lvl_int = eid_int(lid)
+                lvl_int = elementid_int(lid)
         except Exception:
             pass
 
@@ -374,9 +384,16 @@ for fi, pt in equip_instances:
         for room in candidate_rooms:
             try:
                 if room and room.IsPointInRoom(pt):
-                    rkey = node_key("room", eid_int(room.Id))
-                    ekey = node_key("equip", eid_int(fi.Id))
-                    add_edge("room_to_equip", rkey, ekey, props={})
+                    rkey = node_key("room", elementid_int(room.Id))
+                    jsn = ""
+                    try:
+                        p = familyinstance.LookupParameter("JSN")
+                        if p and p.HasValue:
+                            jsn = p.AsString()
+                            ekey = node_key("equip", jsn)
+                    except Exception:
+                        ekey = node_key("equip", elementid_int(familyinstance.Id))
+                    add_edge("room_to_equip", rkey, ekey, properties={})
             except Exception:
                 continue
     except Exception:
@@ -386,12 +403,12 @@ for fi, pt in equip_instances:
 # ----------------------------
 # 4) Systems via connectors (Equip -> System)
 # ----------------------------
-def iter_connectors(fi):
+def iter_connectors(familyinstance):
     """
     Return connectors for a FamilyInstance if available.
     """
     try:
-        mep = fi.MEPModel
+        mep = familyinstance.MEPModel
         if mep is None:
             return []
         cm = getattr(mep, "ConnectorManager", None)
@@ -412,7 +429,7 @@ def system_key_and_label(sys_obj):
     try:
         sid = getattr(sys_obj, "Id", None)
         if sid:
-            sid_int = eid_int(sid)
+            sid_int = elementid_int(sid)
             if sid_int is not None:
                 skey = node_key("system", sid_int)
                 sname = getattr(sys_obj, "Name", None) or "System {}".format(sid_int)
@@ -430,39 +447,39 @@ def system_key_and_label(sys_obj):
     return skey, "System", {"systemType": "Unknown"}
 
 # Track created systems to avoid duplicates
-for fi, _pt in equip_instances:
+for familyinstance, _pt in equip_instances:
     try:
-        ekey = node_key("equip", eid_int(fi.Id))
-        conns = iter_connectors(fi)
+        element_key = node_key("equip", elementid_int(familyinstance.Id))
+        conns = iter_connectors(familyinstance)
         for c in conns:
-            sys_obj = None
+            system_obj = None
 
             # Mechanical/Piping
             try:
-                sys_obj = getattr(c, "MEPSystem", None)
+                system_obj = getattr(c, "MEPSystem", None)
             except Exception:
-                sys_obj = None
+                system_obj = None
 
             # Electrical (some builds expose ElectricalSystem)
-            if sys_obj is None:
+            if system_obj is None:
                 try:
-                    sys_obj = getattr(c, "ElectricalSystem", None)
+                    system_obj = getattr(c, "ElectricalSystem", None)
                 except Exception:
-                    sys_obj = None
+                    system_obj = None
 
-            if sys_obj is None:
+            if system_obj is None:
                 continue
 
-            skey, sname, sprops = system_key_and_label(sys_obj)
+            system_key, system_name, system_properties = system_key_and_label(system_obj)
 
             # Create system node
             add_node(
-                skey, "system", sname, el=(sys_obj if hasattr(sys_obj, "UniqueId") else None),
-                props=sprops,
+                system_key, "system", system_name, el=(system_obj if hasattr(system_obj, "UniqueId") else None),
+                properties=system_properties,
                 pos=next_pos("system")
             )
 
-            add_edge("equip_to_system", ekey, skey, props={})
+            add_edge("equip_to_system", element_key, system_key, properties={})
     except Exception:
         continue
 
@@ -470,20 +487,20 @@ for fi, _pt in equip_instances:
 # ----------------------------
 # 5) View -> Rooms (phase-1: rooms on same GenLevel)
 # ----------------------------
-for vid_int, view in views_by_id.items():
+for viewid_int, view in views_by_id.items():
     try:
-        vkey = node_key("view", vid_int)
+        vkey = node_key("view", viewid_int)
         lvlid = get_level_id_for_view(view)
         if not lvlid or lvlid == ElementId.InvalidElementId:
             continue
 
-        lvl_int = eid_int(lvlid)
+        lvl_int = elementid_int(lvlid)
         if lvl_int is None:
             continue
 
         for room in rooms_by_level.get(lvl_int, []):
-            rkey = node_key("room", eid_int(room.Id))
-            add_edge("view_to_room", vkey, rkey, props={"method": "GenLevel"})
+            rkey = node_key("room", elementid_int(room.Id))
+            add_edge("view_to_room", vkey, rkey, properties={"method": "GenLevel"})
     except Exception:
         continue
 
