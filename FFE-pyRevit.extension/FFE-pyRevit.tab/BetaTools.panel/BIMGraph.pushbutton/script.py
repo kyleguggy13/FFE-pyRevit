@@ -20,7 +20,7 @@ Tested pattern: Revit 2024/2025/2026 + pyRevit (IronPython).
 
 import os
 import json
-import datetime
+import time
 
 from pyrevit import script, forms
 from Autodesk.Revit.DB import (
@@ -34,9 +34,9 @@ from Autodesk.Revit.DB import (
     ElementId
 )
 
-doc = __revit__.ActiveUIDocument.Document
-uiapp = __revit__
-app = uiapp.Application
+doc     = __revit__.ActiveUIDocument.Document
+uiapp   = __revit__
+app     = uiapp.Application
 
 logger = script.get_logger()
 
@@ -60,7 +60,7 @@ def node_key(prefix, elid_int):
     return "{}:{}".format(prefix, elid_int)
 
 def now_utc_iso():
-    return datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 def get_location_point(el):
     """
