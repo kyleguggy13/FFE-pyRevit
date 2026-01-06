@@ -18,11 +18,17 @@ Edges:
 Tested pattern: Revit 2024/2025/2026 + pyRevit (IronPython).
 """
 
+
+#____________________________________________________________________ IMPORTS (SYSTEM)
 import os
 import json
 import time
 
-from pyrevit import script, forms
+#____________________________________________________________________ IMPORTS (PYREVIT)
+from pyrevit import script, forms, output
+
+
+#____________________________________________________________________ VARIABLES (AUTODESK)
 from Autodesk.Revit.DB import (
     FilteredElementCollector,
     BuiltInCategory,
@@ -34,16 +40,18 @@ from Autodesk.Revit.DB import (
     ElementId
 )
 
+
+#____________________________________________________________________ VARIABLES
 doc     = __revit__.ActiveUIDocument.Document
 uiapp   = __revit__
 app     = uiapp.Application
 
+output_window = output.get_output()
+
 logger = script.get_logger()
 
 
-# ----------------------------
-# Helpers
-# ----------------------------
+#____________________________________________________________________ FUNCTIONS
 def elementid_int(elementid):
     """
     Convert ElementId to int safely.
@@ -135,9 +143,7 @@ def get_level_id_for_instance(familyinstance):
     return ElementId.InvalidElementId
 
 
-# ----------------------------
-# “Key equipment” category whitelist
-# ----------------------------
+#____________________________________________________________________ KEY EQUIPMENT CATEGORIES
 KEY_EQUIP_CATEGORIES = [
     BuiltInCategory.OST_MechanicalEquipment,
     BuiltInCategory.OST_PlumbingFixtures,
@@ -150,9 +156,7 @@ KEY_EQUIP_CATEGORIES = [
 ]
 
 
-# ----------------------------
-# Collect nodes + edges
-# ----------------------------
+#____________________________________________________________________ NODES + EDGES
 nodes = []
 edges = []
 
@@ -174,7 +178,7 @@ def add_node(key, nodetype, label, element=None, properties=None, pos=None):
     if element is not None:
         node["revit"] = {
             "elementId": element.Id.ToString(),
-            "uniqueId": safe_unique_id(element)
+            # "uniqueId": safe_unique_id(element)
         }
 
     node_index[key] = node
@@ -191,9 +195,8 @@ def add_edge(element_type, from_key, to_key, properties=None):
     })
 
 
-# ----------------------------
-# Layout: swimlanes by type
-# ----------------------------
+#____________________________________________________________________ LAYOUT: SWIMLANES BY TYPE
+### I don't think this is needed
 LANE_X = {
     "sheet": -600,
     "view":  -200,
@@ -215,9 +218,7 @@ def next_pos(nodetype):
     return {"x": x, "y": y}
 
 
-# ----------------------------
-# 1) Sheets + placed Views (Sheet -> View)
-# ----------------------------
+#____________________________________________________________________ 1) SHEETS -> VIEWS
 sheets = [s for s in FilteredElementCollector(doc).OfClass(ViewSheet) if not s.IsPlaceholder]
 
 # Pre-collect all Viewports once
@@ -261,9 +262,7 @@ for sheet in sheets:
             continue
 
 
-# ----------------------------
-# 2) Rooms
-# ----------------------------
+#____________________________________________________________________ 2) ROOMS
 rooms = []
 rooms_by_level = {}  # levelId int -> [room]
 room_col = FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_Rooms).WhereElementIsNotElementType()
@@ -274,8 +273,8 @@ for r in room_col:
         room = r
         if room is None:
             continue
-        rid = elementid_int(room.Id)
-        rkey = node_key("room", rid)
+        room_id = elementid_int(room.Id)
+        room_key = node_key("room", room_id)
 
         # Label: Number - Name
         number = ""
@@ -285,10 +284,12 @@ for r in room_col:
         except Exception:
             pass
         try:
-            name = room.Name
+            # name = room.Name
+            name = room.LookupParameter("Name").AsString()
         except Exception:
+            output_window.print_md("### Warning: Room {} has no name.".format(room_id))
             pass
-        rlabel = "{} - {}".format(number, name).strip(" -")
+        room_label = "{}".format(name)
 
         # Level
         lvlid = ElementId.InvalidElementId
@@ -299,7 +300,7 @@ for r in room_col:
         lvl_int = elementid_int(lvlid) if lvlid and lvlid != ElementId.InvalidElementId else None
 
         add_node(
-            rkey, "room", rlabel, element=room,
+            room_key, "room", room_label, element=room,
             properties={"number": number, "name": name, "levelId": lvl_int},
             pos=next_pos("room")
         )
@@ -311,9 +312,7 @@ for r in room_col:
         continue
 
 
-# ----------------------------
-# 3) Key Equipment + Room containment (Room -> Equipment)
-# ----------------------------
+#____________________________________________________________________ 3) ROOM -> EQUIPMENT
 equip_instances = []
 
 for built_in_category in KEY_EQUIP_CATEGORIES:
@@ -351,7 +350,7 @@ for built_in_category in KEY_EQUIP_CATEGORIES:
             except Exception:
                 pass
 
-            label = fam or "Equipment"
+            label = familyinstance.Name or "Equipment"
             if typ:
                 label = "{}: {}".format(label, typ)
             if jsn:
@@ -401,9 +400,8 @@ for familyinstance, pt in equip_instances:
         continue
 
 
-# ----------------------------
-# 4) Systems via connectors (Equip -> System)
-# ----------------------------
+#____________________________________________________________________ 4) EQUIPMENT -> SYSTEMS
+### Systems via connectors
 def iter_connectors(familyinstance):
     """
     Return connectors for a FamilyInstance if available.
@@ -485,9 +483,8 @@ for familyinstance, _pt in equip_instances:
         continue
 
 """
-# ----------------------------
-# 5) View -> Rooms (phase-1: rooms on same GenLevel)
-# ----------------------------
+#____________________________________________________________________ VIEWS -> ROOMS
+### phase-1: rooms on same GenLevel
 for viewid_int, view in views_by_id.items():
     try:
         vkey = node_key("view", viewid_int)
@@ -506,9 +503,7 @@ for viewid_int, view in views_by_id.items():
         continue
 """
 
-# ----------------------------
-# Export JSON
-# ----------------------------
+#____________________________________________________________________ EXPORT JSON
 default_name = "bim_graph.json"
 out_path = forms.save_file(file_ext="json", default_name=default_name)
 
