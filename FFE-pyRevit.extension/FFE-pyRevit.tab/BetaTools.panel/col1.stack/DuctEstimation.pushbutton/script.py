@@ -19,6 +19,7 @@ Author: Kyle Guggenheim"""
 
 #____________________________________________________________________ IMPORTS (AUTODESK)
 
+import sys
 import clr
 clr.AddReference("System")
 from Autodesk.Revit.DB import *
@@ -37,12 +38,17 @@ uidoc       = __revit__.ActiveUIDocument
 doc         = __revit__.ActiveUIDocument.Document   #type: Document
 selection   = uidoc.Selection                       #type: Selection
 
+
+output_window = output.get_output()
+
+
 #____________________________________________________________________ MAIN
 
+############## LINKIFY TESTING
+"""
 selection = revit.get_selection()
 
 # Set up the output panel
-output_window = output.get_output()
 output_window.set_title("Duct Estimation")
 output_window.print_md("## 🛠 Duct & Insulation Estimation Tool")
 output_window.print_md("### ⚠️ This tool estimates the total surface area and volume of sheet metal and insulation in the project.")
@@ -55,36 +61,10 @@ output_window.print_md("### 📋 Selected Elements:"
 for elem in selection.elements:
     elid = elem.Id
     output_window.print_md("### 📋 Element ID: {}".format(output_window.linkify(elid)))
-
 """
-# Test duct_collector
-# duct_collector = FilteredElementCollector(doc).OfClass(ElementType).WhereElementIsElementType().ToElements()
-# for duct_type in duct_collector:
-#     if duct_type.FamilyName == "Round Duct" or duct_type.FamilyName == "Rectangular Duct":
-#         ducttype_Name = DB.Element.Name.__get__(duct_type)
-#         ducttype_ID = DB.Element.Id.__get__(duct_type)
-#         output_window.print_md("### ✅ Found Duct Types: {}, {}".format(ducttype_Name, ducttype_ID))
+############## LINKIFY TESTING
 
 
-# duct_instance_collector = FilteredElementCollector(doc).OfClass(FamilyInstance).WhereElementIsNotElementType().ToElements()
-# for duct_instance in duct_instance_collector:
-#     if duct_instance.Symbol.FamilyName == "Round Duct" or duct_instance.Symbol.FamilyName == "Rectangular Duct":
-#         ductinstance_Name = DB.Element.Name.__get__(duct_instance)
-#         ductinstance_ID = DB.Element.Id.__get__(duct_instance)
-#         output_window.print_md("### ✅ Found Duct Instances: {}, {}".format(ductinstance_Name, ductinstance_ID))
-"""
-
-##################
-### CURRENTLY WORKING:
-# for duct in selection:
-#     if isinstance(duct, FamilyInstance):
-#         if duct.Symbol.FamilyName == "Round Duct" or duct.Symbol.FamilyName == "Rectangular Duct":
-#             ductinstance_Name = DB.Element.Name.__get__(duct)
-#             ductinstance_ID = DB.Element.Id.__get__(duct)
-#             output_window.print_md("### ✅ Found Duct Instance: {}, {}".format(ductinstance_Name, ductinstance_ID))
-#         else:
-#             output_window.print_md()
-##################
 
 """
 ### Steps:
@@ -110,8 +90,6 @@ output_window.print_md("### ✅ Found Duct Network with {} elements.".format(len
 
 
 
-# A simplified example for traversing from a selected element
-# from pyrevit import revit, DB, UI
 
 uidoc = revit.uidoc
 doc = revit.doc
@@ -120,21 +98,27 @@ doc = revit.doc
 try:
     ref = uidoc.Selection.PickObject(UI.Selection.ObjectType.Element, "Select a duct or fitting.")
     start_element = doc.GetElement(ref)
+    print("start element: ", start_element, type(start_element))
 except:
     script.exit()
 
-connected_elements = set()
-# Use a function to recursively find all connected parts (a full script is complex)
-# The core idea is using element.ConnectorManager.Lookup(other_connector_id) to confirm connections
-# Or simply using the built-in system.GetElementIds() if the system is properly defined in Revit
 
 # If the element belongs to a system, this is the easiest way to get all connected elements:
 if hasattr(start_element, 'MEPSystem'):
     mep_system = start_element.MEPSystem
+    print("mep_system: ", mep_system, type(mep_system))
     if mep_system:
-        # Get all elements related to that logical system
-        all_system_elements = mep_system.DuctNetwork
-        output_window.print_md("Found {} elements in the system '{}'.".format(all_system_elements, mep_system.Name))
+        # Get all sections related to MEPSystem
+        sections = mep_system.SectionsCount
+        system_sections = [mep_system.GetSectionByNumber(i) for i in range(1, sections + 1)]
+        # all_system_elements = mep_system.GetSectionByNumber(4).GetElementIds()  # Example: get elements in section 4
+        output_window.print_md("Found {} sections in the system '{}'.".format(len(system_sections), mep_system.Name))
+        
+        # print all element IDs in section
+        for elem_id in system_sections:
+            output_window.print_md("### Section: {}".format(system_sections.index(elem_id) + 1))
+            for el_id in elem_id.GetElementIds():
+                output_window.print_md(" - {}".format(el_id))
 
 
 """
@@ -183,7 +167,7 @@ else:
 # SqFt_Rnd              = (pi() * Diameter / 1') * (Length / 1')
 
 #_____________________________________________________________________ 🏃‍➡️ RUN 
-
+"""
 # Collect all duct elements
 duct_collector = FilteredElementCollector(doc)\
                     .OfCategory(BuiltInCategory.OST_DuctCurves)\
@@ -274,3 +258,4 @@ table_rows=[
 # output_window.print_md("### Duct Elements Found")
 
 # output_window.print_table(table_data=table_rows, columns=table_columns, title="Ducts in Model")
+"""
