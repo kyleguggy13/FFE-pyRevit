@@ -49,7 +49,8 @@ def elementid_int(elementid):
     Convert ElementId to int safely.
     """
     try:
-        return int(elementid.IntegerValue)
+        # return int(elementid.IntegerValue)
+        return elementid.ToString()
     except Exception:
         return None
 
@@ -158,22 +159,22 @@ edges = []
 node_index = {}  # key -> node dict (dedupe)
 
 
-def add_node(key, ntype, label, el=None, properties=None, pos=None):
+def add_node(key, nodetype, label, element=None, properties=None, pos=None):
     if key in node_index:
         return node_index[key]
 
     # Create node
     node = {
         "key": key,
-        "type": ntype,
+        "type": nodetype,
         "label": label,
         "properties": properties or {},
         "pos": pos or {"x": 0, "y": 0}
     }
-    if el is not None:
+    if element is not None:
         node["revit"] = {
-            "elementId": elementid_int(el.Id),
-            "uniqueId": safe_unique_id(el)
+            "elementId": element.Id.ToString(),
+            "uniqueId": safe_unique_id(element)
         }
 
     node_index[key] = node
@@ -228,7 +229,7 @@ for sheet in sheets:
     sheet_key = node_key("sheet", elementid_int(sheet.Id))
     sheet_label = "{} - {}".format(sheet.SheetNumber, sheet.Name)
     add_node(
-        sheet_key, "sheet", sheet_label, el=sheet,
+        sheet_key, "sheet", sheet_label, element=sheet,
         properties={"sheetNumber": sheet.SheetNumber, "sheetName": sheet.Name},
         pos=next_pos("sheet")
     )
@@ -249,7 +250,7 @@ for sheet in sheets:
             vtype = str(getattr(view, "ViewType", ""))
 
             add_node(
-                vkey, "view", vname, el=view,
+                vkey, "view", vname, element=view,
                 properties={"viewType": vtype},
                 pos=next_pos("view")
             )
@@ -298,7 +299,7 @@ for r in room_col:
         lvl_int = elementid_int(lvlid) if lvlid and lvlid != ElementId.InvalidElementId else None
 
         add_node(
-            rkey, "room", rlabel, el=room,
+            rkey, "room", rlabel, element=room,
             properties={"number": number, "name": name, "levelId": lvl_int},
             pos=next_pos("room")
         )
@@ -357,7 +358,7 @@ for built_in_category in KEY_EQUIP_CATEGORIES:
                 label = "{} [{}]".format(label, jsn)
 
             add_node(
-                ekey, "equip", label, el=familyinstance,
+                ekey, "equip", label, element=familyinstance,
                 properties={"family": fam, "type": typ, "JSN": jsn, "category": str(familyinstance.Category.Name if familyinstance.Category else "")},
                 pos=next_pos("equip")
             )
@@ -474,7 +475,7 @@ for familyinstance, _pt in equip_instances:
 
             # Create system node
             add_node(
-                system_key, "system", system_name, el=(system_obj if hasattr(system_obj, "UniqueId") else None),
+                system_key, "system", system_name, element=(system_obj if hasattr(system_obj, "UniqueId") else None),
                 properties=system_properties,
                 pos=next_pos("system")
             )
@@ -483,7 +484,7 @@ for familyinstance, _pt in equip_instances:
     except Exception:
         continue
 
-
+"""
 # ----------------------------
 # 5) View -> Rooms (phase-1: rooms on same GenLevel)
 # ----------------------------
@@ -503,7 +504,7 @@ for viewid_int, view in views_by_id.items():
             add_edge("view_to_room", vkey, rkey, properties={"method": "GenLevel"})
     except Exception:
         continue
-
+"""
 
 # ----------------------------
 # Export JSON
