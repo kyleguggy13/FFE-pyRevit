@@ -152,6 +152,7 @@
           <option value="">All Equipment</option>
         </select>
         <button id="clearFiltersBtn">Clear Filters</button>
+        <button id="hideIsolatedBtn" style="background: rgba(255,255,255,0.08); color: rgba(231,234,240,.85);">Hide Isolated</button>
       </div>
     </div>
 
@@ -171,6 +172,40 @@
   <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 
   <script>
+    /*
+      Expected input JSON shape (passed to `buildForceGraph`):
+
+      {
+        "nodes": [
+          { "key": "unique-id", "type": "sheet|view|room|equip|system", "label": "Display text",
+            "pos": { "x": 0, "y": 0 },    // optional suggested position
+            "revit": { ... },               // optional Revit-specific metadata
+            "props": { ... }                // optional arbitrary properties
+          }, ...
+        ],
+        "edges": [
+          { "from": "node-key", "to": "node-key", "type": "edge_type_string" },
+          ...
+        ],
+        "meta": {
+          "sourceModelTitle": "...",
+          "exportedAtUtc": "...",
+          "revitVersion": "..."
+        }
+      }
+
+      Values used by this viewer:
+      - nodes[].key    -> unique identifier used to map links and for titles
+      - nodes[].type   -> controls color, size and filter grouping (sheet, view, room, equip, system)
+      - nodes[].label  -> displayed text next to node and in details panel
+      - nodes[].pos.x/y-> optional seed positions used when present
+      - nodes[].revit  -> shown (if present) in the details panel under "revit"
+      - nodes[].props  -> shown (if present) in the details panel under "props"
+      - edges[].from   -> source node key
+      - edges[].to     -> target node key
+      - edges[].type   -> used to tune link distance (see linkDistanceByType)
+      - meta.sourceModelTitle, meta.exportedAtUtc, meta.revitVersion -> displayed in top-left meta
+    */
     const svg = d3.select("#svg");
 
     const panel = document.getElementById("panel");
@@ -196,6 +231,7 @@
     // Global state for filtering
     let allNodes = [];
     let allLinks = [];
+    let hideIsolated = false;  // Toggle for hiding nodes without edges
     let activeFilters = {
       sheet: "",
       view: "",
@@ -207,8 +243,26 @@
     function getVisibleNodes() {
       if (!allNodes || allNodes.length === 0) return new Set();
 
+      // Compute nodes with edges once if needed
+      let nodesWithEdges = null;
+      if (hideIsolated) {
+        nodesWithEdges = new Set();
+        allLinks.forEach(link => {
+          nodesWithEdges.add(link.source);
+          nodesWithEdges.add(link.target);
+        });
+      }
+
       const hasActiveFilter = Object.values(activeFilters).some(v => v !== "");
-      if (!hasActiveFilter) return new Set(allNodes);
+      
+      // If no active filters, return all nodes (or all nodes with edges if hideIsolated)
+      if (!hasActiveFilter) {
+        if (hideIsolated) {
+          return nodesWithEdges;
+        } else {
+          return new Set(allNodes);
+        }
+      }
 
       const visible = new Set();
 
@@ -248,6 +302,15 @@
         });
       }
 
+      // If hideIsolated is enabled, filter out nodes without edges
+      if (hideIsolated) {
+        Array.from(visible).forEach(n => {
+          if (!nodesWithEdges.has(n)) {
+            visible.delete(n);
+          }
+        });
+      }
+
       return visible;
     }
 
@@ -259,6 +322,9 @@
 
     // Update filter dropdowns based on graph
     function updateFilterOptions(graph) {
+      // `nodes` expected to be an array of node objects. This function
+      // pulls `nodes[].type` and `nodes[].key` to populate the select lists.
+      // Note: dropdown values are the node `key` (unique identifier).
       const nodes = graph.nodes || [];
       
       const sheets = nodes.filter(n => n.type === "sheet").map(n => n.key);
@@ -318,6 +384,17 @@
       }
     });
 
+    // Hide isolated nodes button
+    document.getElementById("hideIsolatedBtn").addEventListener("click", () => {
+      hideIsolated = !hideIsolated;
+      const btn = document.getElementById("hideIsolatedBtn");
+      btn.style.background = hideIsolated ? "rgba(100,200,100,0.20)" : "rgba(255,255,255,0.08)";
+      btn.style.borderColor = hideIsolated ? "rgba(100,200,100,0.40)" : "rgba(255,255,255,0.20)";
+      if (allNodes.length > 0) {
+        buildForceGraph({ nodes: allNodes, edges: allLinks.map(l => ({ from: l.source.key, to: l.target.key, type: l.type })), meta: window.currentGraphMeta });
+      }
+    });
+
     const zoom = d3.zoom()
       .scaleExtent([0.15, 6])
       .on("zoom", (event) => root.attr("transform", event.transform));
@@ -372,6 +449,12 @@
       if (simulation) simulation.stop();
 
       // Prepare nodes + links
+      // Map incoming nodes to a working copy. Expected node fields used:
+      // - key (string): unique id
+      // - type (string): 'sheet'|'view'|'room'|'equip'|'system' used for color/filters
+      // - label (string): displayed label
+      // - pos (optional): {x,y} seed position
+      // - revit, props (optional): shown in details panel
       const nodes = (graph.nodes || []).map(n => ({
         ...n,
         x: (n.pos?.x ?? 0) + (Math.random() * 200 - 100),
