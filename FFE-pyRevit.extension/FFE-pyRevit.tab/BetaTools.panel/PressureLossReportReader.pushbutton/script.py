@@ -32,6 +32,7 @@ Outputs (written next to the selected .html file):
 # from __future__ import print_function
 
 #____________________________________________________________________ IMPORTS (SYSTEM)
+from math import e
 import os
 import re
 import csv
@@ -39,10 +40,17 @@ import codecs
 from HTMLParser import HTMLParser  # IronPython 2.7 compatible
 
 #____________________________________________________________________ IMPORTS (PYREVIT)
-from pyrevit import script
+from pyrevit import script, DB
 from pyrevit.script import output
 
+#____________________________________________________________________ IMPORTS (AUTODESK)
+from Autodesk.Revit.DB import FilteredElementCollector, BuiltInCategory
+
+
 #____________________________________________________________________ VARIABLES
+uidoc       = __revit__.ActiveUIDocument
+doc         = __revit__.ActiveUIDocument.Document   #type: Document
+
 output_window = output.get_output()
 
 log_status = ""
@@ -355,7 +363,7 @@ for tn, s in zip(d_section_tablenode, Duct_Sections):
             t.insert(0, s[0])  # Insert Section Number at position 0
             DuctReport.append(t)
 
-# Create Fititngs Report Lists
+# Create Fittngs Report Lists
 FittingsReport = []
 for tn, s in zip(f_section_tablenode, Fitting_Sections):
     t_rows = tn.rows
@@ -417,6 +425,74 @@ for data_row in dict_DuctReport["Data"]:
 
 
 
+duct_collector = FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_DuctCurves).WhereElementIsNotElementType()
+flexduct_collector = FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_FlexDuctCurves).WhereElementIsNotElementType()
+
+# Create Linkify Element IDs in Duct Report
+for data_row in dict_DuctReport["Data"]:
+    element_id = data_row[dict_DuctReport["Header"].index("Element ID")]
+    
+    # Search for element in duct collector
+    for duct in duct_collector:
+        element_obj = ""
+        
+        if duct.Id.ToString() == element_id:
+            element_obj = duct
+            break
+    
+    # If not found in duct collector, check flexduct collector
+    for flex in flexduct_collector:
+        if flex.Id.ToString() == element_id:
+            element_obj = flex
+            break
+    
+    # Check for element_obj value. Create Element Link
+    if element_obj == "":
+        element_link = "N/A"
+    else:
+        element_link = output_window.linkify(element_obj.Id)
+
+    # Insert Element Link into data row
+    data_row.insert(0, element_link)
+
+# Insert Element Link Header
+dict_DuctReport["Header"].insert(0, "Element Link")
+
+
+
+
+fittings_collector = FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_DuctFitting).WhereElementIsNotElementType()
+accessories_collector = FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_DuctAccessory).WhereElementIsNotElementType()
+
+# Create Linkify Element IDs in Fittings Report
+for data_row in dict_FittingsReport["Data"]:
+    element_id = data_row[dict_FittingsReport["Header"].index("Element ID")]
+    
+    # Search for element in fittings collector
+    for fitting in fittings_collector:
+        element_obj = ""
+        
+        if fitting.Id.ToString() == element_id:
+            element_obj = fitting
+            break
+    
+    # If not found in fittings collector, check accessories collector
+    for accessory in accessories_collector:
+        if accessory.Id.ToString() == element_id:
+            element_obj = accessory
+            break
+    
+    # Check for element_obj value. Create Element Link
+    if element_obj == "":
+        element_link = "N/A"
+    else:
+        element_link = output_window.linkify(element_obj.Id)
+
+    # Insert Element Link into data row
+    data_row.insert(0, element_link)
+
+# Insert Element Link Header
+dict_FittingsReport["Header"].insert(0, "Element Link")
 
 
 #____________________________________________________________________ OUTPUT TABLES
