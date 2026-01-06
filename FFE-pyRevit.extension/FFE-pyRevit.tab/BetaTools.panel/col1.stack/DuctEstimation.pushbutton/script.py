@@ -49,8 +49,12 @@ output_window.print_md("### ⚠️ This tool estimates the total surface area an
 
 output_window.print_md("### 📋 Selected Elements:"
                        "\n- {}".format(len(selection.elements)))
-output_window.print_md("### 📋 Selected Element IDs:"
-                       "\n- {}".format(', '.join([str(el.Id) for el in selection.elements])))
+# output_window.print_md("### 📋 Selected Element IDs:"
+#                        "\n- {}".format(', '.join([str(el.Id) for el in selection.elements])))
+
+for elem in selection.elements:
+    elid = elem.Id
+    output_window.print_md("### 📋 Element ID: {}".format(output_window.linkify(elid)))
 
 """
 # Test duct_collector
