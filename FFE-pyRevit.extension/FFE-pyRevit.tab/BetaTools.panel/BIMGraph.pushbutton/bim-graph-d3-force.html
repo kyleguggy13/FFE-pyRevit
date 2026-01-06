@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BIM Graph Viewer (D3 Force)</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0b0f16; overflow: hidden; }
+    #wrap { width: 100%; height: 100%; position: relative; }
+
+    #topbar{
+      position: absolute; left: 16px; top: 16px; z-index: 10;
+      display: flex; gap: 10px; align-items: flex-start;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      color: rgba(231,234,240,.85);
+      background: rgba(20, 25, 35, 0.6);
+      padding: 10px 12px;
+      border-radius: 12px;
+      backdrop-filter: blur(6px);
+      user-select: none;
+    }
+
+    #filterPanel {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-left: 20px;
+    }
+
+    #filterPanel select {
+      padding: 6px 10px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.20);
+      background: rgba(255,255,255,0.08);
+      color: rgba(231,234,240,.85);
+      font-size: 12px;
+      font-family: inherit;
+      cursor: pointer;
+    }
+
+    #filterPanel select:hover {
+      background: rgba(255,255,255,0.12);
+    }
+
+    #filterPanel select:focus {
+      outline: none;
+      border-color: rgba(255,255,255,0.40);
+      background: rgba(255,255,255,0.12);
+    }
+
+    #filterPanel label {
+      font-size: 12px;
+      opacity: 0.9;
+    }
+
+    #clearFiltersBtn {
+      padding: 6px 12px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.20);
+      background: rgba(255,255,255,0.08);
+      color: rgba(231,234,240,.85);
+      font-size: 12px;
+      font-family: inherit;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    #clearFiltersBtn:hover {
+      background: rgba(255,255,255,0.12);
+    }
+    #meta { font-size: 12px; opacity: 0.9; max-width: 55vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    #panel {
+      position: absolute;
+      right: 16px;
+      top: 16px;
+      width: 380px;
+      max-width: calc(100vw - 32px);
+      border-radius: 12px;
+      background: rgba(20, 25, 35, 0.92);
+      color: #e7eaf0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      box-shadow: 0 10px 30px rgba(0,0,0,.35);
+      padding: 12px 12px 10px;
+      backdrop-filter: blur(6px);
+      display: none;
+      z-index: 10;
+    }
+    #panel h3 { margin: 0 0 6px; font-size: 16px; }
+    #panel pre {
+      margin: 0;
+      opacity: .9;
+      font-size: 12px;
+      line-height: 1.35;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: rgba(255,255,255,.06);
+      padding: 10px;
+      border-radius: 10px;
+      max-height: 50vh;
+      overflow: auto;
+    }
+    #panel button {
+      float: right;
+      border: 0;
+      border-radius: 10px;
+      padding: 6px 10px;
+      background: rgba(255,255,255,.10);
+      color: #e7eaf0;
+      cursor: pointer;
+    }
+    #panel button:hover { background: rgba(255,255,255,.16); }
+
+    svg { width: 100%; height: 100%; display: block; }
+
+    .hint {
+      position: absolute; left: 16px; bottom: 16px; z-index: 10;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      font-size: 12px;
+      color: rgba(231,234,240,.75);
+      background: rgba(20, 25, 35, 0.55);
+      padding: 8px 10px;
+      border-radius: 10px;
+      backdrop-filter: blur(6px);
+      user-select: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <div id="topbar">
+      <div>
+        <strong>Load graph JSON:</strong>
+        <input id="file" type="file" accept=".json" />
+        <span id="meta"></span>
+      </div>
+      <div id="filterPanel" style="display: none;">
+        <label for="sheetFilter">Sheet:</label>
+        <select id="sheetFilter">
+          <option value="">All Sheets</option>
+        </select>
+        <label for="viewFilter">View:</label>
+        <select id="viewFilter">
+          <option value="">All Views</option>
+        </select>
+        <label for="roomFilter">Room:</label>
+        <select id="roomFilter">
+          <option value="">All Rooms</option>
+        </select>
+        <label for="equipFilter">Equipment:</label>
+        <select id="equipFilter">
+          <option value="">All Equipment</option>
+        </select>
+        <button id="clearFiltersBtn">Clear Filters</button>
+      </div>
+    </div>
+
+    <div id="panel">
+      <button id="closeBtn">Close</button>
+      <h3 id="panelTitle"></h3>
+      <pre id="panelBody"></pre>
+    </div>
+
+    <div class="hint">
+      Pan/zoom: mouse wheel + drag background • Drag node: click-drag • Click node: details • Double-click background: reset
+    </div>
+
+    <svg id="svg"></svg>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+
+  <script>
+    const svg = d3.select("#svg");
+
+    const panel = document.getElementById("panel");
+    const panelTitle = document.getElementById("panelTitle");
+    const panelBody = document.getElementById("panelBody");
+    document.getElementById("closeBtn").onclick = () => panel.style.display = "none";
+
+    function nodeColor(type) {
+      switch (type) {
+        case "sheet": return "#60a5fa";
+        case "view":  return "#a78bfa";
+        case "room":  return "#34d399";
+        case "equip": return "#f59e0b";
+        case "system":return "#ef4444";
+        default:      return "#e7eaf0";
+      }
+    }
+
+    const root = svg.append("g");
+    const linkLayer = root.append("g");
+    const nodeLayer = root.append("g");
+
+    // Global state for filtering
+    let allNodes = [];
+    let allLinks = [];
+    let activeFilters = {
+      sheet: "",
+      view: "",
+      room: "",
+      equip: ""
+    };
+
+    // Helper: get all nodes that should be visible based on filters
+    function getVisibleNodes() {
+      if (!allNodes || allNodes.length === 0) return new Set();
+
+      const hasActiveFilter = Object.values(activeFilters).some(v => v !== "");
+      if (!hasActiveFilter) return new Set(allNodes);
+
+      const visible = new Set();
+
+      // Add explicitly filtered nodes
+      if (activeFilters.sheet) {
+        allNodes.forEach(n => { if (n.type === "sheet" && n.key === activeFilters.sheet) visible.add(n); });
+      }
+      if (activeFilters.view) {
+        allNodes.forEach(n => { if (n.type === "view" && n.key === activeFilters.view) visible.add(n); });
+      }
+      if (activeFilters.room) {
+        allNodes.forEach(n => { if (n.type === "room" && n.key === activeFilters.room) visible.add(n); });
+      }
+      if (activeFilters.equip) {
+        allNodes.forEach(n => { if (n.type === "equip" && n.key === activeFilters.equip) visible.add(n); });
+      }
+
+      // Add connected nodes (traverse the graph)
+      const toProcess = Array.from(visible);
+      const processed = new Set(visible);
+
+      while (toProcess.length > 0) {
+        const current = toProcess.pop();
+        
+        // Find all connected nodes
+        allLinks.forEach(link => {
+          if (link.source === current && !processed.has(link.target)) {
+            processed.add(link.target);
+            visible.add(link.target);
+            toProcess.push(link.target);
+          }
+          if (link.target === current && !processed.has(link.source)) {
+            processed.add(link.source);
+            visible.add(link.source);
+            toProcess.push(link.source);
+          }
+        });
+      }
+
+      return visible;
+    }
+
+    // Helper: get visible links
+    function getVisibleLinks() {
+      const visibleNodes = getVisibleNodes();
+      return allLinks.filter(l => visibleNodes.has(l.source) && visibleNodes.has(l.target));
+    }
+
+    // Update filter dropdowns based on graph
+    function updateFilterOptions(graph) {
+      const nodes = graph.nodes || [];
+      
+      const sheets = nodes.filter(n => n.type === "sheet").map(n => n.key);
+      const views = nodes.filter(n => n.type === "view").map(n => n.key);
+      const rooms = nodes.filter(n => n.type === "room").map(n => n.key);
+      const equips = nodes.filter(n => n.type === "equip").map(n => n.key);
+
+      const populateSelect = (selectId, options) => {
+        const select = document.getElementById(selectId);
+        const currentValue = select.value;
+        const selectLabel = selectId.replace('Filter', '');
+        const capitalizedLabel = selectLabel.charAt(0).toUpperCase() + selectLabel.slice(1);
+        const pluralLabel = selectLabel === 'equip' ? 'Equipment' : capitalizedLabel + 's';
+        select.innerHTML = '<option value="">All ' + pluralLabel + '</option>';
+        
+        options.forEach(opt => {
+          const optionEl = document.createElement("option");
+          optionEl.value = opt;
+          optionEl.textContent = opt;
+          select.appendChild(optionEl);
+        });
+        
+        select.value = currentValue;
+      };
+
+      populateSelect("sheetFilter", sheets);
+      populateSelect("viewFilter", views);
+      populateSelect("roomFilter", rooms);
+      populateSelect("equipFilter", equips);
+
+      // Show filter panel if there's data
+      if (sheets.length > 0 || views.length > 0 || rooms.length > 0 || equips.length > 0) {
+        document.getElementById("filterPanel").style.display = "flex";
+      }
+    }
+
+    // Attach filter change handlers
+    ["sheetFilter", "viewFilter", "roomFilter", "equipFilter"].forEach(filterId => {
+      document.getElementById(filterId).addEventListener("change", (e) => {
+        const filterType = filterId.replace("Filter", "");
+        activeFilters[filterType] = e.target.value;
+        if (allNodes.length > 0) {
+          buildForceGraph({ nodes: allNodes, edges: allLinks.map(l => ({ from: l.source.key, to: l.target.key, type: l.type })), meta: window.currentGraphMeta });
+        }
+      });
+    });
+
+    // Clear filters button
+    document.getElementById("clearFiltersBtn").addEventListener("click", () => {
+      activeFilters = { sheet: "", view: "", room: "", equip: "" };
+      document.getElementById("sheetFilter").value = "";
+      document.getElementById("viewFilter").value = "";
+      document.getElementById("roomFilter").value = "";
+      document.getElementById("equipFilter").value = "";
+      if (allNodes.length > 0) {
+        buildForceGraph({ nodes: allNodes, edges: allLinks.map(l => ({ from: l.source.key, to: l.target.key, type: l.type })), meta: window.currentGraphMeta });
+      }
+    });
+
+    const zoom = d3.zoom()
+      .scaleExtent([0.15, 6])
+      .on("zoom", (event) => root.attr("transform", event.transform));
+
+    svg.call(zoom);
+
+    svg.on("dblclick", () => {
+      svg.transition().duration(250).call(zoom.transform, d3.zoomIdentity);
+    });
+
+    let simulation = null;
+
+    function showNodeDetails(n) {
+      panelTitle.textContent = `${n.type.toUpperCase()}: ${n.label}`;
+      panelBody.textContent = JSON.stringify({
+        key: n.key,
+        type: n.type,
+        label: n.label,
+        revit: n.revit || null,
+        props: n.props || {}
+      }, null, 2);
+      panel.style.display = "block";
+    }
+
+    // Estimate how much “space” a node should occupy, including label.
+    // This drives collision radius to reduce overlap.
+    function collisionRadius(d) {
+      const base = 18; // node + padding
+      const label = (d.label || "");
+      // rough monospace width estimate: ~7px per char at 12px font, scaled down a bit
+      const labelWidth = Math.min(260, label.length * 6.5);
+      // convert label width into a radius-like measure
+      return base + (labelWidth / 10);
+    }
+
+    function linkDistanceByType(edgeType) {
+      // Increase distances so layout expands.
+      // Tune these based on your graph density.
+      switch (edgeType) {
+        case "sheet_to_view":   return 180;
+        case "view_to_room":    return 160;
+        case "room_to_equip":   return 140;
+        case "equip_to_system": return 170;
+        default:                return 150;
+      }
+    }
+
+    function buildForceGraph(graph) {
+      // Clear old
+      linkLayer.selectAll("*").remove();
+      nodeLayer.selectAll("*").remove();
+      if (simulation) simulation.stop();
+
+      // Prepare nodes + links
+      const nodes = (graph.nodes || []).map(n => ({
+        ...n,
+        x: (n.pos?.x ?? 0) + (Math.random() * 200 - 100),
+        y: (n.pos?.y ?? 0) + (Math.random() * 200 - 100),
+      }));
+
+      // Store full graph for filtering
+      allNodes = nodes;
+      window.currentGraphMeta = graph.meta || {};
+      updateFilterOptions(graph);
+
+      const nodeByKey = new Map(nodes.map(n => [n.key, n]));
+
+      allLinks = (graph.edges || [])
+        .map(e => ({
+          ...e,
+          source: nodeByKey.get(e.from),
+          target: nodeByKey.get(e.to),
+        }))
+        .filter(l => l.source && l.target);
+
+      // Apply filters
+      const visibleNodes = Array.from(getVisibleNodes());
+      const visibleLinks = getVisibleLinks();
+      // Links
+      const link = linkLayer.selectAll("line")
+        .data(visibleLinks)
+        .enter()
+        .append("line")
+        .attr("stroke", "rgba(255,255,255,0.10)")
+        .attr("stroke-width", 1.2);
+
+      // Drag
+      const drag = d3.drag()
+        .on("start", (event, d) => {
+          if (!event.active) simulation.alphaTarget(0.30).restart();
+          d.fx = d.x;
+          d.fy = d.y;
+        })
+        .on("drag", (event, d) => {
+          d.fx = event.x;
+          d.fy = event.y;
+        })
+        .on("end", (event, d) => {
+          if (!event.active) simulation.alphaTarget(0);
+          d.fx = null;
+          d.fy = null;
+        });
+
+      // Nodes
+      const node = nodeLayer.selectAll("g.node")
+        .data(visibleNodes)
+        .enter()
+        .append("g")
+        .attr("class", "node")
+        .style("cursor", "pointer")
+        .call(drag)
+        .on("click", (event, d) => {
+          event.stopPropagation();
+          showNodeDetails(d);
+        });
+
+      node.append("circle")
+        .attr("r", d => {
+          if (d.type === "sheet") return 9;
+          if (d.type === "view") return 8;
+          if (d.type === "room") return 7;
+          if (d.type === "system") return 7;
+          return 6;
+        })
+        .attr("fill", d => nodeColor(d.type))
+        .attr("fill-opacity", 0.95)
+        .attr("stroke", "rgba(255,255,255,0.22)")
+        .attr("stroke-width", 1.2);
+
+      node.append("text")
+        .text(d => d.label)
+        .attr("x", 12)
+        .attr("y", 4)
+        .attr("fill", "rgba(231,234,240,0.92)")
+        .attr("font-size", 12)
+        .attr("font-family", "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace")
+        .style("pointer-events", "none");
+
+      node.append("title").text(d => `${d.type}: ${d.label}\n${d.key}`);
+
+      // Simulation tuning for “less condensed”
+      const { width, height } = svg.node().getBoundingClientRect();
+
+      simulation = d3.forceSimulation(nodes)
+        .force("link", d3.forceLink(visibleLinks)
+          .id(d => d.key)
+          .distance(l => linkDistanceByType(l.type))
+          .strength(0.35)           // weaker links = less clumping
+        )
+        .force("charge", d3.forceManyBody().strength(-600)) // stronger repulsion
+        .force("center", d3.forceCenter(width / 2, height / 2))
+        .force("collide", d3.forceCollide().radius(collisionRadius).iterations(2))
+        .force("radial", d3.forceRadial(Math.min(width, height) * 0.30, width / 2, height / 2)
+          .strength(0.02))          // gentle “spread out” tendency
+        .alpha(1.0)
+        .alphaDecay(0.03)           // slower cooling so it can expand
+        .velocityDecay(0.35)        // slightly less damping
+        .on("tick", () => {
+          link
+            .attr("x1", d => d.source.x)
+            .attr("y1", d => d.source.y)
+            .attr("x2", d => d.target.x)
+            .attr("y2", d => d.target.y);
+
+          node.attr("transform", d => `translate(${d.x},${d.y})`);
+        });
+
+      // Metadata
+      const m = graph.meta || {};
+      document.getElementById("meta").textContent =
+        `Model: ${m.sourceModelTitle || ""}  |  Exported: ${m.exportedAtUtc || ""}  |  Revit: ${m.revitVersion || ""}`;
+
+      // Clicking background closes panel
+      svg.on("click", () => panel.style.display = "none");
+    }
+
+    // File input loader
+    document.getElementById("file").addEventListener("change", (evt) => {
+      const file = evt.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          buildForceGraph(JSON.parse(reader.result));
+        } catch (err) {
+          alert("Invalid JSON: " + err);
+        }
+      };
+      reader.readAsText(file);
+    });
+
+    // Resize: update center forces
+    window.addEventListener("resize", () => {
+      if (!simulation) return;
+      const { width, height } = svg.node().getBoundingClientRect();
+      simulation.force("center", d3.forceCenter(width / 2, height / 2));
+      simulation.force("radial", d3.forceRadial(Math.min(width, height) * 0.30, width / 2, height / 2).strength(0.02));
+      simulation.alpha(0.4).restart();
+    });
+  </script>
+</body>
+</html>
