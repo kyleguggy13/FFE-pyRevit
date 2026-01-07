@@ -27,7 +27,7 @@ import clr
 clr.AddReference("System")
 from Autodesk.Revit.DB import *
 from Autodesk.Revit.UI import *
-from Autodesk.Revit.DB import FilteredElementCollector, Mechanical, Transaction, Family, BuiltInParameter, ElementType
+from Autodesk.Revit.DB import FilteredElementCollector, Mechanical, Family, BuiltInParameter, ElementType, UnitTypeId
 from Autodesk.Revit.DB import BuiltInCategory, ElementCategoryFilter, ElementId, GeometryElement
 #____________________________________________________________________ IMPORTS (PYREVIT)
 
@@ -124,6 +124,24 @@ def get_MEPSystem_elements(section):
     return elements
 
 
+def convertPressureUnits(value, units):
+    """
+    Function to convert internal units to Imperial
+    
+    :param value:   Value to convert
+    :param units:   ["pressure", "air flow"]
+    :return:        Specified Unit
+"""
+
+    if      units == "pressure" : units = UnitTypeId.InchesOfWater60DegreesFahrenheit
+    elif    units == "air flow" : units = UnitTypeId.CubicFeetPerMinute
+
+
+    # ConvertedValue = DB.UnitUtils.ConvertFromInternalUnits(Val, DB.UnitTypeId.InchesOfWater60DegreesFahrenheit)
+    return UnitUtils.ConvertFromInternalUnits(value, units)
+
+
+
 def get_element_data(element, SystemName):
     """Extract relevant data from a duct element."""
     # print("element: ", element, type(element))  # <- TESTING
@@ -175,16 +193,40 @@ output_window.print_md("# 📊 Duct Network Summary:")
 
 # Collect MEPSystem Data
 MEPSystem_Obj = get_MEPSystem(start_element)
+print("MEPSystem_Obj: ", MEPSystem_Obj, type(MEPSystem_Obj)) # <- TESTING
 
 
+# Collect System Name
 SystemName = MEPSystem_Obj.Name if MEPSystem_Obj != "N/A" else "N/A"
-output_window.print_md("### 📋 MEP System Name: {}".format(SystemName))
+output_window.print_md("### MEP System Name: {}".format(SystemName))
 
 
+# Check System Connection Status
+System_ConnectionStatus = MEPSystem_Obj.IsWellConnected
+if System_ConnectionStatus == True:
+    output_window.print_md("### System Connection Status: ✅")
+else:
+    output_window.print_md("### System Connection Status: ❌")
+
+
+# Collect Critical Path Sections
 SystemCriticalPath = MEPSystem_Obj.GetCriticalPathSectionNumbers()
-output_window.print_md("### 📋 Critical Path Sections: {}".format(SystemCriticalPath))
+output_window.print_md("### Critical Path Sections: {}".format(SystemCriticalPath))
 
 
+# Get Critical Path Total Static Pressure Loss
+CriticalPath_PressureLoss_Internal = MEPSystem_Obj.PressureLossOfCriticalPath
+CriticalPath_PressureLoss = convertPressureUnits(CriticalPath_PressureLoss_Internal, "pressure")
+output_window.print_md("### Critical Path Pressure Loss: {:.4f} in-wg".format(CriticalPath_PressureLoss))
+
+
+# Get Air Flow of System
+System_AirFlow_Internal = MEPSystem_Obj.GetFlow()
+System_AirFlow = convertPressureUnits(System_AirFlow_Internal, "air flow")
+output_window.print_md("### System Air Flow: {} CFM".format(System_AirFlow))
+
+
+# Collect all sections in the System
 system_sections = get_MEPSystem_sections(start_element)
 
 
@@ -194,6 +236,7 @@ ElementsBySection = {}
 for section in system_sections:
     elements = get_MEPSystem_elements(section)
     ElementsBySection[system_sections.index(section) + 1] = elements
+    output_window.print_md(section.Flow.ToString())
     # output_window.print_md("### Section {}: {} elements".format(system_sections.index(section) + 1, len(elements)))
 
 
@@ -229,6 +272,9 @@ for section_num, elements in ElementsBySection.items():
     for elem in elements:
         elem_data = get_element_data(elem, SystemName)
         elem_data['Section'] = section_num
+
+
+
         DuctNetworkData.append(elem_data)
 
 
@@ -242,8 +288,10 @@ output_window.print_table(table_data=TableRows, columns=DuctNetworkData[0].keys(
 
 
 
-"""
+
+
 ### Attempt to get GeometryObject from selected reference
+"""
 if ref:
     # 1. Get the host Element (the wall, floor, etc. that the geometry belongs to)
     element = doc.GetElement(ref.ElementId)
