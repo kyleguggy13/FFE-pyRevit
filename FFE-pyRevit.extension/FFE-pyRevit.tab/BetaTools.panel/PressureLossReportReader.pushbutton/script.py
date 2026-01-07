@@ -379,18 +379,6 @@ dict_DuctReport     = {"Header": DuctReport[0], "Data": DuctReport[1:]}
 dict_FittingsReport  = {"Header": FittingsReport[0], "Data": FittingsReport[1:]}
 
 
-"""
-# Use this for inserting Flow values into Fittings Report
-dict_DuctReport["Header"].insert(0, "Section")
-for data_row in dict_DuctReport["Data"]:
-    section_value = ""
-    element_id = data_row[dict_DuctReport["Header"].index("Element ID")]
-    for d_section in Duct_Sections:
-        if element_id in d_section[1]:
-            section_value = d_section[0]
-            break
-    data_row.insert(0, section_value)
-"""
 
 # Insert Category Column
 dict_DuctReport["Header"].insert(1, "Category")
