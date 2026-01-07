@@ -19,7 +19,10 @@ Author: Kyle Guggenheim"""
 
 #____________________________________________________________________ IMPORTS (AUTODESK)
 
+from math import e
+from re import S
 import sys
+from webbrowser import get
 import clr
 clr.AddReference("System")
 from Autodesk.Revit.DB import *
@@ -40,7 +43,7 @@ selection   = uidoc.Selection                       #type: Selection
 
 
 output_window = output.get_output()
-
+"""Output window for displaying results."""
 
 #____________________________________________________________________ MAIN
 
@@ -89,8 +92,51 @@ output_window.print_md("### ✅ Found Duct Network with {} elements.".format(len
 # """
 
 
+#____________________________________________________________________ FUNCTIONS
+def get_MEPSystem(element):
+    """Get the MEPSystem name of the given element, if it exists."""
+    if hasattr(element, 'MEPSystem'):
+        mep_system = element.MEPSystem
+        if mep_system:
+            return mep_system
+    return "N/A"
 
 
+def get_MEPSystem_sections(element):
+    """Get all sections in the duct network starting from the given element."""
+    if hasattr(element, 'MEPSystem'):
+        mep_system = element.MEPSystem            # Get the MEPSystem of the element
+        if mep_system:
+            sections_count = mep_system.SectionsCount   # Get Total number of sections
+            
+            # Get all sections related to MEPSystem
+            system_sections = [mep_system.GetSectionByNumber(i) for i in range(1, sections_count + 1)]
+            
+            return system_sections
+    
+    return []
+
+
+def get_MEPSystem_elements(section):
+    """Get all elements in a given duct section."""
+    element_ids_list = section.GetElementIds()                          # Get all element IDs in section
+    elements = [doc.GetElement(eid) for eid in element_ids_list]        # Retrieve elements from IDs
+    return elements
+
+
+def get_element_data(element, SystemName):
+    """Extract relevant data from a duct element."""
+    # print("element: ", element, type(element))  # <- TESTING
+    data = {}
+    data['Category'] = element.Category.Name if element.Category else "N/A"
+    data['Element ID'] = element.Id.ToString()
+    data['Comments'] = element.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS).AsString() if element.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS) else "N/A"
+    data['System Name'] = SystemName
+    # Add more parameters as needed
+    return data
+
+
+#____________________________________________________________________ MAIN
 uidoc = revit.uidoc
 doc = revit.doc
 
@@ -98,27 +144,102 @@ doc = revit.doc
 try:
     ref = uidoc.Selection.PickObject(UI.Selection.ObjectType.Element, "Select a duct or fitting.")
     start_element = doc.GetElement(ref)
-    print("start element: ", start_element, type(start_element))
+    print("start element: ", start_element, type(start_element)) # <- TESTING 
 except:
     script.exit()
 
-
-# If the element belongs to a system, this is the easiest way to get all connected elements:
-if hasattr(start_element, 'MEPSystem'):
-    mep_system = start_element.MEPSystem
-    print("mep_system: ", mep_system, type(mep_system))
-    if mep_system:
-        # Get all sections related to MEPSystem
-        sections = mep_system.SectionsCount
-        system_sections = [mep_system.GetSectionByNumber(i) for i in range(1, sections + 1)]
-        # all_system_elements = mep_system.GetSectionByNumber(4).GetElementIds()  # Example: get elements in section 4
-        output_window.print_md("Found {} sections in the system '{}'.".format(len(system_sections), mep_system.Name))
+"""
+# # If the element belongs to a system, this is the easiest way to get all connected elements:
+# if hasattr(start_element, 'MEPSystem'):
+#     mep_system = start_element.MEPSystem
+#     print("mep_system: ", mep_system, type(mep_system)) # <- TESTING
+    
+#     # If the element is not part of a system, mep_system will be None
+#     if mep_system:
+#         sections_count = mep_system.SectionsCount                                                   # Get all sections related to MEPSystem
+#         system_sections = [mep_system.GetSectionByNumber(i) for i in range(1, sections_count + 1)]
+#         output_window.print_md("Found {} sections in the system '{}'.".format(len(system_sections), mep_system.Name))
         
-        # print all element IDs in section
-        for elem_id in system_sections:
-            output_window.print_md("### Section: {}".format(system_sections.index(elem_id) + 1))
-            for el_id in elem_id.GetElementIds():
-                output_window.print_md(" - {}".format(el_id))
+#         # Get all element IDs in section
+#         for section in system_sections:
+#             output_window.print_md("### Section: {}".format(system_sections.index(section) + 1))    # Print Section Number
+#             element_ids_list = section.GetElementIds()
+#             for element_id in element_ids_list:
+#                 output_window.print_md(" - {}".format(element_id))                                  # Print Element IDs in Section
+"""
+
+
+
+output_window.print_md("# 📊 Duct Network Summary:")
+
+
+# Collect MEPSystem Data
+MEPSystem_Obj = get_MEPSystem(start_element)
+
+
+SystemName = MEPSystem_Obj.Name if MEPSystem_Obj != "N/A" else "N/A"
+output_window.print_md("### 📋 MEP System Name: {}".format(SystemName))
+
+
+SystemCriticalPath = MEPSystem_Obj.GetCriticalPathSectionNumbers()
+output_window.print_md("### 📋 Critical Path Sections: {}".format(SystemCriticalPath))
+
+
+system_sections = get_MEPSystem_sections(start_element)
+
+
+ElementsBySection = {}
+
+# Get all elements in each section
+for section in system_sections:
+    elements = get_MEPSystem_elements(section)
+    ElementsBySection[system_sections.index(section) + 1] = elements
+    # output_window.print_md("### Section {}: {} elements".format(system_sections.index(section) + 1, len(elements)))
+
+
+
+
+DuctNetworkData = []
+""" 
+List of Dictionaries containing data for each element in the duct network.
+## HEADERS FOR DATA TABLE
+| Headers       | Status    | Categories    |
+| ----------    | ----      | ----          |
+|Section        |✅     |                                       |
+|Category       |✅     |                                       |
+|Element ID     |✅     |                                       |
+|Type Mark      |❌     |                                       |
+|ASHRAE Table   |❌     | Duct, Fitting, Accessory              |
+|Comments       |✅     |                                       |
+|Size           |❌     | Duct, Flex Duct, Fitting, Accessory   |
+|Flow           |❌     | Duct, Flex Duct, Fitting, Accessory   |
+|Length         |❌     | Duct, Flex Duct                       |
+|Velocity       |❌     | Duct, Flex Duct                       |
+|Friction       |❌     | Duct, Flex Duct                       |
+|System Name    |✅     |                                       |
+|Pressure Loss  |❌     |                                       |
+"""
+
+
+
+
+# Compile data for all elements in the duct network
+
+for section_num, elements in ElementsBySection.items():
+    for elem in elements:
+        elem_data = get_element_data(elem, SystemName)
+        elem_data['Section'] = section_num
+        DuctNetworkData.append(elem_data)
+
+
+# Prepare data for table display
+TableRows = []
+for data in DuctNetworkData:
+    row = data.values()
+    TableRows.append(row)
+
+output_window.print_table(table_data=TableRows, columns=DuctNetworkData[0].keys(), title="Duct Network Elements")
+
 
 
 """
