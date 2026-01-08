@@ -110,25 +110,33 @@ def convertUnits(value, units):
 
     if      units == "pressure" : units = UnitTypeId.InchesOfWater60DegreesFahrenheit
     elif    units == "air flow" : units = UnitTypeId.CubicFeetPerMinute
+    elif    units == "length"   : units = UnitTypeId.Feet
 
 
-    # ConvertedValue = DB.UnitUtils.ConvertFromInternalUnits(Val, DB.UnitTypeId.InchesOfWater60DegreesFahrenheit)
+    
     return UnitUtils.ConvertFromInternalUnits(value, units)
 
 
 def get_MEPSection_PressureDrop(section, element):
     """Get pressure drop values for each element per section"""
-    # PressureDrop_dict = {}
     try:
         pressuredrop = section.GetPressureDrop(element)
-        # print(pressuredrop) # <- TESTING
-        
     except:
         pressuredrop = "Invalid Section"
 
-    # PressureDrop_dict[element] = pressuredrop
     return convertUnits(pressuredrop, "pressure")
 
+
+def get_MEPSection_SegmentLength(section, element):
+    """Get segment length values for each straigt/flex duct element per section"""
+    try:
+        segmentlength = section.GetSegmentLength(element)
+        segmentlength = "{:.4f}".format(convertUnits(segmentlength, "length"))
+        # print(segmentlength) # <- TESTING
+    except:
+        segmentlength = ""
+
+    return segmentlength
 
 
 
@@ -150,9 +158,9 @@ doc = revit.doc
 
 # Select one duct element first
 try:
-    ref = uidoc.Selection.PickObject(UI.Selection.ObjectType.Element, "Select a duct or fitting.")
+    ref = uidoc.Selection.PickObject(UI.Selection.ObjectType.Element, "Select a duct.")
     start_element = doc.GetElement(ref)
-    print("start element: ", start_element, type(start_element)) # <- TESTING 
+    # print("start element: ", start_element, type(start_element)) # <- TESTING 
 except:
     script.exit()
 
@@ -183,7 +191,7 @@ output_window.print_md("# 📊 Duct Network Summary:")
 
 # Collect MEPSystem Data
 MEPSystem_Obj = get_MEPSystem(start_element)
-print("MEPSystem_Obj: ", MEPSystem_Obj, type(MEPSystem_Obj)) # <- TESTING
+# print("MEPSystem_Obj: ", MEPSystem_Obj, type(MEPSystem_Obj)) # <- TESTING
 
 
 # Collect System Name
@@ -192,11 +200,14 @@ output_window.print_md("### MEP System Name: {}".format(SystemName))
 
 
 # Check System Connection Status
-System_ConnectionStatus = MEPSystem_Obj.IsWellConnected
-if System_ConnectionStatus == True:
-    output_window.print_md("### System Connection Status: ✅")
-else:
-    output_window.print_md("### System Connection Status: ❌")
+try:
+    System_ConnectionStatus = MEPSystem_Obj.IsWellConnected
+    if System_ConnectionStatus == True:
+        output_window.print_md("### System Connection Status: ✅")
+    else:
+        output_window.print_md("### System Connection Status: ❌")
+except:
+    forms.alert("Please Select Straight or Flex Duct", title="Invalid Selection", exitscript=True)
 
 
 # Collect Critical Path Sections
@@ -283,6 +294,10 @@ for section_num, elements in Elements_BySection.items():
         
         pd = get_MEPSection_PressureDrop(system_sections[section_num - 1], elem.Id)
         elem_data["Pressure Drop (in-wg)"] = "{:.4f}".format(pd)
+
+        length = get_MEPSection_SegmentLength(system_sections[section_num - 1], elem.Id)
+        elem_data["Length (ft)"] = length
+
 
         DuctNetworkData.append(elem_data)
 
