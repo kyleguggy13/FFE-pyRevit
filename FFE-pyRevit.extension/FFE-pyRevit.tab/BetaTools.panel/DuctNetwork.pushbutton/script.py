@@ -222,7 +222,9 @@ except:
 
 
 # Collect Critical Path Sections
-SystemCriticalPath = MEPSystem_Obj.GetCriticalPathSectionNumbers()
+SystemCriticalPath = MEPSystem.GetCriticalPathSectionNumbers(MEPSystem_Obj)
+SystemCriticalPath = list(map(str, SystemCriticalPath))
+# SystemCriticalPath = MEPSystem_Obj.GetCriticalPathSectionNumbers()
 output_window.print_md("### Critical Path Sections: {}".format(SystemCriticalPath))
 
 
