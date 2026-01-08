@@ -16,18 +16,22 @@ Last update:
 ______________________________________________________________
 Author: Kyle Guggenheim"""
 
-#____________________________________________________________________ IMPORTS (AUTODESK)
+#____________________________________________________________________ IMPORTS (SYSTEM)
+from System import String
 
+
+#____________________________________________________________________ IMPORTS (AUTODESK)
 import sys
-from webbrowser import get
 import clr
 clr.AddReference("System")
 from Autodesk.Revit.DB import *
 from Autodesk.Revit.UI import *
 from Autodesk.Revit.DB import FilteredElementCollector, Mechanical, Family, BuiltInParameter, ElementType, UnitTypeId
-from Autodesk.Revit.DB import BuiltInCategory, ElementCategoryFilter, ElementId, GeometryElement
-#____________________________________________________________________ IMPORTS (PYREVIT)
+from Autodesk.Revit.DB import BuiltInCategory, ElementCategoryFilter, ElementId, FamilyInstance
+from Autodesk.Revit.DB.ExtensibleStorage import Schema
 
+
+#____________________________________________________________________ IMPORTS (PYREVIT)
 from pyrevit import revit, DB, UI, script
 from pyrevit.script import output
 from pyrevit import forms
@@ -87,6 +91,8 @@ def convertUnits(value, units):
     if      units == "pressure" : units = UnitTypeId.InchesOfWater60DegreesFahrenheit
     elif    units == "air flow" : units = UnitTypeId.CubicFeetPerMinute
     elif    units == "length"   : units = UnitTypeId.Feet
+    elif    units == "velocity" : units = UnitTypeId.FeetPerMinute
+    elif    units == "friction" : units = UnitTypeId.InchesOfWater60DegreesFahrenheitPer100Feet
 
     return UnitUtils.ConvertFromInternalUnits(value, units)
 
@@ -113,6 +119,51 @@ def get_MEPSection_SegmentLength(section, element):
     return segmentlength
 
 
+def find_coefficient_schema():
+    """Return the Schema whose name is 'CoefficientFromTable', or None."""
+    for s in Schema.ListSchemas():
+        if s.SchemaName == "CoefficientFromTable":
+            return s
+    return None
+
+
+def get_ashrae_code(fitting, coeff_schema):
+    """
+    Return the ASHRAE table code for a duct fitting (e.g. 'SD5-3').
+
+    Stored in ExtensibleStorage:
+      SchemaName: 'CoefficientFromTable'
+      Field:      'ASHRAETableName'
+    """
+    if coeff_schema is None or fitting is None:
+        return None
+
+    # Get the Entity attached to this element for that schema
+    entity = fitting.GetEntity(coeff_schema)
+
+    if not (entity and entity.IsValid()):
+        return None
+
+    # Get the field object
+    field = coeff_schema.GetField("ASHRAETableName")
+    if field is None:
+        return None
+
+    try:
+        # Generic Get<T>(Field) – T is System.String
+        table_name = entity.Get[String](field)
+    except:
+        # Fallback to non-generic overload if needed
+        try:
+            table_name = entity.Get(field)
+        except:
+            return None
+
+    if not table_name:
+        return None
+
+    return table_name
+
 
 def get_element_data(element, SystemName):
     """Extract relevant data from a duct element."""
@@ -121,6 +172,13 @@ def get_element_data(element, SystemName):
     data['Element ID'] = output_window.linkify(element.Id)
     data['Comments'] = element.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS).AsString() if element.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS) else "N/A"
     data['System Name'] = SystemName
+    
+    if element.Category.Name == "Flex Ducts":
+        data['Size'] = element.LookupParameter("Overall Size").AsString()
+    elif element.Category.Name != "Mechanical Equipment":
+        data['Size'] = element.LookupParameter("Size").AsString()
+    else:
+        data["Size"] = ""
     # Add more parameters as needed
     return data
 
@@ -187,6 +245,8 @@ system_sections = get_MEPSystem_sections(start_element)
 Elements_BySection = {}
 AirFlow_BySection = {}
 PressureDrop_BySection = {}
+Velocity_BySection = {}
+Friction_BySection = {}
 
 # Get all elements in each section
 for section in system_sections:
@@ -194,10 +254,22 @@ for section in system_sections:
     Elements_BySection[system_sections.index(section) + 1] = elements
 
     # Get Air Flow per section
-    AirFlow_BySection[system_sections.index(section) + 1] = convertUnits(section.Flow,"air flow")
+    AirFlow_BySection[system_sections.index(section) + 1] = convertUnits(section.Flow, "air flow")
+
+    # Get Velocity per section
+    Velocity_BySection[system_sections.index(section) + 1] = convertUnits(section.Velocity, "velocity")
+
+    # Get Friction per section
+    Friction_BySection[system_sections.index(section) + 1] = convertUnits(section.Friction, "friction")
 
 
-
+# Get coefficient table schema
+coeff_schema = find_coefficient_schema()
+if coeff_schema is None:
+    output_window.print_md(
+        "**Could not find ExtensibleStorage schema 'CoefficientFromTable'.**\n"
+        "Make sure you have ASHRAE loss coefficient data assigned in the model."
+    )
 
 
 DuctNetworkData = []
@@ -210,13 +282,13 @@ List of Dictionaries containing data for each element in the duct network.
 |Category       |✅     |                                       |
 |Element ID     |✅     |                                       |
 |Type Mark      |❌     |                                       |
-|ASHRAE Table   |❌     | Duct, Fitting, Accessory              |
+|ASHRAE Table   |✅     | Duct, Fitting, Accessory              |
 |Comments       |✅     |                                       |
-|Size           |❌     | Duct, Flex Duct, Fitting, Accessory   |
+|Size           |✅     | Duct, Flex Duct, Fitting, Accessory   |
 |Flow           |✅     | Duct, Flex Duct, Fitting, Accessory   |
 |Length         |✅     | Duct, Flex Duct                       |
-|Velocity       |❌     | Duct, Flex Duct                       |
-|Friction       |❌     | Duct, Flex Duct                       |
+|Velocity       |✅     | Duct, Flex Duct                       |
+|Friction       |✅     | Duct, Flex Duct                       |
 |System Name    |✅     |                                       |
 |Pressure Loss  |✅     |                                       |
 """
@@ -231,12 +303,30 @@ for section_num, elements in Elements_BySection.items():
         elem_data["Section"] = section_num
 
         elem_data["Flow (CFM)"] = AirFlow_BySection[section_num]
-        
+
+        if elem.Category.Name in ["Ducts", "Flex Ducts"]:
+
+            velocity = Velocity_BySection[section_num]
+            elem_data["Velocity (FPM)"] = "{:.2f}".format(velocity)
+            
+            friction = Friction_BySection[section_num]
+            elem_data["Friction (in-wg/100ft)"] = "{:.4f}".format(friction)
+        else:
+            elem_data["Velocity (FPM)"] = ""
+            elem_data["Friction (in-wg/100ft)"] = ""
+
+
         pd = get_MEPSection_PressureDrop(system_sections[section_num - 1], elem.Id)
         elem_data["Pressure Drop (in-wg)"] = "{:.4f}".format(pd)
 
         length = get_MEPSection_SegmentLength(system_sections[section_num - 1], elem.Id)
         elem_data["Length (ft)"] = length
+
+        if elem.Category.Name in ["Duct Fittings", "Duct Accessories"]:
+            code = get_ashrae_code(elem, coeff_schema) or "<no ASHRAE table set>"
+        else:
+            code = ""
+        elem_data["ASHRAE Table"] = code
 
 
         DuctNetworkData.append(elem_data)
