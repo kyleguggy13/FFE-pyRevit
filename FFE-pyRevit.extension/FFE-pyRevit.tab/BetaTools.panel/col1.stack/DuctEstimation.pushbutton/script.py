@@ -19,8 +19,6 @@ Author: Kyle Guggenheim"""
 
 #____________________________________________________________________ IMPORTS (AUTODESK)
 
-from math import e
-from re import S
 import sys
 from webbrowser import get
 import clr
@@ -45,7 +43,7 @@ selection   = uidoc.Selection                       #type: Selection
 output_window = output.get_output()
 """Output window for displaying results."""
 
-#____________________________________________________________________ MAIN
+
 
 ############## LINKIFY TESTING
 """
@@ -67,29 +65,6 @@ for elem in selection.elements:
 """
 ############## LINKIFY TESTING
 
-
-
-"""
-### Steps:
-1. Select duct
-2. Get "DuctNetwork" property
-    Property: DuctNetwork
-    Type: ElementSet
-    Full type: Autodesk.Revit.DB.ElementSet
-    Value: ElementSet
-This gives us the duct network, which contains Duct, DuctInsulation, and FamilyInstance elements.
-
-DuctNetwork = []
-for duct_instance in duct_instance_collector:
-    if duct_instance.Symbol.FamilyName == "Round Duct" or duct_instance.Symbol.FamilyName == "Rectangular Duct":
-        duct_network = duct_instance.MEPModel.DuctNetwork
-        if duct_network:
-            for element in duct_network:
-                if element not in DuctNetwork:
-                    DuctNetwork.append(element)
-
-output_window.print_md("### ✅ Found Duct Network with {} elements.".format(len(DuctNetwork)))
-# """
 
 
 #____________________________________________________________________ FUNCTIONS
@@ -117,14 +92,14 @@ def get_MEPSystem_sections(element):
     return []
 
 
-def get_MEPSystem_elements(section):
+def get_MEPSection_elements(section):
     """Get all elements in a given duct section."""
     element_ids_list = section.GetElementIds()                          # Get all element IDs in section
     elements = [doc.GetElement(eid) for eid in element_ids_list]        # Retrieve elements from IDs
     return elements
 
 
-def convertPressureUnits(value, units):
+def convertUnits(value, units):
     """
     Function to convert internal units to Imperial
     
@@ -139,6 +114,21 @@ def convertPressureUnits(value, units):
 
     # ConvertedValue = DB.UnitUtils.ConvertFromInternalUnits(Val, DB.UnitTypeId.InchesOfWater60DegreesFahrenheit)
     return UnitUtils.ConvertFromInternalUnits(value, units)
+
+
+def get_MEPSection_PressureDrop(section, element):
+    """Get pressure drop values for each element per section"""
+    # PressureDrop_dict = {}
+    try:
+        pressuredrop = section.GetPressureDrop(element)
+        # print(pressuredrop) # <- TESTING
+        
+    except:
+        pressuredrop = "Invalid Section"
+
+    # PressureDrop_dict[element] = pressuredrop
+    return convertUnits(pressuredrop, "pressure")
+
 
 
 
@@ -216,13 +206,13 @@ output_window.print_md("### Critical Path Sections: {}".format(SystemCriticalPat
 
 # Get Critical Path Total Static Pressure Loss
 CriticalPath_PressureLoss_Internal = MEPSystem_Obj.PressureLossOfCriticalPath
-CriticalPath_PressureLoss = convertPressureUnits(CriticalPath_PressureLoss_Internal, "pressure")
+CriticalPath_PressureLoss = convertUnits(CriticalPath_PressureLoss_Internal, "pressure")
 output_window.print_md("### Critical Path Pressure Loss: {:.4f} in-wg".format(CriticalPath_PressureLoss))
 
 
 # Get Air Flow of System
 System_AirFlow_Internal = MEPSystem_Obj.GetFlow()
-System_AirFlow = convertPressureUnits(System_AirFlow_Internal, "air flow")
+System_AirFlow = convertUnits(System_AirFlow_Internal, "air flow")
 output_window.print_md("### System Air Flow: {} CFM".format(System_AirFlow))
 
 
@@ -230,16 +220,32 @@ output_window.print_md("### System Air Flow: {} CFM".format(System_AirFlow))
 system_sections = get_MEPSystem_sections(start_element)
 
 
-ElementsBySection = {}
+Elements_BySection = {}
+AirFlow_BySection = {}
+PressureDrop_BySection = {}
 
 # Get all elements in each section
 for section in system_sections:
-    elements = get_MEPSystem_elements(section)
-    ElementsBySection[system_sections.index(section) + 1] = elements
-    output_window.print_md(section.Flow.ToString())
-    # output_window.print_md("### Section {}: {} elements".format(system_sections.index(section) + 1, len(elements)))
+    elements = get_MEPSection_elements(section)
+    Elements_BySection[system_sections.index(section) + 1] = elements
+
+    # Get Air Flow per section
+    AirFlow_BySection[system_sections.index(section) + 1] = convertUnits(section.Flow,"air flow")
+
+    # output_window.print_md("Section {}: {} CFM".format(section, convertUnits(section.Flow,"air flow")))
 
 
+
+
+# print("section 1: ", system_sections[1])
+
+# print("section 14: ", system_sections[14].GetPressureDrop(ElementId.Parse("2457552")))
+# print("section 14[0]: ", system_sections[14].GetPressureDrop(Elements_BySection[14][0].Id))
+# print("section 14[1]: ", system_sections[14].GetPressureDrop(Elements_BySection[14][1].Id))
+# print("section 14[2]: ", system_sections[14].GetPressureDrop(Elements_BySection[14][2].Id))
+# print("section 14, Element 0: ", Elements_BySection[14][0].Id)
+# print("section 14, Element 1: ", Elements_BySection[14][1].Id)
+# print("section 14, Element 2: ", Elements_BySection[14][2].Id)
 
 
 DuctNetworkData = []
@@ -255,12 +261,12 @@ List of Dictionaries containing data for each element in the duct network.
 |ASHRAE Table   |❌     | Duct, Fitting, Accessory              |
 |Comments       |✅     |                                       |
 |Size           |❌     | Duct, Flex Duct, Fitting, Accessory   |
-|Flow           |❌     | Duct, Flex Duct, Fitting, Accessory   |
+|Flow           |✅     | Duct, Flex Duct, Fitting, Accessory   |
 |Length         |❌     | Duct, Flex Duct                       |
 |Velocity       |❌     | Duct, Flex Duct                       |
 |Friction       |❌     | Duct, Flex Duct                       |
 |System Name    |✅     |                                       |
-|Pressure Loss  |❌     |                                       |
+|Pressure Loss  |✅     |                                       |
 """
 
 
@@ -268,12 +274,15 @@ List of Dictionaries containing data for each element in the duct network.
 
 # Compile data for all elements in the duct network
 
-for section_num, elements in ElementsBySection.items():
+for section_num, elements in Elements_BySection.items():
     for elem in elements:
         elem_data = get_element_data(elem, SystemName)
-        elem_data['Section'] = section_num
+        elem_data["Section"] = section_num
 
-
+        elem_data["Flow (CFM)"] = AirFlow_BySection[section_num]
+        
+        pd = get_MEPSection_PressureDrop(system_sections[section_num - 1], elem.Id)
+        elem_data["Pressure Drop (in-wg)"] = "{:.4f}".format(pd)
 
         DuctNetworkData.append(elem_data)
 
