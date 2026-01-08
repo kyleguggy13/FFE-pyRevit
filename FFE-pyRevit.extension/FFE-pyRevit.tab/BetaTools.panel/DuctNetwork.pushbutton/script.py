@@ -43,29 +43,6 @@ output_window = output.get_output()
 """Output window for displaying results."""
 
 
-
-############## LINKIFY TESTING
-"""
-selection = revit.get_selection()
-
-# Set up the output panel
-output_window.set_title("Duct Estimation")
-output_window.print_md("## 🛠 Duct & Insulation Estimation Tool")
-output_window.print_md("### ⚠️ This tool estimates the total surface area and volume of sheet metal and insulation in the project.")
-
-output_window.print_md("### 📋 Selected Elements:"
-                       "\n- {}".format(len(selection.elements)))
-# output_window.print_md("### 📋 Selected Element IDs:"
-#                        "\n- {}".format(', '.join([str(el.Id) for el in selection.elements])))
-
-for elem in selection.elements:
-    elid = elem.Id
-    output_window.print_md("### 📋 Element ID: {}".format(output_window.linkify(elid)))
-# """
-############## LINKIFY TESTING
-
-
-
 #____________________________________________________________________ FUNCTIONS
 def get_MEPSystem(element):
     """Get the MEPSystem name of the given element, if it exists."""
@@ -105,14 +82,12 @@ def convertUnits(value, units):
     :param value:   Value to convert
     :param units:   ["pressure", "air flow"]
     :return:        Specified Unit
-"""
+    """
 
     if      units == "pressure" : units = UnitTypeId.InchesOfWater60DegreesFahrenheit
     elif    units == "air flow" : units = UnitTypeId.CubicFeetPerMinute
     elif    units == "length"   : units = UnitTypeId.Feet
 
-
-    
     return UnitUtils.ConvertFromInternalUnits(value, units)
 
 
@@ -141,10 +116,8 @@ def get_MEPSection_SegmentLength(section, element):
 
 def get_element_data(element, SystemName):
     """Extract relevant data from a duct element."""
-    # print("element: ", element, type(element))  # <- TESTING
     data = {}
     data['Category'] = element.Category.Name if element.Category else "N/A"
-    # data['Element ID'] = element.Id.ToString()
     data['Element ID'] = output_window.linkify(element.Id)
     data['Comments'] = element.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS).AsString() if element.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS) else "N/A"
     data['System Name'] = SystemName
@@ -163,26 +136,6 @@ try:
     # print("start element: ", start_element, type(start_element)) # <- TESTING 
 except:
     script.exit()
-
-"""
-# # If the element belongs to a system, this is the easiest way to get all connected elements:
-# if hasattr(start_element, 'MEPSystem'):
-#     mep_system = start_element.MEPSystem
-#     print("mep_system: ", mep_system, type(mep_system)) # <- TESTING
-    
-#     # If the element is not part of a system, mep_system will be None
-#     if mep_system:
-#         sections_count = mep_system.SectionsCount                                                   # Get all sections related to MEPSystem
-#         system_sections = [mep_system.GetSectionByNumber(i) for i in range(1, sections_count + 1)]
-#         output_window.print_md("Found {} sections in the system '{}'.".format(len(system_sections), mep_system.Name))
-        
-#         # Get all element IDs in section
-#         for section in system_sections:
-#             output_window.print_md("### Section: {}".format(system_sections.index(section) + 1))    # Print Section Number
-#             element_ids_list = section.GetElementIds()
-#             for element_id in element_ids_list:
-#                 output_window.print_md(" - {}".format(element_id))                                  # Print Element IDs in Section
-"""
 
 
 
