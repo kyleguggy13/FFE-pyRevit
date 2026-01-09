@@ -253,7 +253,7 @@ output_window.print_md("### Critical Path Pressure Loss: {:.4f} in-wg".format(Cr
 # Get Air Flow of System
 System_AirFlow_Internal = MEPSystem_Obj.GetFlow()
 System_AirFlow = convertUnits(System_AirFlow_Internal, "air flow")
-output_window.print_md("### System Air Flow: {} CFM".format(System_AirFlow))
+output_window.print_md("### System Air Flow: {:.0f} CFM".format(System_AirFlow))
 
 
 # Collect all sections in the System
@@ -319,10 +319,11 @@ for section_num, elements in Elements_BySection.items():    # Iterate over dict 
     for elem in elements:                                   # Iterate over Elements per Section
         elem_category = elem.Category.Name
 
-        elem_data = get_element_data(elem, SystemName)
+        elem_data = get_element_data(elem, SystemName)      # Must be first item to start dict
+
         elem_data["Section"] = section_num
         
-        elem_data["Flow (CFM)"] = AirFlow_BySection[section_num]
+        elem_data["Flow (CFM)"] = "{:.0f}".format(AirFlow_BySection[section_num])
 
         # Get Velocity and Friction Values
         if elem_category in ["Ducts", "Flex Ducts"]:
@@ -341,7 +342,7 @@ for section_num, elements in Elements_BySection.items():    # Iterate over dict 
         length = get_MEPSection_SegmentLength(system_sections[section_num - 1], elem.Id)
         elem_data["Length (ft)"] = length
 
-        if elem.Category.Name in ["Duct Fittings", "Duct Accessories"]:
+        if elem_category in ["Duct Fittings", "Duct Accessories"]:
             code = get_ashrae_code(elem, coeff_schema) or "<no ASHRAE table set>"
         else:
             code = ""
@@ -358,5 +359,7 @@ for data in DuctNetworkData:
     row = data.values()
     TableRows.append(row)
 
-output_window.print_table(table_data=TableRows, columns=DuctNetworkData[0].keys(), title="Duct Network Elements")
+TableTitle = "Duct Network Elements: {}".format(len(TableRows))
+
+output_window.print_table(table_data=TableRows, columns=DuctNetworkData[0].keys(), title=TableTitle)
 
