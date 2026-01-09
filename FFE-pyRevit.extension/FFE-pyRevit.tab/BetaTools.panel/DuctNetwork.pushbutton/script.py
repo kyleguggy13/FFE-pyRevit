@@ -165,6 +165,22 @@ def get_ashrae_code(fitting, coeff_schema):
     return table_name
 
 
+def get_Mark(element):
+    """
+    Docstring for get_Mark
+    
+    :param element: Element (object)
+    """
+    mark = element.get_Parameter(BuiltInParameter.ALL_MODEL_MARK).AsString()
+    
+    if mark != None:
+        value = mark
+    else:
+        value = ""
+
+    return value
+
+
 def get_element_data(element, SystemName):
     """Extract relevant data from a duct element."""
     data = {}
@@ -283,7 +299,7 @@ List of Dictionaries containing data for each element in the duct network.
 |Section        |✅     |                                       |
 |Category       |✅     |                                       |
 |Element ID     |✅     |                                       |
-|Type Mark      |❌     |                                       |
+|Mark           |✅     |                                       |
 |ASHRAE Table   |✅     | Duct, Fitting, Accessory              |
 |Comments       |✅     |                                       |
 |Size           |✅     | Duct, Flex Duct, Fitting, Accessory   |
@@ -299,15 +315,17 @@ List of Dictionaries containing data for each element in the duct network.
 
 #____________________________________________________________________ RUN
 # Compile data for all elements in the duct network
-for section_num, elements in Elements_BySection.items():
-    for elem in elements:
+for section_num, elements in Elements_BySection.items():    # Iterate over dict of Section and Element list
+    for elem in elements:                                   # Iterate over Elements per Section
+        elem_category = elem.Category.Name
+
         elem_data = get_element_data(elem, SystemName)
         elem_data["Section"] = section_num
-
+        
         elem_data["Flow (CFM)"] = AirFlow_BySection[section_num]
 
-        if elem.Category.Name in ["Ducts", "Flex Ducts"]:
-
+        # Get Velocity and Friction Values
+        if elem_category in ["Ducts", "Flex Ducts"]:
             velocity = Velocity_BySection[section_num]
             elem_data["Velocity (FPM)"] = "{:.2f}".format(velocity)
             
@@ -316,7 +334,6 @@ for section_num, elements in Elements_BySection.items():
         else:
             elem_data["Velocity (FPM)"] = ""
             elem_data["Friction (in-wg/100ft)"] = ""
-
 
         pd = get_MEPSection_PressureDrop(system_sections[section_num - 1], elem.Id)
         elem_data["Pressure Drop (in-wg)"] = "{:.4f}".format(pd)
@@ -330,6 +347,7 @@ for section_num, elements in Elements_BySection.items():
             code = ""
         elem_data["ASHRAE Table"] = code
 
+        elem_data["Mark/TypeMark"] = get_Mark(elem)
 
         DuctNetworkData.append(elem_data)
 
