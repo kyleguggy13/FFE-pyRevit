@@ -18,6 +18,8 @@ Author: Kyle Guggenheim"""
 
 #____________________________________________________________________ IMPORTS (SYSTEM)
 from System import String
+from collections import defaultdict
+
 
 
 #____________________________________________________________________ IMPORTS (AUTODESK)
@@ -183,12 +185,26 @@ def get_Mark(element):
 
 def get_element_data(element, SystemName):
     """Extract relevant data from a duct element."""
+    # Initialize dict
     data = {}
+    
+    # Get Category
     data['Category'] = element.Category.Name if element.Category else "N/A"
+    
+    # Get Element ID
     data['Element ID'] = output_window.linkify(element.Id)
-    data['Comments'] = element.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS).AsString() if element.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS) else "N/A"
+
+    # Get Comments
+    comments = element.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS).AsString()
+    if comments != None:
+        data["Comments"] = comments
+    else:
+        data["Comments"] = ""
+    
+    # Get System Name
     data['System Name'] = SystemName
     
+    # Get Size
     if element.Category.Name == "Flex Ducts":
         data['Size'] = element.LookupParameter("Overall Size").AsString()
     elif element.Category.Name != "Mechanical Equipment":
@@ -197,6 +213,37 @@ def get_element_data(element, SystemName):
         data["Size"] = ""
     # Add more parameters as needed
     return data
+
+
+def get_connectors_from_element(elem):
+    """
+    Return a list of Revit MEP Connectors for an element (duct, fitting,
+    accessory, terminal, etc.).
+    Handles both MEPModel.ConnectorManager and direct ConnectorManager.
+    """
+    connectors = []
+
+    # Many family instances (fittings, accessories, terminals) use MEPModel.ConnectorManager
+    mep_model = getattr(elem, "MEPModel", None)
+    if mep_model:
+        try:
+            conn_mgr = mep_model.ConnectorManager
+            if conn_mgr:
+                for c in conn_mgr.Connectors:
+                    connectors.append(c)
+        except:
+            pass
+
+    # Ducts / flex ducts expose ConnectorManager directly
+    conn_mgr2 = getattr(elem, "ConnectorManager", None)
+    if conn_mgr2:
+        try:
+            for c in conn_mgr2.Connectors:
+                connectors.append(c)
+        except:
+            pass
+
+    return connectors
 
 
 #____________________________________________________________________ MAIN
@@ -294,26 +341,41 @@ DuctNetworkData = []
 """ 
 List of Dictionaries containing data for each element in the duct network.
 ## HEADERS FOR DATA TABLE
-| Headers       | Status    | Categories    |
-| ----------    | ----      | ----          |
-|Section        |✅     |                                       |
-|Category       |✅     |                                       |
-|Element ID     |✅     |                                       |
-|Mark           |✅     |                                       |
-|ASHRAE Table   |✅     | Duct, Fitting, Accessory              |
-|Comments       |✅     |                                       |
-|Size           |✅     | Duct, Flex Duct, Fitting, Accessory   |
-|Flow           |✅     | Duct, Flex Duct, Fitting, Accessory   |
-|Length         |✅     | Duct, Flex Duct                       |
-|Velocity       |✅     | Duct, Flex Duct                       |
-|Friction       |✅     | Duct, Flex Duct                       |
-|System Name    |✅     |                                       |
-|Pressure Loss  |✅     |                                       |
+| Headers               | Status    | Categories    |
+| ----------            | ----      | ----          |
+|System Name            |✅         |                                       |
+|Category               |✅         |                                       |
+|Element ID             |✅         |                                       |
+|Section                |✅         |                                       |
+|Mark                   |✅         |                                       |
+|ASHRAE Table           |✅         | Duct, Fitting, Accessory              |
+|Comments               |✅         |                                       |
+|Flow (CFM)             |✅         | Duct, Flex Duct, Fitting, Accessory   |
+|Size                   |✅         | Duct, Flex Duct, Fitting, Accessory   |
+|Length (ft)            |✅         | Duct, Flex Duct                       |
+|Velocity (FPM)         |✅         | Duct, Flex Duct                       |
+|Friction (in-wg/100ft) |✅         | Duct, Flex Duct                       |
+|Pressure Loss          |✅         |                                       |
 """
 
+ColumnOrder = [
+    'System Name',
+    'Category',
+    'Element ID',
+    'Section',
+    'Mark',
+    'ASHRAE Table',
+    'Comments',
+    'Flow (CFM)',
+    'Size',
+    'Length (ft)',
+    'Velocity (FPM)',
+    'Friction (in-wg/100ft)',
+    'Pressure Drop (in-wg)',
+]
 
 
-#____________________________________________________________________ RUN
+#____________________________________________________________________ RUN: Duct Network Summary
 # Compile data for all elements in the duct network
 for section_num, elements in Elements_BySection.items():    # Iterate over dict of Section and Element list
     for elem in elements:                                   # Iterate over Elements per Section
@@ -348,7 +410,7 @@ for section_num, elements in Elements_BySection.items():    # Iterate over dict 
             code = ""
         elem_data["ASHRAE Table"] = code
 
-        elem_data["Mark/TypeMark"] = get_Mark(elem)
+        elem_data["Mark"] = get_Mark(elem)
 
         DuctNetworkData.append(elem_data)
 
@@ -356,10 +418,257 @@ for section_num, elements in Elements_BySection.items():    # Iterate over dict 
 # Prepare data for table display
 TableRows = []
 for data in DuctNetworkData:
-    row = data.values()
+    row = [data.get(col, "") for col in ColumnOrder]
     TableRows.append(row)
 
 TableTitle = "Duct Network Elements: {}".format(len(TableRows))
 
-output_window.print_table(table_data=TableRows, columns=DuctNetworkData[0].keys(), title=TableTitle)
+output_window.print_table(table_data=TableRows, columns=ColumnOrder, title=TableTitle)
 
+
+
+
+#____________________________________________________________________ GATHER DUCT PATHS (DIRECTED BY FLOW)
+
+# Collect System Name
+SystemName = MEPSystem_Obj.Name if MEPSystem_Obj != "N/A" else "N/A"
+output_window.print_md("### MEP System Name: {}".format(SystemName))
+
+# Detect system type and choose flow direction
+system_type_name = ""
+try:
+    # For duct systems
+    system_type_name = str(MEPSystem_Obj.DuctSystemType)
+except:
+    try:
+        # Fallback for generic mechanical systems
+        system_type_name = str(MEPSystem_Obj.SystemType)
+    except:
+        system_type_name = "Unknown"
+
+output_window.print_md("### System Type: {}".format(system_type_name))
+
+# Decide direction:
+#   Supply-like systems: Equipment -> Terminals
+#   Return/Exhaust-like systems: Terminals -> Equipment
+flow_from_equipment = True
+if ("Return" in system_type_name) or ("Exhaust" in system_type_name):
+    flow_from_equipment = False
+
+if flow_from_equipment:
+    output_window.print_md("### Flow Direction (logical): Mechanical Equipment → Air Terminals")
+else:
+    output_window.print_md("### Flow Direction (logical): Air Terminals → Mechanical Equipment")
+
+
+# 1) Map each element to its section number and collect equipment + air terminals
+AirTerminals = []
+Equipment = []
+elem_section = {}     # {ElementId: section_number}
+
+for section_num, elements in Elements_BySection.items():    # Iterate over dict of Section and Element list
+    for elem in elements:                                   # Iterate over Elements per Section
+        elem_section[elem.Id] = section_num
+
+        cat_name = elem.Category.Name if elem.Category else ""
+
+        if cat_name == "Air Terminals":
+            AirTerminals.append(elem)
+        elif cat_name == "Mechanical Equipment":
+            Equipment.append(elem)
+
+# Build quick sets of section numbers containing terminals and equipment
+terminal_sections = set()
+for term in AirTerminals:
+    sec = elem_section.get(term.Id, None)
+    if sec is not None:
+        terminal_sections.add(sec)
+
+equipment_sections = set()
+for eq in Equipment:
+    sec = elem_section.get(eq.Id, None)
+    if sec is not None:
+        equipment_sections.add(sec)
+
+
+# 2) Build an undirected graph of sections based on connector connectivity
+#    section_graph: {section_number: set([neighbor_section_number, ...])}
+
+# print("elem_section: ", elem_section)# <- TESTING
+
+section_graph = defaultdict(set)
+
+for A_elem_id, A_sec in elem_section.items():
+    output_window.print_md("## A_elem_id (section): {} ({})".format(A_elem_id, A_sec)) # <- TESTING
+    A_elem = doc.GetElement(A_elem_id)
+    if A_elem is None:
+        continue
+
+    connectors = get_connectors_from_element(A_elem)
+    # print("connectors: ", connectors) # <- TESTING
+    if not connectors:
+        continue
+
+    for c in connectors:
+        try:
+            output_window.print_md("### c: {}, {}".format(c.Direction, c.ConnectorType)) # <- TESTING
+            # c.AllRefs is a set of ConnectorRefs; each has an Owner element
+            for ref in c.AllRefs:
+                B_element = ref.Owner
+                
+                output_window.print_md("- B element: {}".format(B_element.Id.ToString())) # <- TESTING
+                if B_element is None:
+                    continue
+
+                B_element_id = B_element.Id
+                if B_element_id == A_elem_id:
+                    continue
+                if B_element_id not in elem_section:
+                    # connected to something outside the analyzed network
+                    continue
+
+                B_sec = elem_section[B_element_id]
+                if B_sec is None or B_sec == A_sec:
+                    continue
+
+                # Undirected edge between section numbers
+                section_graph[A_sec].add(B_sec)
+                section_graph[B_sec].add(A_sec)
+
+                # output_window.print_md("### B_sec: {}".format(B_sec)) # <- TESTING
+                # output_window.print_md("### A_sec: {}".format(A_sec)) # <- TESTING
+                # output_window.print_md("---") # <- TESTING
+            print("Section Graph: ", section_graph)
+        except:
+            # Some connectors may not expose AllRefs properly; ignore and continue
+            pass
+
+# 3) Determine sources and sinks based on flow direction
+
+if flow_from_equipment:
+    # Supply: Equipment -> Terminals
+    sources = set(equipment_sections)
+    sinks   = set(terminal_sections)
+else:
+    # Return/Exhaust: Terminals -> Equipment
+    sources = set(terminal_sections)
+    sinks   = set(equipment_sections)
+
+# Fallbacks if something is missing (e.g. user started from a branch)
+if not sources:
+    # Use endpoints (degree 1) as sources
+    endpoints = [s for s, nbs in section_graph.items() if len(nbs) == 1]
+    sources = set(endpoints)
+
+if not sinks:
+    # Use endpoints as sinks if none detected
+    endpoints = [s for s, nbs in section_graph.items() if len(nbs) == 1]
+    sinks = set(endpoints)
+
+
+def find_directed_flow_paths(section_graph_dict, sources_set, sinks_set):
+    """
+    Generate directed paths from sources to sinks over an undirected section graph.
+
+    - section_graph_dict: dict[int, set[int]]
+    - sources_set: set[int]
+    - sinks_set: set[int]
+
+    Returns:
+        List[List[int]]  e.g. [[10, 9, 8], [10, 11, 12, 13], ...]
+        where order follows the logical flow direction.
+    """
+    paths = []
+    paths_set = set()
+
+    for src in sources_set:
+        if src not in section_graph_dict:
+            continue
+
+        # Iterative DFS stack: (current_section, path_list)
+        stack = [(src, [src])]
+
+        while stack:
+            current, path = stack.pop()
+
+            # If we've reached a sink (and it's not the trivial src-only path), record the path
+            if current in sinks_set and current != src:
+                path_tuple = tuple(path)
+                if path_tuple not in paths_set:
+                    paths_set.add(path_tuple)
+                    paths.append(list(path))
+                    # print("paths: ", paths) # <- TESTING
+                # Don't continue past sink for flow paths
+                continue
+
+            for nxt in section_graph_dict.get(current, set()):
+                if nxt in path:
+                    # avoid cycles
+                    continue
+                stack.append((nxt, path + [nxt]))
+
+    return paths
+
+
+SectionPaths = find_directed_flow_paths(section_graph, sources, sinks)
+
+# 4) Output: directed list of section numbers for each flow path
+output_window.print_md("## 🔀 Flow Paths by Section (Directed)")
+
+if not SectionPaths:
+    output_window.print_md(
+        "- No directed section-level flow paths could be determined.\n"
+        "  This can happen if the network is extremely small or disconnected."
+    )
+else:
+    direction_label = "Equipment → Terminals" if flow_from_equipment else "Terminals → Equipment"
+    output_window.print_md("Flow orientation: **{}**".format(direction_label))
+
+    for i, path in enumerate(SectionPaths, 1):
+        output_window.print_md(
+            "**Path {0}:** `{1}`".format(i, " -> ".join(str(s) for s in path))
+        )
+
+# 5) Optional: show which paths contain air terminals and equipment
+
+if SectionPaths:
+    # Build a quick map: section_number -> list of path indices (1-based) that contain it
+    section_to_paths = defaultdict(list)
+    for idx, path in enumerate(SectionPaths):
+        for sec in path:
+            section_to_paths[sec].append(idx + 1)
+
+    output_window.print_md("### Section Membership by Flow Path")
+
+    if equipment_sections:
+        output_window.print_md("**Equipment Sections:** {}".format(
+            ", ".join(str(s) for s in sorted(equipment_sections))
+        ))
+    if terminal_sections:
+        output_window.print_md("**Terminal Sections:** {}".format(
+            ", ".join(str(s) for s in sorted(terminal_sections))
+        ))
+
+    # Example: detail each air terminal with its flow path(s)
+    if AirTerminals:
+        output_window.print_md("#### Air Terminals by Path")
+        for term in AirTerminals:
+            sec_num = elem_section.get(term.Id, None)
+            term_mark = get_Mark(term)
+            path_indices = section_to_paths.get(sec_num, [])
+
+            if sec_num is None:
+                info = "- Air Terminal {} (Id {}) is not in any section.\n".format(
+                    term_mark or "<no mark>", term.Id.IntegerValue
+                )
+            elif not path_indices:
+                info = "- Air Terminal {} (Section {}) is not on any detected path.\n".format(
+                    term_mark or "<no mark>", sec_num
+                )
+            else:
+                info = "- Air Terminal {} (Section {}) → Paths: {}\n".format(
+                    term_mark or "<no mark>",
+                    sec_num,
+                    ", ".join("Path {0}".format(p) for p in path_indices)
+                )
+            output_window.print_md(info)
