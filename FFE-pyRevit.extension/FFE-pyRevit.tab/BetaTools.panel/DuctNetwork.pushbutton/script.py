@@ -375,7 +375,7 @@ ColumnOrder = [
 ]
 
 
-#____________________________________________________________________ RUN: Duct Network Summary
+#____________________________________________________________________ RUN: DUCT NETWORK SUMMARY
 # Compile data for all elements in the duct network
 for section_num, elements in Elements_BySection.items():    # Iterate over dict of Section and Element list
     for elem in elements:                                   # Iterate over Elements per Section
