@@ -17,7 +17,6 @@ ______________________________________________________________
 Author: Kyle Guggenheim"""
 
 #____________________________________________________________________ IMPORTS (SYSTEM)
-from re import L
 from System import String
 from collections import defaultdict
 
@@ -87,7 +86,7 @@ def convertUnits(value, units):
     Function to convert internal units to Imperial
     
     :param value:   Value to convert
-    :param units:   ["pressure", "air flow"]
+    :param units:   ["pressure", "air flow", "length", "velocity", "friction"]
     :return:        Specified Unit
     """
 
@@ -247,6 +246,8 @@ def get_connectors_from_element(elem):
     return connectors
 
 
+
+
 #____________________________________________________________________ MAIN
 uidoc = revit.uidoc
 doc = revit.doc
@@ -386,7 +387,8 @@ for section_num, elements in Elements_BySection.items():    # Iterate over dict 
 
         elem_data["Section"] = section_num
         
-        elem_data["Flow (CFM)"] = "{:.0f}".format(AirFlow_BySection[section_num])
+        # elem_data["Flow (CFM)"] = "{:.0f}".format(AirFlow_BySection[section_num])
+        elem_data["Flow (CFM)"] = "{:.0f} ({:.4f})".format(AirFlow_BySection[section_num], system_sections[section_num - 1].Flow)
 
         # Get Velocity and Friction Values
         if elem_category in ["Ducts", "Flex Ducts"]:
@@ -429,39 +431,17 @@ output_window.print_table(table_data=TableRows, columns=ColumnOrder, title=Table
 
 
 
-# #____________________________________________________________________ GATHER DUCT PATHS (DIRECTED BY FLOW)
-
-# Collect System Name
-SystemName = MEPSystem_Obj.Name if MEPSystem_Obj != "N/A" else "N/A"
-output_window.print_md("### MEP System Name: {}".format(SystemName))
-
-# Detect system type and choose flow direction
-system_type_name = ""
-try:
-    # For duct systems
-    system_type_name = str(MEPSystem_Obj.DuctSystemType)
-except:
-    try:
-        # Fallback for generic mechanical systems
-        system_type_name = str(MEPSystem_Obj.SystemType)
-    except:
-        system_type_name = "Unknown"
-
-output_window.print_md("### System Type: {}".format(system_type_name))
-
-# Decide direction:
-#   Supply-like systems: Equipment -> Terminals
-#   Return/Exhaust-like systems: Terminals -> Equipment
-flow_from_equipment = True
-if ("Return" in system_type_name) or ("Exhaust" in system_type_name):
-    flow_from_equipment = False
-
-if flow_from_equipment:
-    output_window.print_md("### Flow Direction (logical): Mechanical Equipment → Air Terminals")
-else:
-    output_window.print_md("### Flow Direction (logical): Air Terminals → Mechanical Equipment")
+#____________________________________________________________________ PATH FINDING - GATHER DUCT PATHS (DIRECTED BY FLOW)
 
 
+
+
+
+
+############################################################
+############################################################
+############################################################
+#____________________________________________ PATH FINDING - 1) MAP ELEMENTS TO SECTIONS & COLLECT EQUIPMENT + TERMINALS
 # 1) Map each element to its section number and collect equipment + air terminals
 AirTerminals = []
 Equipment = []
@@ -554,10 +534,12 @@ for A_elem_id, A_sec in elem_section.items():
 
 section_graph = defaultdict(set)
 
+Path_Dict = {}
+
 for A_section, elements in Elements_BySection.items():
 
     for A_elem in elements:
-        output_window.print_md("A_elem_id (section): {} ({})".format(A_elem.Id, A_section)) # <- TESTING
+        output_window.print_md("### A_elem_id (section): {} ({})".format(A_elem.Id, A_section)) # <- TESTING
         # A_elem = doc.GetElement(A_elem_id)
         if A_elem is None:
             continue
@@ -568,8 +550,37 @@ for A_section, elements in Elements_BySection.items():
             continue
 
         for c in connectors:
+            section =   A_section
+            c_Id =      c.Id
+            c_Owner =   c.Owner
+
             try:
-                # output_window.print_md("Element: {} ({}) | c: {}, {}, {}, {}".format(A_elem_id, A_sec, c.Id, c.Direction, c.ConnectorType, c.Origin)) # <- TESTING
+                c_Direction = c.Direction if c.Direction else "N/A"
+                c_ConnectorType = c.ConnectorType if c.ConnectorType else "N/A"
+                c_Flow = convertUnits(c.Flow, "air flow") if c.Flow else "N/A"
+                c_AllRefs = c.AllRefs
+            except:
+                pass
+            
+            ref_list = []
+            for ref in c_AllRefs:
+                if ref:
+                    ref_list.append(ref)
+
+
+            Path_Dict[A_elem.Id] = {
+                "section":          section, 
+                "c_Id":             c_Id, 
+                "c_Direction":      c_Direction, 
+                "c_ConnectorType":  c_ConnectorType, 
+                "c_Flow":           c_Flow, 
+                "c_Owner":          c_Owner, 
+                "c_AllRefs":        ref_list 
+                }
+            
+            print(Path_Dict[A_elem.Id])
+            try:
+                # output_window.print_md("Element: {} ({}) | c: {}, {}, {}, {}".format(A_elem.Id, A_section, c.Id, c.Direction, c.ConnectorType, c.Origin)) # <- TESTING
                 # c.AllRefs is a set of ConnectorRefs; each has an Owner element
                 for ref in c.AllRefs:
                     B_element = ref.Owner
@@ -594,7 +605,7 @@ for A_section, elements in Elements_BySection.items():
                     section_graph[B_sec].add(A_section)
 
                     # output_window.print_md("### B_sec: {}".format(B_sec)) # <- TESTING
-                    # output_window.print_md("### A_sec: {}".format(A_sec)) # <- TESTING
+                    # output_window.print_md("### A_sec: {}".format(A_section)) # <- TESTING
                     # output_window.print_md("---") # <- TESTING
                 # print("Section Graph: ", section_graph)
             except:
@@ -604,7 +615,7 @@ for A_section, elements in Elements_BySection.items():
 
 
 # 3) Determine sources and sinks based on flow direction
-
+flow_from_equipment = True
 if flow_from_equipment:
     # Supply: Equipment -> Terminals
     sources = set(equipment_sections)
@@ -697,7 +708,7 @@ else:
         for sec, air in zip(str_path, airflow_path):
             outputPath.append("{} ({:.0f})".format(sec, air))
 
-        output_window.print_md("**Path {0}:** `{1}`".format(i, " -> ".join(str(s) for s in outputPath)))
+        # output_window.print_md("**Path {0}:** `{1}`".format(i, " -> ".join(str(s) for s in outputPath))) # <- MAIN PATH OUTPUT
 
         # output_window.print_md(
         #     "**Path {0}:** `{1}`".format(i, " -> ".join(str(s) for s in path))
@@ -746,228 +757,3 @@ if SectionPaths:
                     ", ".join("Path {0}".format(p) for p in path_indices)
                 )
             output_window.print_md(info)
-
-
-
-#####################################################################
-#####################################################################
-#####################################################################
-#____________________________________________________________________ GATHER DUCT PATHS (DIRECTED BY FLOW, MULTI-SECTION ELEMENTS)
-
-# # 1) Map each element to ALL of its section numbers and collect equipment + air terminals
-# AirTerminals = []
-# Equipment = []
-
-# # elem_sections: {ElementId: set([section_num1, section_num2, ...])}
-# elem_sections = defaultdict(set)
-
-# for section_num, elements in Elements_BySection.items():    # Iterate over dict of Section and Element list
-#     for elem in elements:                                   # Iterate over Elements per Section
-#         elem_sections[elem.Id].add(section_num)
-
-#         cat_name = elem.Category.Name if elem.Category else ""
-
-#         if cat_name == "Air Terminals":
-#             AirTerminals.append(elem)
-#         elif cat_name == "Mechanical Equipment":
-#             Equipment.append(elem)
-
-# # Build quick sets of section numbers containing terminals and equipment
-# terminal_sections = set()
-# for term in AirTerminals:
-#     for sec in elem_sections.get(term.Id, []):
-#         terminal_sections.add(sec)
-
-# equipment_sections = set()
-# for eq in Equipment:
-#     for sec in elem_sections.get(eq.Id, []):
-#         equipment_sections.add(sec)
-
-# # 2) Build an undirected graph of sections based on connector connectivity
-# #    section_graph: {section_number: set([neighbor_section_number, ...])}
-
-# section_graph = defaultdict(set)
-
-# for elem_id, sec_set_this in elem_sections.items():
-#     elem = doc.GetElement(elem_id)
-#     if elem is None:
-#         continue
-
-#     connectors = get_connectors_from_element(elem)
-#     if not connectors:
-#         continue
-
-#     for c in connectors:
-#         try:
-#             # c.AllRefs is a set of ConnectorRefs; each has an Owner element
-#             for ref in c.AllRefs:
-#                 other = ref.Owner
-#                 if other is None:
-#                     continue
-
-#                 other_id = other.Id
-#                 if other_id == elem_id:
-#                     continue
-#                 if other_id not in elem_sections:
-#                     # connected to something outside the analyzed network
-#                     continue
-
-#                 sec_set_other = elem_sections[other_id]
-#                 if not sec_set_other:
-#                     continue
-
-#                 # Create edges for all section combinations between the two elements
-#                 for sec_this in sec_set_this:
-#                     for sec_other in sec_set_other:
-#                         if sec_other is None or sec_this is None:
-#                             continue
-#                         if sec_other == sec_this:
-#                             continue
-
-#                         # Undirected edge between section numbers
-#                         section_graph[sec_this].add(sec_other)
-#                         section_graph[sec_other].add(sec_this)
-#         except:
-#             # Some connectors may not expose AllRefs properly; ignore and continue
-#             pass
-
-# # 3) Determine sources and sinks based on flow direction
-
-# if flow_from_equipment:
-#     # Supply: Equipment -> Terminals
-#     sources = set(equipment_sections)
-#     sinks   = set(terminal_sections)
-# else:
-#     # Return/Exhaust: Terminals -> Equipment
-#     sources = set(terminal_sections)
-#     sinks   = set(equipment_sections)
-
-# # Fallbacks if something is missing (e.g. user started from a branch)
-# if not sources:
-#     # Use endpoints (degree 1) as sources
-#     endpoints = [s for s, nbs in section_graph.items() if len(nbs) == 1]
-#     sources = set(endpoints)
-
-# if not sinks:
-#     # Use endpoints as sinks if none detected
-#     endpoints = [s for s, nbs in section_graph.items() if len(nbs) == 1]
-#     sinks = set(endpoints)
-
-
-# def find_directed_flow_paths(section_graph_dict, sources_set, sinks_set):
-#     """
-#     Generate directed paths from sources to sinks over an undirected section graph.
-
-#     - section_graph_dict: dict[int, set[int]]
-#     - sources_set: set[int]
-#     - sinks_set: set[int]
-
-#     Returns:
-#         List[List[int]]  e.g. [[10, 9, 8], [10, 11, 12, 13], ...]
-#         where order follows the logical flow direction.
-#     """
-#     paths = []
-#     paths_set = set()
-
-#     for src in sources_set:
-#         if src not in section_graph_dict:
-#             continue
-
-#         # Iterative DFS stack: (current_section, path_list)
-#         stack = [(src, [src])]
-
-#         while stack:
-#             current, path = stack.pop()
-
-#             # If we've reached a sink (and it's not the trivial src-only path), record the path
-#             if current in sinks_set and current != src:
-#                 path_tuple = tuple(path)
-#                 if path_tuple not in paths_set:
-#                     paths_set.add(path_tuple)
-#                     paths.append(list(path))
-#                 # Don't continue past sink for flow paths
-#                 continue
-
-#             for nxt in section_graph_dict.get(current, set()):
-#                 if nxt in path:
-#                     # avoid cycles
-#                     continue
-#                 stack.append((nxt, path + [nxt]))
-
-#     return paths
-
-
-# SectionPaths = find_directed_flow_paths(section_graph, sources, sinks)
-
-# # 4) Output: directed list of section numbers for each flow path
-# output_window.print_md("## 🔀 Flow Paths by Section (Directed, Multi-Section Elements)")
-
-# if not SectionPaths:
-#     output_window.print_md(
-#         "- No directed section-level flow paths could be determined.\n"
-#         "  This can happen if the network is extremely small or disconnected."
-#     )
-# else:
-#     direction_label = "Equipment → Terminals" if flow_from_equipment else "Terminals → Equipment"
-#     output_window.print_md("Flow orientation: **{}**".format(direction_label))
-
-#     for i, path in enumerate(SectionPaths, 1):
-#         output_window.print_md(
-#             "**Path {0}:** `{1}`".format(i, " -> ".join(str(s) for s in path))
-#         )
-
-# # 5) Optional: show which paths contain air terminals and equipment
-
-# if SectionPaths:
-#     # Build a quick map: section_number -> list of path indices (1-based) that contain it
-#     section_to_paths = defaultdict(list)
-#     for idx, path in enumerate(SectionPaths):
-#         for sec in path:
-#             section_to_paths[sec].append(idx + 1)
-
-#     output_window.print_md("### Section Membership by Flow Path")
-
-#     if equipment_sections:
-#         output_window.print_md("**Equipment Sections:** {}".format(
-#             ", ".join(str(s) for s in sorted(equipment_sections))
-#         ))
-#     if terminal_sections:
-#         output_window.print_md("**Terminal Sections:** {}".format(
-#             ", ".join(str(s) for s in sorted(terminal_sections))
-#         ))
-
-#     # Example: detail each air terminal with its flow path(s), allowing for multi-section membership
-#     if AirTerminals:
-#         output_window.print_md("#### Air Terminals by Path")
-
-#         for term in AirTerminals:
-#             secs = sorted(elem_sections.get(term.Id, []))
-#             term_mark = get_Mark(term)
-
-#             if not secs:
-#                 info = "- Air Terminal {} (Id {}) is not in any section.\n".format(
-#                     term_mark or "<no mark>", term.Id.IntegerValue
-#                 )
-#                 output_window.print_md(info)
-#                 continue
-
-#             # Union of all paths that contain any of this terminal's sections
-#             path_indices = set()
-#             for sec in secs:
-#                 for pidx in section_to_paths.get(sec, []):
-#                     path_indices.add(pidx)
-
-#             if not path_indices:
-#                 info = "- Air Terminal {} (Sections {}) is not on any detected path.\n".format(
-#                     term_mark or "<no mark>", ", ".join(str(s) for s in secs)
-#                 )
-#             else:
-#                 info = (
-#                     "- Air Terminal {} (Sections {}) → Paths: {}\n"
-#                     .format(
-#                         term_mark or "<no mark>",
-#                         ", ".join(str(s) for s in secs),
-#                         ", ".join("Path {0}".format(p) for p in sorted(path_indices))
-#                     )
-#                 )
-#             output_window.print_md(info)
