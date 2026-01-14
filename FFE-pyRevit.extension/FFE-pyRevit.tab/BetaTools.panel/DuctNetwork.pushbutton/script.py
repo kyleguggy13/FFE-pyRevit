@@ -535,6 +535,8 @@ for A_elem_id, A_sec in elem_section.items():
 section_graph = defaultdict(set)
 
 dict_Path = {}  # { Element Id : c_Id: dict }
+Elements_All = []
+# Connectors_All = []
 
 for A_section, elements in Elements_BySection.items():
 
@@ -543,6 +545,8 @@ for A_section, elements in Elements_BySection.items():
         # A_elem = doc.GetElement(A_elem_id)
         if A_elem is None:
             continue
+
+        Elements_All.append(A_elem.Id)
         
         dict_Connectors = {}    # { connector Id : section, c_Id, c_Direction, c_ConnectorType, c_Flow, c_Owner, c_AllRefs, connector }
 
@@ -555,7 +559,9 @@ for A_section, elements in Elements_BySection.items():
             section =   A_section
             c_Id =      c.Id
             c_Owner =   c.Owner
-
+            
+            # Connectors_All.append(c)
+            
             try:
                 c_Direction = c.Direction if c.Direction else "N/A"
                 c_ConnectorType = c.ConnectorType if c.ConnectorType else "N/A"
@@ -580,6 +586,8 @@ for A_section, elements in Elements_BySection.items():
                 "c_AllRefs":        ref_list,
                 "connector":        c
                 }
+            
+            
             
             # print(dict_Connectors[c.Id])
             try:
@@ -622,12 +630,80 @@ for A_section, elements in Elements_BySection.items():
 
 
 output_window.print_md("## TESTING IsConnectedTo on 2457958")
-print(dict_Path.keys())
-print(len(dict_Path.keys()))
+print("dict_Path: ", dict_Path.keys())
+print("dict_Path (length): ", len(dict_Path.keys()))
+
+elem_2457958 = dict_Path["2457958"] # <- dict of element's connectors
+elem_2457958_c1 = elem_2457958[1]   # <- dict of connector 1
+elem_2457958_c2 = elem_2457958[2]   # <- dict of connector 2
+
+
+# print("elem_2457958: {}".format(elem_2457958))
+# output_window.print_md("---")
+# print("elem_2457958_c1: {}".format(elem_2457958_c1['connector']))
+# output_window.print_md("---")
+# print("elem_2457958_c2: {}".format(elem_2457958_c2['connector']))
+
+
+print("elem_2457958_c1: {}".format(elem_2457958_c1['connector'].IsConnectedTo(elem_2457958_c2['connector'])))
+
+
+Elements_All = list(set(Elements_All))
+
+print("Elements: {}".format(len(Elements_All)))
+
+
+Connectors_All = []
+for elem_id in Elements_All:
+    elem = doc.GetElement(elem_id)
+    connectors = get_connectors_from_element(elem)
+    for c in connectors:
+        try:
+            c_Flow = convertUnits(c.Flow, "air flow") if c.Flow else "N/A"
+            c_Direction = c.Direction if c.Direction else "N/A"
+            c_ConnectorType = c.ConnectorType if c.ConnectorType else "N/A"
+        except:
+            pass
+        
+        Connectors_All.append(c)
+        # print("connector: {}, Owner: {}, Id: {}, Direction: {}, Flow: {}, ConnectorType: {}".format(c, c.Owner.Id, c.Id, c_Direction, c_Flow, c_ConnectorType))
+
+
+print("Connectors: {}".format(len(Connectors_All)))
+
+
 for element, conn in dict_Path.items():
-    print("element: {}".format(element))
-    print("connector: {}".format(conn))
-    output_window.print_md("---")
+    for c_id in conn.keys():
+        connector_dict = conn[c_id]
+        connector_A = connector_dict['connector']
+
+        for connector_B in Connectors_All:
+            IsConnected = connector_A.IsConnectedTo(connector_B)
+            if IsConnected == True and connector_A.Owner.Id.ToString() != connector_B.Owner.Id.ToString():
+                output_window.print_md("{} --> {}".format(connector_A.Owner.Id.ToString(), connector_B.Owner.Id.ToString()))
+
+
+
+# FlowPath = []
+# source = "2633093"
+
+# while source not in FlowPath:
+#     for element_id in Elements_All:
+#         element = doc.GetElement(element_id)
+#         connectors = get_connectors_from_element(element)
+
+
+
+
+
+#         print("IsConnectedTo: {}".format(connector_B.IsConnectedTo()))
+#         print("element: {}, connector id: {}, connector: {}".format(element, c_id, connector_B))
+#         output_window.print_md("---")
+
+
+    # print("element: {}".format(element))
+    # print("connector: {}".format(type(conn)))
+    # output_window.print_md("---")
 
 
 
