@@ -684,26 +684,20 @@ for element, conn in dict_Path.items():
 
 
 
-# FlowPath = []
-# source = "2633093"
-
-# while source not in FlowPath:
-#     for element_id in Elements_All:
-#         element = doc.GetElement(element_id)
-#         connectors = get_connectors_from_element(element)
+FlowPath = []
+source = "2633093"
 
 
 
+for terminal in AirTerminals:
+    FlowPath.append(terminal)
+    while source not in FlowPath:
+        for element_id in Elements_All:
+            element = doc.GetElement(element_id)
+            connectors = get_connectors_from_element(element)
+            
 
 
-#         print("IsConnectedTo: {}".format(connector_B.IsConnectedTo()))
-#         print("element: {}, connector id: {}, connector: {}".format(element, c_id, connector_B))
-#         output_window.print_md("---")
-
-
-    # print("element: {}".format(element))
-    # print("connector: {}".format(type(conn)))
-    # output_window.print_md("---")
 
 
 
