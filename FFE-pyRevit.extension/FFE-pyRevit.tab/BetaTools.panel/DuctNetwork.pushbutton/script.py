@@ -629,9 +629,9 @@ for A_section, elements in Elements_BySection.items():
 
 
 
-output_window.print_md("## TESTING IsConnectedTo on 2457958")
-print("dict_Path: ", dict_Path.keys())
-print("dict_Path (length): ", len(dict_Path.keys()))
+# output_window.print_md("## TESTING IsConnectedTo on 2457958")
+# print("dict_Path: ", dict_Path.keys())
+# print("dict_Path (length): ", len(dict_Path.keys()))
 
 elem_2457958 = dict_Path["2457958"] # <- dict of element's connectors
 elem_2457958_c1 = elem_2457958[1]   # <- dict of connector 1
@@ -645,12 +645,13 @@ elem_2457958_c2 = elem_2457958[2]   # <- dict of connector 2
 # print("elem_2457958_c2: {}".format(elem_2457958_c2['connector']))
 
 
-print("elem_2457958_c1: {}".format(elem_2457958_c1['connector'].IsConnectedTo(elem_2457958_c2['connector'])))
+# print("elem_2457958_c1: {}".format(elem_2457958_c1['connector'].IsConnectedTo(elem_2457958_c2['connector'])))
 
 
 Elements_All = list(set(Elements_All))
 
-print("Elements: {}".format(len(Elements_All)))
+print("Elements (length): {}".format(len(Elements_All)))
+# print("Elements: {}".format(Elements_All))
 
 
 Connectors_All = []
@@ -672,129 +673,350 @@ for elem_id in Elements_All:
 print("Connectors: {}".format(len(Connectors_All)))
 
 
-for element, conn in dict_Path.items():
-    for c_id in conn.keys():
-        connector_dict = conn[c_id]
-        connector_A = connector_dict['connector']
+# for element, conn in dict_Path.items():
+#     for c_id in conn.keys():
+#         connector_dict = conn[c_id]
+#         connector_A = connector_dict['connector']
 
-        for connector_B in Connectors_All:
-            IsConnected = connector_A.IsConnectedTo(connector_B)
-            if IsConnected == True and connector_A.Owner.Id.ToString() != connector_B.Owner.Id.ToString():
-                output_window.print_md("{} --> {}".format(connector_A.Owner.Id.ToString(), connector_B.Owner.Id.ToString()))
+#         for connector_B in Connectors_All:
+#             IsConnected = connector_A.IsConnectedTo(connector_B)
+#             if IsConnected == True and connector_A.Owner.Id.ToString() != connector_B.Owner.Id.ToString():
+#                 output_window.print_md("{} --> {}".format(connector_A.Owner.Id.ToString(), connector_B.Owner.Id.ToString()))
 
 
 
 FlowPath = []
-source = "2633093"
+source_id = "2633093"
+source = Equipment
+source_ids = {eq.Id for eq in Equipment}
 
 
 
-for terminal in AirTerminals:
-    FlowPath.append(terminal)
-    while source not in FlowPath:
-        for element_id in Elements_All:
-            element = doc.GetElement(element_id)
-            connectors = get_connectors_from_element(element)
+# print("AirTerminals: {}".format(AirTerminals))
+# print("Equipment: {}".format(Equipment))
+
+
+# def isConnectorConnected(conn_A, conn_All):
+#     for conn_B in conn_All:
+#         isconnected = conn_A.IsConnectedTo(conn_B)
+#         if isconnected == True and conn_A.Owner.Id.ToString() != conn_B.Owner.Id.ToString():
+#             outputValue = conn_B
+    
+#     return outputValue
+
+
+# for terminal in AirTerminals:
+#     FlowPath = [terminal]
+
+#     while FlowPath[-1].Id not in source_ids:
+#         current_elem = FlowPath[-1]
+
+#         next_elem = None
+
+#         # TODO: find upstream-connected element via connectors
+#         # next_elem = ...
+
+#         if next_elem is None:
+#             # dead end, prevent infinite loop
+#             break
+
+#         FlowPath.append(next_elem)
             
+# output_window.print_md("---")
+# print("FlowPath: {}".format(FlowPath))
 
 
 
+######################################################
+######################################################
+######################################################
+from Autodesk.Revit.DB import FlowDirectionType
+
+def _as_flow_dir(d):
+    """Return FlowDirectionType or None safely."""
+    try:
+        return d
+    except:
+        return None
 
 
-
-# 3) Determine sources and sinks based on flow direction
-flow_from_equipment = True
-if flow_from_equipment:
-    # Supply: Equipment -> Terminals
-    sources = set(equipment_sections)
-    sinks   = set(terminal_sections)
-else:
-    # Return/Exhaust: Terminals -> Equipment
-    sources = set(terminal_sections)
-    sinks   = set(equipment_sections)
-
-# Fallbacks if something is missing (e.g. user started from a branch)
-if not sources:
-    # Use endpoints (degree 1) as sources
-    endpoints = [s for s, nbs in section_graph.items() if len(nbs) == 1]
-    sources = set(endpoints)
-
-if not sinks:
-    # Use endpoints as sinks if none detected
-    endpoints = [s for s, nbs in section_graph.items() if len(nbs) == 1]
-    sinks = set(endpoints)
-
-
-def find_directed_flow_paths(section_graph_dict, sources_set, sinks_set):
+def iter_connected_neighbors(current_elem):
     """
-    Generate directed paths from sources to sinks over an undirected section graph.
+    Yield neighbor relationships as tuples:
+        (neighbor_elem, current_connector, neighbor_connector)
 
-    - section_graph_dict: dict[int, set[int]]
-    - sources_set: set[int]
-    - sinks_set: set[int]
-
-    Returns:
-        List[List[int]]  e.g. [[10, 9, 8], [10, 11, 12, 13], ...]
-        where order follows the logical flow direction.
+    neighbor_connector is a Connector object from current_connector.AllRefs.
     """
-    paths = []
-    paths_set = set()
+    for c in get_connectors_from_element(current_elem):
+        if c is None:
+            continue
+        try:
+            refs = c.AllRefs
+        except:
+            refs = None
 
-    for src in sources_set:
-        if src not in section_graph_dict:
+        if not refs:
             continue
 
-        # Iterative DFS stack: (current_section, path_list)
-        stack = [(src, [src])]
+        for nconn in refs:
+            try:
+                nowner = nconn.Owner
+            except:
+                nowner = None
 
-        while stack:
-            current, path = stack.pop()
-
-            # If we've reached a sink (and it's not the trivial src-only path), record the path
-            if current in sinks_set and current != src:
-                path_tuple = tuple(path)
-                if path_tuple not in paths_set:
-                    paths_set.add(path_tuple)
-                    paths.append(list(path))
-                    # print("paths: ", paths) # <- TESTING
-                # Don't continue past sink for flow paths
+            if nowner is None:
                 continue
 
-            for nxt in section_graph_dict.get(current, set()):
-                if nxt in path:
-                    # avoid cycles
-                    continue
-                stack.append((nxt, path + [nxt]))
+            # skip self-connection
+            if nowner.Id.ToString() == current_elem.Id.ToString():
+                continue
 
-    return paths
+            yield (nowner, c, nconn)
 
 
-SectionPaths = find_directed_flow_paths(section_graph, sources, sinks)
+def pick_upstream_neighbor(current_elem, visited_ids, allowed_elem_ids_set, mode="terminal_to_equipment_supply"):
+    """
+    Choose ONE upstream neighbor element based on connector directions.
 
-# 4) Output: directed list of section numbers for each flow path
-output_window.print_md("## 🔀 Flow Paths by Section (Directed)")
+    Parameters
+    ----------
+    current_elem : Revit element
+    visited_ids : set[int]     (integer ElementId values)
+    allowed_elem_ids_set : set[int]  only consider neighbors inside your analyzed network
+    mode : str
+        "terminal_to_equipment_supply"  (default)
+            Walking from Air Terminal upstream to Equipment on a SUPPLY system.
+            Prefer: current_conn.Direction == In and neighbor_conn.Direction == Out.
 
-print(AirFlow_BySection)
+        If you later want return/exhaust walking from terminal to equipment, you likely want:
+            Prefer: current_conn.Direction == Out and neighbor_conn.Direction == In
+    """
+    candidates = []
+
+    for neigh, c_cur, c_neigh in iter_connected_neighbors(current_elem):
+        nid = neigh.Id.ToString()
+
+        # must be in the analyzed network
+        if nid not in allowed_elem_ids_set:
+            continue
+
+        # avoid cycles
+        if nid in visited_ids:
+            continue
+
+        # direction heuristic
+        cur_dir = _as_flow_dir(getattr(c_cur, "Direction", None))
+        n_dir   = _as_flow_dir(getattr(c_neigh, "Direction", None))
+
+        score = 0
+
+        if mode == "terminal_to_equipment_supply":
+            # Upstream (opposite flow) from terminal:
+            # current element typically receives flow -> In
+            # upstream neighbor typically sends flow -> Out
+            if cur_dir == FlowDirectionType.In:
+                score += 10
+            if n_dir == FlowDirectionType.Out:
+                score += 10
+
+        elif mode == "terminal_to_equipment_return":
+            # Return/exhaust case (often opposite):
+            if cur_dir == FlowDirectionType.Out:
+                score += 10
+            if n_dir == FlowDirectionType.In:
+                score += 10
+
+        # tie-breaker: favor higher connector flow if available
+        try:
+            nflow = c_neigh.Flow
+            # note: internal units, but relative magnitude is sufficient for scoring
+            if nflow:
+                score += float(nflow)
+        except:
+            pass
+
+        candidates.append((score, neigh))
+
+    if not candidates:
+        return None
+
+    # pick best-scoring candidate
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return candidates[0][1]
+
+###################################################
+###################################################
+
+# Build equipment id set for termination
+equipment_ids = set([eq.Id.ToString() for eq in Equipment])
+
+# Build analyzed-network id set (Elements_All currently contains ElementId objects)
+allowed_ids = set([eid.ToString() for eid in Elements_All])
+
+all_flow_paths = []  # optional: collect each terminal's path
+dict_all_flow_paths = {}
+
+for terminal in AirTerminals:
+    FlowPath = [terminal]
+    visited = set([terminal.Id.ToString()])
+
+    max_hops = 500  # safety cap for weird/cyclic networks
+
+    hops = 0
+    while FlowPath[-1].Id.ToString() not in equipment_ids:
+        hops += 1
+        if hops > max_hops:
+            # prevent hang
+            break
+
+        current_elem = FlowPath[-1]
+
+        next_elem = pick_upstream_neighbor(
+            current_elem=current_elem,
+            visited_ids=visited,
+            allowed_elem_ids_set=allowed_ids,
+            mode="terminal_to_equipment_supply"  # change if needed
+        )
+
+        if next_elem is None:
+            # dead end: no upstream neighbor found
+            break
+
+        FlowPath.append(next_elem)
+        visited.add(next_elem.Id.ToString())
+
+    all_flow_paths.append(FlowPath)
+
+    # Optional: print a compact result
+    try:
+        term_mark = get_Mark(terminal) or "<no mark>"
+    except:
+        term_mark = "<no mark>"
+    
+    dict_all_flow_paths[term_mark] = FlowPath   # Main Output of Flow Paths
+
+    path_ids = [e.Id.ToString() for e in FlowPath]
+    output_window.print_md("- Terminal {} path: {}".format(term_mark, " --> ".join([str(i) for i in path_ids])))
+
+######################################################
+######################################################
+######################################################
+
+# output_window.print_md("## all_flow_paths:")
+# print(all_flow_paths)
+
+# output_window.print_md("## dict_all_flow_paths:")
+# print(dict_all_flow_paths)
 
 
-if not SectionPaths:
-    output_window.print_md(
-        "- No directed section-level flow paths could be determined.\n"
-        "  This can happen if the network is extremely small or disconnected."
-    )
-else:
-    direction_label = "Equipment → Terminals" if flow_from_equipment else "Terminals → Equipment"
-    output_window.print_md("Flow orientation: **{}**".format(direction_label))
 
-    for i, path in enumerate(SectionPaths, 1):
-        str_path = [s for s in path]
-        airflow_path = []
-        for p in str_path:
-            airflow_path.append(AirFlow_BySection[p])
 
-        outputPath = []
-        for sec, air in zip(str_path, airflow_path):
-            outputPath.append("{} ({:.0f})".format(sec, air))
+
+
+
+
+
+
+
+
+
+
+
+
+
+# # 3) Determine sources and sinks based on flow direction
+# flow_from_equipment = True
+# if flow_from_equipment:
+#     # Supply: Equipment -> Terminals
+#     sources = set(equipment_sections)
+#     sinks   = set(terminal_sections)
+# else:
+#     # Return/Exhaust: Terminals -> Equipment
+#     sources = set(terminal_sections)
+#     sinks   = set(equipment_sections)
+
+# # Fallbacks if something is missing (e.g. user started from a branch)
+# if not sources:
+#     # Use endpoints (degree 1) as sources
+#     endpoints = [s for s, nbs in section_graph.items() if len(nbs) == 1]
+#     sources = set(endpoints)
+
+# if not sinks:
+#     # Use endpoints as sinks if none detected
+#     endpoints = [s for s, nbs in section_graph.items() if len(nbs) == 1]
+#     sinks = set(endpoints)
+
+
+# def find_directed_flow_paths(section_graph_dict, sources_set, sinks_set):
+#     """
+#     Generate directed paths from sources to sinks over an undirected section graph.
+
+#     - section_graph_dict: dict[int, set[int]]
+#     - sources_set: set[int]
+#     - sinks_set: set[int]
+
+#     Returns:
+#         List[List[int]]  e.g. [[10, 9, 8], [10, 11, 12, 13], ...]
+#         where order follows the logical flow direction.
+#     """
+#     paths = []
+#     paths_set = set()
+
+#     for src in sources_set:
+#         if src not in section_graph_dict:
+#             continue
+
+#         # Iterative DFS stack: (current_section, path_list)
+#         stack = [(src, [src])]
+
+#         while stack:
+#             current, path = stack.pop()
+
+#             # If we've reached a sink (and it's not the trivial src-only path), record the path
+#             if current in sinks_set and current != src:
+#                 path_tuple = tuple(path)
+#                 if path_tuple not in paths_set:
+#                     paths_set.add(path_tuple)
+#                     paths.append(list(path))
+#                     # print("paths: ", paths) # <- TESTING
+#                 # Don't continue past sink for flow paths
+#                 continue
+
+#             for nxt in section_graph_dict.get(current, set()):
+#                 if nxt in path:
+#                     # avoid cycles
+#                     continue
+#                 stack.append((nxt, path + [nxt]))
+
+#     return paths
+
+
+# SectionPaths = find_directed_flow_paths(section_graph, sources, sinks)
+
+# # 4) Output: directed list of section numbers for each flow path
+# output_window.print_md("## 🔀 Flow Paths by Section (Directed)")
+
+# print(AirFlow_BySection)
+
+
+# if not SectionPaths:
+#     output_window.print_md(
+#         "- No directed section-level flow paths could be determined.\n"
+#         "  This can happen if the network is extremely small or disconnected."
+#     )
+# else:
+#     direction_label = "Equipment → Terminals" if flow_from_equipment else "Terminals → Equipment"
+#     output_window.print_md("Flow orientation: **{}**".format(direction_label))
+
+#     for i, path in enumerate(SectionPaths, 1):
+#         str_path = [s for s in path]
+#         airflow_path = []
+#         for p in str_path:
+#             airflow_path.append(AirFlow_BySection[p])
+
+#         outputPath = []
+#         for sec, air in zip(str_path, airflow_path):
+#             outputPath.append("{} ({:.0f})".format(sec, air))
 
         # output_window.print_md("**Path {0}:** `{1}`".format(i, " -> ".join(str(s) for s in outputPath))) # <- MAIN PATH OUTPUT
 
@@ -804,44 +1026,44 @@ else:
 
 # 5) Optional: show which paths contain air terminals and equipment
 
-if SectionPaths:
-    # Build a quick map: section_number -> list of path indices (1-based) that contain it
-    section_to_paths = defaultdict(list)
-    for idx, path in enumerate(SectionPaths):
-        for sec in path:
-            section_to_paths[sec].append(idx + 1)
+# if SectionPaths:
+#     # Build a quick map: section_number -> list of path indices (1-based) that contain it
+#     section_to_paths = defaultdict(list)
+#     for idx, path in enumerate(SectionPaths):
+#         for sec in path:
+#             section_to_paths[sec].append(idx + 1)
 
-    output_window.print_md("### Section Membership by Flow Path")
+#     output_window.print_md("### Section Membership by Flow Path")
 
-    if equipment_sections:
-        output_window.print_md("**Equipment Sections:** {}".format(
-            ", ".join(str(s) for s in sorted(equipment_sections))
-        ))
-    if terminal_sections:
-        output_window.print_md("**Terminal Sections:** {}".format(
-            ", ".join(str(s) for s in sorted(terminal_sections))
-        ))
+#     if equipment_sections:
+#         output_window.print_md("**Equipment Sections:** {}".format(
+#             ", ".join(str(s) for s in sorted(equipment_sections))
+#         ))
+#     if terminal_sections:
+#         output_window.print_md("**Terminal Sections:** {}".format(
+#             ", ".join(str(s) for s in sorted(terminal_sections))
+#         ))
 
-    # Example: detail each air terminal with its flow path(s)
-    if AirTerminals:
-        output_window.print_md("#### Air Terminals by Path")
-        for term in AirTerminals:
-            sec_num = elem_section.get(term.Id, None)
-            term_mark = get_Mark(term)
-            path_indices = section_to_paths.get(sec_num, [])
+#     # Example: detail each air terminal with its flow path(s)
+#     if AirTerminals:
+#         output_window.print_md("#### Air Terminals by Path")
+#         for term in AirTerminals:
+#             sec_num = elem_section.get(term.Id, None)
+#             term_mark = get_Mark(term)
+#             path_indices = section_to_paths.get(sec_num, [])
 
-            if sec_num is None:
-                info = "- Air Terminal {} (Id {}) is not in any section.\n".format(
-                    term_mark or "<no mark>", term.Id.IntegerValue
-                )
-            elif not path_indices:
-                info = "- Air Terminal {} (Section {}) is not on any detected path.\n".format(
-                    term_mark or "<no mark>", sec_num
-                )
-            else:
-                info = "- Air Terminal {} (Section {}) → Paths: {}\n".format(
-                    term_mark or "<no mark>",
-                    sec_num,
-                    ", ".join("Path {0}".format(p) for p in path_indices)
-                )
-            output_window.print_md(info)
+#             if sec_num is None:
+#                 info = "- Air Terminal {} (Id {}) is not in any section.\n".format(
+#                     term_mark or "<no mark>", term.Id.IntegerValue
+#                 )
+#             elif not path_indices:
+#                 info = "- Air Terminal {} (Section {}) is not on any detected path.\n".format(
+#                     term_mark or "<no mark>", sec_num
+#                 )
+#             else:
+#                 info = "- Air Terminal {} (Section {}) → Paths: {}\n".format(
+#                     term_mark or "<no mark>",
+#                     sec_num,
+#                     ", ".join("Path {0}".format(p) for p in path_indices)
+#                 )
+#             output_window.print_md(info)
