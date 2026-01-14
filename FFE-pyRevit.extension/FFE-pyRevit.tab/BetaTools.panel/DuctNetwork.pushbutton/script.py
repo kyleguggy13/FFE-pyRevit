@@ -534,15 +534,17 @@ for A_elem_id, A_sec in elem_section.items():
 
 section_graph = defaultdict(set)
 
-Path_Dict = {}
+dict_Path = {}  # { Element Id : c_Id: dict }
 
 for A_section, elements in Elements_BySection.items():
 
     for A_elem in elements:
-        output_window.print_md("### A_elem_id (section): {} ({})".format(A_elem.Id, A_section)) # <- TESTING
+        # output_window.print_md("### A_elem_id (section): {} ({})".format(A_elem.Id, A_section)) # <- TESTING
         # A_elem = doc.GetElement(A_elem_id)
         if A_elem is None:
             continue
+        
+        dict_Connectors = {}    # { connector Id : section, c_Id, c_Direction, c_ConnectorType, c_Flow, c_Owner, c_AllRefs, connector }
 
         connectors = get_connectors_from_element(A_elem)
         # print("connectors: ", connectors) # <- TESTING
@@ -567,18 +569,19 @@ for A_section, elements in Elements_BySection.items():
                 if ref:
                     ref_list.append(ref)
 
-
-            Path_Dict[A_elem.Id] = {
+            
+            dict_Connectors[c.Id] = {
                 "section":          section, 
                 "c_Id":             c_Id, 
                 "c_Direction":      c_Direction, 
                 "c_ConnectorType":  c_ConnectorType, 
                 "c_Flow":           c_Flow, 
                 "c_Owner":          c_Owner, 
-                "c_AllRefs":        ref_list 
+                "c_AllRefs":        ref_list,
+                "connector":        c
                 }
             
-            print(Path_Dict[A_elem.Id])
+            # print(dict_Connectors[c.Id])
             try:
                 # output_window.print_md("Element: {} ({}) | c: {}, {}, {}, {}".format(A_elem.Id, A_section, c.Id, c.Direction, c.ConnectorType, c.Origin)) # <- TESTING
                 # c.AllRefs is a set of ConnectorRefs; each has an Owner element
@@ -611,6 +614,21 @@ for A_section, elements in Elements_BySection.items():
             except:
                 # Some connectors may not expose AllRefs properly; ignore and continue
                 pass
+        dict_Path[A_elem.Id.ToString()] = dict_Connectors
+        # print(dict_Connectors)
+
+# print(dict_Path)
+
+
+
+output_window.print_md("## TESTING IsConnectedTo on 2457958")
+print(dict_Path.keys())
+print(len(dict_Path.keys()))
+for element, conn in dict_Path.items():
+    print("element: {}".format(element))
+    print("connector: {}".format(conn))
+    output_window.print_md("---")
+
 
 
 
