@@ -1,5 +1,40 @@
 flowchart LR
 
+
+2447626 --> SD-7-5-1:::terminal@{ shape: bow-rect }
+3034403 --> SD-7-5-2:::terminal@{ shape: bow-rect }
+2447638 --> SD-7-5-3:::terminal@{ shape: bow-rect }
+2448084 --> SD-7-5-4:::terminal@{ shape: bow-rect }
+2447898 --> SD-7-5-5:::terminal@{ shape: bow-rect }
+
+Equipment:::equip@{ shape: bow-rect } --> 2633093
+
+
+3388924:::duct
+2457968:::duct
+3034403:::terminal
+2633093:::equip
+2447626:::terminal
+2457458:::duct
+2457552:::duct
+2457469:::duct
+2457754:::duct
+2447638:::terminal
+2458040:::duct
+2458023:::duct
+2447898:::terminal
+2457588:::duct
+2448084:::terminal
+3034405:::duct
+
+
+classDef equip stroke:#f00
+classDef terminal stroke:#0f0
+classDef duct stroke:#00f
+
+
+
+
 2447626
 2447638
 2447898
@@ -41,8 +76,7 @@ flowchart LR
 3388923
 3388924
 
-
-
+2633093 --> 3131458
 
 3131458 --> 2457458
 
@@ -72,7 +106,7 @@ flowchart LR
 
 2457987 --> 2457991
 
-2457991 --> 2447626 --> SD-7-5-1@{ shape: bow-rect }
+2457991 --> 2447626
 
 2457552 --> 2458028
 
@@ -88,7 +122,7 @@ flowchart LR
 
 2458069 --> 2458073
 
-2458073 --> 2447638 --> SD-7-5-3@{ shape: bow-rect }
+2458073 --> 2447638
 
 2458023 --> 2458174
 
@@ -96,7 +130,7 @@ flowchart LR
 
 2458171 --> 2458175
 
-2458175 --> 2448084 --> SD-7-5-4@{ shape: bow-rect }
+2458175 --> 2448084
 
 2457552 --> 3034406
 
@@ -108,7 +142,7 @@ flowchart LR
 
 3034408 --> 3034410
 
-3034410 --> 3034403 --> SD-7-5-2@{ shape: bow-rect }
+3034410 --> 3034403
 
 2457552 --> 2457938
 
@@ -120,4 +154,4 @@ flowchart LR
 
 2457717 --> 3026926
 
-3026926 --> 2447898 --> SD-7-5-5@{ shape: bow-rect }
+3026926 --> 2447898
