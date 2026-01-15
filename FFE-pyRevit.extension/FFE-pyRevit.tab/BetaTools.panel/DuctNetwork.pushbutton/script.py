@@ -50,6 +50,21 @@ output_window = output.get_output()
 
 
 #____________________________________________________________________ FUNCTIONS
+def eid_key(eid_or_elem):
+    """
+    Return a stable key for an element or ElementId.
+    Prefers .Id.ToString() if given an element, otherwise uses .ToString().
+    """
+    try:
+        # If it's an element, it has .Id
+        return eid_or_elem.Id.ToString()
+    except:
+        # If it's an ElementId already
+        try:
+            return eid_or_elem.ToString()
+        except:
+            return str(eid_or_elem)
+
 def get_MEPSystem(element):
     """Get the MEPSystem name of the given element, if it exists."""
     if hasattr(element, 'MEPSystem'):
@@ -442,6 +457,7 @@ output_window.print_table(table_data=TableRows, columns=ColumnOrder, title=Table
 ############################################################
 ############################################################
 #____________________________________________ PATH FINDING - 1) MAP ELEMENTS TO SECTIONS & COLLECT EQUIPMENT + TERMINALS
+"""
 # 1) Map each element to its section number and collect equipment + air terminals
 AirTerminals = []
 Equipment = []
@@ -471,6 +487,49 @@ for eq in Equipment:
     sec = elem_section.get(eq.Id, None)
     if sec is not None:
         equipment_sections.add(sec)
+"""
+
+
+# 1) Map each element to its section number and collect equipment + air terminals
+AirTerminals = []
+Equipment = []
+# elementId -> set(sectionNums)
+elem_sections = defaultdict(set)
+
+AirTerminals = []
+Equipment = []
+
+for section_num, elements in Elements_BySection.items():
+    for elem in elements:
+        eid = eid_key(elem)
+        elem_sections[eid].add(section_num)
+
+        cat_name = elem.Category.Name if elem.Category else ""
+        if cat_name == "Air Terminals":
+            AirTerminals.append(elem)
+        elif cat_name == "Mechanical Equipment":
+            Equipment.append(elem)
+        # print("element: {}, section: {}".format(elem.Id, section_num)) # <- TESTING
+
+
+print("elem_sections: {}".format(elem_sections))
+
+
+# Build quick sets of section numbers containing terminals and equipment
+# terminal_sections = set()
+# for term in AirTerminals:
+#     sec = elem_section.get(term.Id, None)
+#     if sec is not None:
+#         terminal_sections.add(sec)
+
+# equipment_sections = set()
+# for eq in Equipment:
+#     sec = elem_section.get(eq.Id, None)
+#     if sec is not None:
+#         equipment_sections.add(sec)
+
+
+
 
 
 # 2) Build an undirected graph of sections based on connector connectivity
@@ -603,11 +662,11 @@ for A_section, elements in Elements_BySection.items():
                     B_element_id = B_element.Id
                     if B_element_id == A_elem.Id:
                         continue
-                    if B_element_id not in elem_section:
+                    if B_element_id not in elem_sections:
                         # connected to something outside the analyzed network
                         continue
 
-                    B_sec = elem_section[B_element_id]
+                    B_sec = elem_sections[B_element_id]
                     if B_sec is None or B_sec == A_section:
                         continue
 
@@ -633,9 +692,9 @@ for A_section, elements in Elements_BySection.items():
 # print("dict_Path: ", dict_Path.keys())
 # print("dict_Path (length): ", len(dict_Path.keys()))
 
-elem_2457958 = dict_Path["2457958"] # <- dict of element's connectors
-elem_2457958_c1 = elem_2457958[1]   # <- dict of connector 1
-elem_2457958_c2 = elem_2457958[2]   # <- dict of connector 2
+# elem_2457958 = dict_Path["2457958"] # <- dict of element's connectors
+# elem_2457958_c1 = elem_2457958[1]   # <- dict of connector 1
+# elem_2457958_c2 = elem_2457958[2]   # <- dict of connector 2
 
 
 # print("elem_2457958: {}".format(elem_2457958))
@@ -686,7 +745,7 @@ print("Connectors: {}".format(len(Connectors_All)))
 
 
 FlowPath = []
-source_id = "2633093"
+# source_id = "2633093"
 source = Equipment
 source_ids = {eq.Id for eq in Equipment}
 
@@ -740,6 +799,53 @@ def _as_flow_dir(d):
         return None
 
 
+def element_path_to_section_path(element_path, elem_sections_map):
+    """
+    Given elem_path = [Element, Element, ...]
+    return a compact section path like [1,2,3,4,5]
+    by selecting the shared section between each adjacent pair.
+
+    If an adjacent pair shares multiple sections (rare but possible),
+    we prefer continuity with the last chosen section.
+    """
+    if not element_path or len(element_path) < 2:
+        return []
+
+    sec_path = []
+    last_sec = None
+
+    for i in range(len(element_path) - 1):
+        a_id = eid_key(element_path[i])
+        b_id = eid_key(element_path[i + 1])
+
+        a_secs = elem_sections_map.get(a_id, set())
+        b_secs = elem_sections_map.get(b_id, set())
+
+        shared = set(a_secs) & set(b_secs)
+
+        chosen = None
+        if shared:
+            # Prefer to keep continuity if possible
+            if last_sec in shared:
+                chosen = last_sec
+            else:
+                chosen = sorted(shared)[0]  # stable deterministic pick
+        else:
+            # No shared section found. This can happen if:
+            # - one element isn't in Elements_BySection
+            # - Revit sectioning produced a gap at this adjacency
+            # Fallback: pick something deterministic so output still exists.
+            union_secs = set(a_secs) | set(b_secs)
+            if union_secs:
+                chosen = sorted(union_secs)[0]
+
+        if chosen is not None and chosen != last_sec:
+            sec_path.append(chosen)
+            last_sec = chosen
+
+    return sec_path
+
+
 def iter_connected_neighbors(current_elem):
     """
     Yield neighbor relationships as tuples:
@@ -781,8 +887,8 @@ def pick_upstream_neighbor(current_elem, visited_ids, allowed_elem_ids_set, mode
     Parameters
     ----------
     current_elem : Revit element
-    visited_ids : set[int]     (integer ElementId values)
-    allowed_elem_ids_set : set[int]  only consider neighbors inside your analyzed network
+    visited_ids : set[str]     (string ElementId values)
+    allowed_elem_ids_set : set[str]  only consider neighbors inside your analyzed network
     mode : str
         "terminal_to_equipment_supply"  (default)
             Walking from Air Terminal upstream to Equipment on a SUPPLY system.
@@ -896,7 +1002,33 @@ for terminal in AirTerminals:
     dict_all_flow_paths[term_mark] = FlowPath   # Main Output of Flow Paths
 
     path_ids = [e.Id.ToString() for e in FlowPath]
-    output_window.print_md("- Terminal {} path: {}".format(term_mark, " --> ".join([str(i) for i in path_ids])))
+    # output_window.print_md("- Terminal {} path: {}".format(term_mark, " --> ".join([str(i) for i in path_ids])))
+
+
+    # Build section path from element path
+    sec_path = element_path_to_section_path(FlowPath, elem_sections)
+
+    # Print results
+    try:
+        term_mark = get_Mark(terminal) or "<no mark>"
+    except:
+        term_mark = "<no mark>"
+
+    path_ids = [eid_key(e) for e in FlowPath]
+    output_window.print_md("- Terminal {} element path: {}".format(
+        term_mark, " -> ".join(str(i) for i in path_ids)
+    ))
+
+    if sec_path:
+        output_window.print_md("  - Terminal {} section path: {}".format(
+            term_mark, " -> ".join(str(s) for s in sec_path)
+        ))
+    else:
+        output_window.print_md("  - Terminal {} section path: <none determined>".format(term_mark))
+
+
+
+
 
 ######################################################
 ######################################################
