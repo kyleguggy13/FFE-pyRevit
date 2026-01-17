@@ -803,6 +803,10 @@ source_ids = {eq.Id for eq in Equipment}
 # output_window.print_md("---")
 # print("FlowPath: {}".format(FlowPath))
 
+# output_window.print_md("## CONNECTOR ORIGINS")
+# for conn in Connectors_All:
+#     print("Owner: {}, Id: {}, Origin: {}".format(eid_key(conn.Owner), conn.Id, conn.Origin))
+
 
 
 ######################################################
@@ -817,9 +821,25 @@ def _as_flow_dir(d):
     except:
         return None
 
-# print("AirFlow_BySection: {}".format(AirFlow_BySection))
-output_window.print_md("---")
-# print("Elements_BySection: {}".format(Elements_BySection))
+
+def find_sum_object(a, b, c):
+    a_flow = AirFlow_BySection[a]
+    b_flow = AirFlow_BySection[b]
+    c_flow = AirFlow_BySection[c]
+
+    if a_flow == b_flow + c_flow:
+        return a
+    if b_flow == a_flow + c_flow:
+        return b
+    if c_flow == a_flow + b_flow:
+        return c
+    return None
+
+
+print("AirFlow_BySection: {}".format(AirFlow_BySection))    # <- TESTING
+output_window.print_md("---")   # <- TESTING
+# print("Elements_BySection: {}".format(Elements_BySection))    # <- TESTING
+
 def element_path_to_section_path(element_path, elem_sections_map):
     """
     Given elem_path = [Element, Element, ...]
@@ -855,7 +875,16 @@ def element_path_to_section_path(element_path, elem_sections_map):
             else:
                 chosen = sorted(shared)[0]  # stable deterministic pick
                 print("element: {}, # of shared: {}, sorted(shared)[0]: {}".format(element_path[i].Id.ToString(), len(shared), chosen))
-                # last_sec_flow = AirFlow_BySection[sec]
+                
+                # Correctly chose branch
+                if len(shared) >= 2:
+                    shared_list = list(shared)
+                    shared_a = shared_list[0]
+                    shared_b = shared_list[1]
+                    
+                    chosen = find_sum_object(shared_a, shared_b, last_sec)
+
+
                 for sec in shared:
                     sec_flow = AirFlow_BySection[sec]
                     connectors = get_connectors_from_element(element_path[i])
@@ -890,6 +919,7 @@ def element_path_to_section_path(element_path, elem_sections_map):
 
         if chosen is not None and chosen != last_sec:
             sec_path.append(chosen)
+            output_window.print_md("**CHOSEN SECTION: {}**".format(chosen))
             last_sec = chosen
         output_window.print_md("---")
 
