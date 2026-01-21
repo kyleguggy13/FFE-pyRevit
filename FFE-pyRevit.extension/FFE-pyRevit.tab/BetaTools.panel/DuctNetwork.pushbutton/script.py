@@ -343,18 +343,28 @@ output_window.print_md("### System Air Flow: {:.0f} CFM".format(System_AirFlow))
 
 # Collect all sections in the System
 system_sections = get_MEPSystem_sections(start_element)
+# print("system_sections: {}".format(system_sections))   # <- TESTING
 
 
 Elements_BySection = {}
+"""Dict of Lists containing elements per section number."""
+ElementIds_BySection = {}
+"""Dict of Lists containing element ids per section number."""
 AirFlow_BySection = {}
+"""Dict of Air Flow values per section number."""
 PressureDrop_BySection = {}
+"""Dict of Pressure Drop values per section number."""
 Velocity_BySection = {}
+"""Dict of Velocity values per section number."""
 Friction_BySection = {}
+"""Dict of Friction values per section number."""
 
 # Get all elements in each section
 for section in system_sections:
     elements = get_MEPSection_elements(section)
     Elements_BySection[system_sections.index(section) + 1] = elements
+    
+    ElementIds_BySection[system_sections.index(section) + 1] = [eid_key(elem) for elem in elements] # <- TESTING
 
     # Get Air Flow per section
     AirFlow_BySection[system_sections.index(section) + 1] = convertUnits(section.Flow, "air flow")
@@ -383,6 +393,7 @@ List of Dictionaries containing data for each element in the duct network.
 | ----------            | ----      | ----          |
 |System Name            |✅         |                                       |
 |Category               |✅         |                                       |
+|Part Type              |✅         |                                       |
 |Element ID             |✅         |                                       |
 |Section                |✅         |                                       |
 |Mark                   |✅         |                                       |
@@ -399,6 +410,7 @@ List of Dictionaries containing data for each element in the duct network.
 ColumnOrder = [
     'System Name',
     'Category',
+    'Part Type',
     'Element ID',
     'Section',
     'Mark',
@@ -411,6 +423,9 @@ ColumnOrder = [
     'Friction (in-wg/100ft)',
     'Pressure Drop (in-wg)',
 ]
+"""
+Column order for output_window.print_table.
+"""
 
 
 #____________________________________________________________________ RUN: DUCT NETWORK SUMMARY
@@ -445,9 +460,15 @@ for section_num, elements in Elements_BySection.items():    # Iterate over dict 
 
         if elem_category in ["Duct Fittings", "Duct Accessories"]:
             code = get_ashrae_code(elem, coeff_schema) or "<no ASHRAE table set>"
+            if elem_category == "Duct Fittings":
+                parttype = str(elem.MEPModel.PartType)
+            else:
+                parttype = ""
         else:
             code = ""
+            parttype = ""
         elem_data["ASHRAE Table"] = code
+        elem_data["Part Type"] = parttype
 
         elem_data["Mark"] = get_Mark(elem)
 
@@ -462,7 +483,7 @@ for data in DuctNetworkData:
 
 TableTitle = "Duct Network Elements: {}".format(len(TableRows))
 
-output_window.print_table(table_data=TableRows, columns=ColumnOrder, title=TableTitle)
+# output_window.print_table(table_data=TableRows, columns=ColumnOrder, title=TableTitle)
 
 
 
@@ -514,16 +535,64 @@ for eq in Equipment:
 # 1) Map each element to its section number and collect equipment + air terminals
 AirTerminals = []
 Equipment = []
-# elementId -> set(sectionNums)
-elem_sections = defaultdict(set)
 
-AirTerminals = []
-Equipment = []
+# elementId -> set(SectionNumbers)
+elem_sections = defaultdict(set)
+"""
+defaultdict(set): maps element IDs to sets of section numbers.
+- elementId -> set(SectionNumbers)
+"""
+
+elem_sections_dict = {}
+"""
+Dict mapping element IDs to sets of section numbers.
+"""
+
+# AirTerminals = []
+# Equipment = []
 
 for section_num, elements in Elements_BySection.items():
+    elem_list = []
+    output_window.print_md("## Section Number: {}".format(section_num))  # <- TESTING
     for elem in elements:
         eid = eid_key(elem)
+        parttype = str(elem.MEPModel.PartType) if hasattr(elem, 'MEPModel') and hasattr(elem.MEPModel, 'PartType') else "N/A"
+        # output_window.print_md("### - Element ID: {} | Part Type: {}".format(eid, parttype))  # <- TESTING
+        connectors = get_connectors_from_element(elem)
+        for c in connectors:
+            c_Id = c.Id
+            try:
+                c_Direction = c.Direction if c.Direction else "N/A"
+                c_ConnectorType = c.ConnectorType if c.ConnectorType else "N/A"
+                c_Flow = convertUnits(c.Flow, "air flow") if c.Flow else "N/A"
+                c_AllRefs = c.AllRefs
+            except:
+                pass
+            # output_window.print_md("- Connector ID: {} | Direction: {} | ConnectorType: {} | Flow: {}".format(c_Id, c_Direction, c_ConnectorType, c_Flow))  # <- TESTING
+            connector_obj = "{}-{}-{}-{}-{}".format(eid, c_Id, c_Direction, c_ConnectorType, c_Flow)
+            print("Section{} --> {}-{}-{}-{}-{}".format(section_num, eid, c_Id, c_Direction, c_ConnectorType, c_Flow))  # <- TESTING
+
+            for ref in c_AllRefs:
+                # print("ref: {}".format(ref))  # <- TESTING
+                try:
+                    ref_Direction = ref.Direction if ref.Direction else "N/A"
+                    ref_ConnectorType = ref.ConnectorType if ref.ConnectorType else "N/A"
+                    ref_Flow = convertUnits(ref.Flow, "air flow") if ref.Flow else "N/A"
+                    print("{} --> {}-{}-{}-{}-{}".format(connector_obj, eid_key(ref.Owner), ref.Id, ref_Direction, ref_ConnectorType, ref_Flow))  # <- TESTING
+                except:
+                    pass
+                ref_Id = ref.Id
+                ref_Owner = eid_key(ref.Owner)
+                # print("{}".format(ref_Direction))  # <- TESTING
+        
+        
         elem_sections[eid].add(section_num)
+        if eid not in elem_sections_dict:
+            elem_sections_dict[eid] = [section_num]
+        else:
+            elem_sections_dict[eid].append(section_num)
+
+
 
         cat_name = elem.Category.Name if elem.Category else ""
         if cat_name == "Air Terminals":
@@ -533,7 +602,14 @@ for section_num, elements in Elements_BySection.items():
         # print("element: {}, section: {}".format(elem.Id, section_num)) # <- TESTING
 
 
-print("elem_sections: {}".format(elem_sections))
+# print("elem_sections: {}".format(elem_sections))                  # <- TESTING
+
+# print("elem_sections_dict: {}".format(elem_sections_dict))        # <- TESTING
+
+# print("Elements_BySection: {}".format(Elements_BySection))        # <- TESTING
+
+# print("ElementIds_BySection: {}".format(ElementIds_BySection))    # <- TESTING
+
 
 
 # Build quick sets of section numbers containing terminals and equipment
@@ -728,7 +804,13 @@ for A_section, elements in Elements_BySection.items():
 # print("elem_2457958_c1: {}".format(elem_2457958_c1['connector'].IsConnectedTo(elem_2457958_c2['connector'])))
 
 
+
+
 Elements_All = list(set(Elements_All))
+
+# output_window.print_md("---")   # <- TESTING
+# print("Elements_All: {}".format(Elements_All))  # <- TESTING
+# output_window.print_md("---")   # <- TESTING
 
 print("Elements (length): {}".format(len(Elements_All)))
 # print("Elements: {}".format(Elements_All))
@@ -789,8 +871,8 @@ def find_sum_object(a, b, c):
     return None
 
 
-print("AirFlow_BySection: {}".format(AirFlow_BySection))    # <- TESTING
-output_window.print_md("---")   # <- TESTING
+# print("AirFlow_BySection: {}".format(AirFlow_BySection))    # <- TESTING
+# output_window.print_md("---")   # <- TESTING
 
 # print("Elements_BySection: {}".format(Elements_BySection))    # <- TESTING
 
@@ -1098,6 +1180,7 @@ def pick_upstream_neighbor(current_elem, visited_ids, allowed_elem_ids_set, mode
             nflow = c_neigh.Flow
             # note: internal units, but relative magnitude is sufficient for scoring
             if nflow:
+                # print("Neighbor flow: {} ({})".format(convertUnits(nflow, "air flow"), nflow))   # <- TESTING
                 score += float(nflow)
         except:
             pass
@@ -1122,9 +1205,12 @@ allowed_ids = set([eid.ToString() for eid in Elements_All])
 
 all_flow_paths = []  # optional: collect each terminal's path
 dict_all_flow_paths = {}
+dict_all_flow_paths_sections = {}
 
 for terminal in AirTerminals:
     FlowPath = [terminal]
+    FlowPath_Sections = [elem_sections[eid_key(terminal)]]
+
     visited = set([terminal.Id.ToString()])
 
     max_hops = 500  # safety cap for weird/cyclic networks
@@ -1137,6 +1223,16 @@ for terminal in AirTerminals:
             break
 
         current_elem = FlowPath[-1]
+        current_elem_sections = elem_sections_dict.get(eid_key(current_elem))
+        current_elem_flow = []
+        for sec in current_elem_sections:
+            current_elem_flow.append(AirFlow_BySection.get(sec, None))
+
+        # print("Current Element: {} | Sections: {} | Air Flows: {}".format(
+        #     eid_key(current_elem),
+        #     current_elem_sections,
+        #     current_elem_flow
+        # ))  # <- TESTING
 
         next_elem = pick_upstream_neighbor(
             current_elem=current_elem,
@@ -1148,6 +1244,8 @@ for terminal in AirTerminals:
         if next_elem is None:
             # dead end: no upstream neighbor found
             break
+
+        # print("Next Element: {} | Sections: {} | Air Flows: {}".format(eid_key(next_elem), current_elem_sections, next_elem_flow))  # <- TESTING
 
         FlowPath.append(next_elem)
         visited.add(next_elem.Id.ToString())
@@ -1161,6 +1259,7 @@ for terminal in AirTerminals:
         term_mark = "<no mark>"
     
     dict_all_flow_paths[term_mark] = FlowPath   # Main Output of Flow Paths
+    
 
     path_ids = [e.Id.ToString() for e in FlowPath]
     # output_window.print_md("- Terminal {} path: {}".format(term_mark, " --> ".join([str(i) for i in path_ids])))
@@ -1168,7 +1267,8 @@ for terminal in AirTerminals:
 
     # Build section path from element path
     sec_path = element_path_to_section_path(FlowPath, elem_sections)
-
+    dict_all_flow_paths_sections[term_mark] = sec_path   # Main Output of Flow Paths
+    
     # Print results
     try:
         term_mark = get_Mark(terminal) or "<no mark>"
@@ -1193,17 +1293,18 @@ for terminal in AirTerminals:
 ######################################################
 ######################################################
 
-# output_window.print_md("## all_flow_paths:")
-# print(all_flow_paths)
+output_window.print_md("---")
+output_window.print_md("---")
+output_window.print_md("## FINAL Results: Terminal section paths")
+for term_mark, sec_path in dict_all_flow_paths_sections.items():
+    if sec_path:
+        output_window.print_md("- Terminal {} FINAL section path: {}".format(
+            term_mark, " -> ".join(str(s) for s in sec_path)
+        ))
+    else:
+        output_window.print_md("- Terminal {} FINAL section path: <none determined>".format(term_mark))
 
-# output_window.print_md("## dict_all_flow_paths:")
-# print(dict_all_flow_paths)
 
 
-# from Autodesk.Revit.DB.Analysis import MEPAnalyticalSegment, MEPNetworkIterator, MEPNetworkSegmentData
-
-# DuctNetwork_Segments = MEPSystem_Obj.GetAnalyticalModel().GetSegments()
 
 
-# print("DuctNetwork_Segments (length): {}".format(len(DuctNetwork_Segments)))
-# print("DuctNetwork_Segments: {}".format(doc.MEPNetworkIterator))
