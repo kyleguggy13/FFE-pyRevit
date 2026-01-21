@@ -895,7 +895,7 @@ def element_path_to_section_path(element_path, elem_sections_map):
                 for airflow in duct_airflows:
                     if airflow > AirFlow_BySection[last_sec] and airflow != duct_airflows[-1]:
                         duct_index = duct_airflows.index(airflow)
-                        chosen = list(duct_sections[duct_index+1:])
+                        chosen = list(duct_sections[duct_index:])
                         print("  > SPECIAL CASE CHOSEN: {} (flow: {})".format(chosen, airflow))                                     # <- TESTING
                         break
 
