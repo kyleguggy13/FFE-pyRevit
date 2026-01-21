@@ -808,56 +808,56 @@ def element_path_to_section_path(element_path, elem_sections_map):
 
     sec_path = []
     last_sec = None
-    # print("\n=== STARTING element_path_to_section_path ===")                                                                        # <- TESTING
-    # print("Total elements in path: {}".format(len(element_path)))                                                                   # <- TESTING
+    print("\n=== STARTING element_path_to_section_path ===")                                                                        # <- TESTING
+    print("Total elements in path: {}".format(len(element_path)))                                                                   # <- TESTING
 
     for i in range(len(element_path) - 1):
-        # print("\n--- ITERATION {}/{} ---".format(i, len(element_path) - 2))                                                         # <- TESTING
+        print("\n--- ITERATION {}/{} ---".format(i, len(element_path) - 2))                                                         # <- TESTING
         a_id = eid_key(element_path[i])
         b_id = eid_key(element_path[i + 1])
-        # print("Current element A: {} ({})".format(a_id, element_path[i].Category.Name if element_path[i].Category else "N/A"))      # <- TESTING
-        # print("Next element B: {} ({})".format(b_id, element_path[i + 1].Category.Name if element_path[i + 1].Category else "N/A")) # <- TESTING
+        print("Current element A: {} ({})".format(a_id, element_path[i].Category.Name if element_path[i].Category else "N/A"))      # <- TESTING
+        print("Next element B: {} ({})".format(b_id, element_path[i + 1].Category.Name if element_path[i + 1].Category else "N/A")) # <- TESTING
 
         a_secs = elem_sections_map.get(a_id, set())
         b_secs = elem_sections_map.get(b_id, set())
-        # print("Sections in element A: {}".format(sorted(a_secs)))                                                                   # <- TESTING
-        # print("Sections in element B: {}".format(sorted(b_secs)))                                                                   # <- TESTING
+        print("Sections in element A: {}".format(sorted(a_secs)))                                                                   # <- TESTING
+        print("Sections in element B: {}".format(sorted(b_secs)))                                                                   # <- TESTING
 
         shared = set(a_secs) & set(b_secs)
-        # print("Shared sections: {}".format(sorted(shared)))                                                                         # <- TESTING
-        # print("Last section (continuity): {}".format(last_sec))                                                                     # <- TESTING
+        print("Shared sections: {}".format(sorted(shared)))                                                                         # <- TESTING
+        print("Last section (continuity): {}".format(last_sec))                                                                     # <- TESTING
 
         ### NEED TO USE THESE IF STATEMENTS TO CORRECTLY SELECT THE SECTION
         chosen = None
         if shared:
-            # print("BRANCH: Shared sections exist")                                                                                  # <- TESTING
+            print("BRANCH: Shared sections exist")                                                                                  # <- TESTING
             # Prefer to keep continuity if possible
             if last_sec in shared:
-                # print("  > CONTINUITY: Last section {} is in shared set".format(last_sec))                                          # <- TESTING
+                print("  > CONTINUITY: Last section {} is in shared set".format(last_sec))                                          # <- TESTING
                 chosen = last_sec
                 last_sec_flow = AirFlow_BySection[last_sec]
-                # print("  > CHOSEN: {} (flow: {})".format(chosen, last_sec_flow))                                                    # <- TESTING
-                # print("element: {}, if last_sec in shared: {} ({})".format(element_path[i].Id.ToString(), chosen, last_sec_flow))
+                print("  > CHOSEN: {} (flow: {})".format(chosen, last_sec_flow))                                                    # <- TESTING
+                print("element: {}, if last_sec in shared: {} ({})".format(element_path[i].Id.ToString(), chosen, last_sec_flow))
             
 
             elif len(shared) >= 2:
-                # print("  > MULTIPLE SHARED SECTIONS: {} sections shared".format(len(shared)))                                       # <- TESTING
+                print("  > MULTIPLE SHARED SECTIONS: {} sections shared".format(len(shared)))                                       # <- TESTING
                 chosen = sorted(shared)[0]  # stable deterministic pick
-                # print("  > Initial choice (sorted): {}".format(chosen))                                                             # <- TESTING
-                # print("element: {}, # of shared: {}, sorted(shared)[0]: {}".format(element_path[i].Id.ToString(), len(shared), chosen))
+                print("  > Initial choice (sorted): {}".format(chosen))                                                             # <- TESTING
+                print("element: {}, # of shared: {}, sorted(shared)[0]: {}".format(element_path[i].Id.ToString(), len(shared), chosen))
                 
                 # Correctly chose branch
-                # print("  > Attempting to find best fit using flow analysis")                                                    # <- TESTING
+                print("  > Attempting to find best fit using flow analysis")                                                    # <- TESTING
                 shared_list = list(shared)
                 shared_a = shared_list[0]
                 shared_b = shared_list[1]
-                # print("  > Testing sections {} and {} against last_sec {}".format(shared_a, shared_b, last_sec))                # <- TESTING
+                print("  > Testing sections {} and {} against last_sec {}".format(shared_a, shared_b, last_sec))                # <- TESTING
                 
                 chosen = find_sum_object(shared_a, shared_b, last_sec)
-                # if chosen:                                                                                                      # <- TESTING
-                #     print("  > FLOW ANALYSIS RESULT: {} (matches flow sum)".format(chosen))                                     # <- TESTING
-                # else:                                                                                                           # <- TESTING
-                #     print("  > FLOW ANALYSIS: No match found, keeping sorted choice")                                           # <- TESTING
+                if chosen:                                                                                                      # <- TESTING
+                    print("  > FLOW ANALYSIS RESULT: {} (matches flow sum)".format(chosen))                                     # <- TESTING
+                else:                                                                                                           # <- TESTING
+                    print("  > FLOW ANALYSIS: No match found, keeping sorted choice")                                           # <- TESTING
 
 
                 # for sec in shared:
@@ -880,13 +880,13 @@ def element_path_to_section_path(element_path, elem_sections_map):
                 #     print("section (flow): {} ({}), if sec_flow == last_sec_flow: {} ({})".format(sec, sec_flow, last_sec, last_sec_flow))
 
             elif len(shared) == 1 and element_path[i].Category.Name == "Ducts" and len(list(elem_sections[eid_key(element_path[i])])) > 1:
-                # print("  > SPECIAL CASE: Single shared section for Duct element")                                                   # <- TESTING
+                print("  > SPECIAL CASE: Single shared section for Duct element")                                                   # <- TESTING
                 # Check if Duct has multiple sections with increasing flow
                 duct_sections = list(elem_sections[eid_key(element_path[i])])
-                # print("  > Duct sections before sorting: {}".format(duct_sections))                                               # <- TESTING
+                print("  > Duct sections before sorting: {}".format(duct_sections))                                               # <- TESTING
                 
                 duct_airflows = [AirFlow_BySection[sec] for sec in duct_sections]
-                # print("  > Duct airflows before sorting: {}".format(duct_airflows))                                               # <- TESTINGz
+                print("  > Duct airflows before sorting: {}".format(duct_airflows))                                               # <- TESTING
                 
                 zipped_pairs = zip(duct_airflows, duct_sections)
                 sorted_pairs = sorted(zipped_pairs)
@@ -896,7 +896,7 @@ def element_path_to_section_path(element_path, elem_sections_map):
                     if airflow > AirFlow_BySection[last_sec] and airflow != duct_airflows[-1]:
                         duct_index = duct_airflows.index(airflow)
                         chosen = list(duct_sections[duct_index+1:])
-                        # print("  > SPECIAL CASE CHOSEN: {} (flow: {})".format(chosen, airflow))                                     # <- TESTING
+                        print("  > SPECIAL CASE CHOSEN: {} (flow: {})".format(chosen, airflow))                                     # <- TESTING
                         break
 
 
@@ -920,7 +920,7 @@ def element_path_to_section_path(element_path, elem_sections_map):
                 #         # section_index = duct_airflows.index(c_Flow)
                 #         # chosen = duct_sections[section_index]
             else:
-                # print("  > FLOW ANALYSIS: No match found, keeping sorted choice")                                                   # <- TESTING
+                print("  > FLOW ANALYSIS: No match found, keeping sorted choice")                                                   # <- TESTING
                 chosen = sorted(shared)[0]  # stable deterministic pick
 
             """
@@ -966,43 +966,43 @@ def element_path_to_section_path(element_path, elem_sections_map):
                 """
 
         else:
-            # print("BRANCH: NO SHARED SECTIONS")                                                                                     # <- TESTING
+            print("BRANCH: NO SHARED SECTIONS")                                                                                     # <- TESTING
             # No shared section found. This can happen if:
             # - one element isn't in Elements_BySection
             # - Revit sectioning produced a gap at this adjacency
             # Fallback: pick something deterministic so output still exists.
             union_secs = set(a_secs) | set(b_secs)
-            # print("  > Union of sections: {}".format(sorted(union_secs)))                                                           # <- TESTING
+            print("  > Union of sections: {}".format(sorted(union_secs)))                                                           # <- TESTING
             if union_secs:
                 chosen = sorted(union_secs)[0]
-                # print("  > FALLBACK: Using first element from union: {}".format(chosen))                                            # <- TESTING
+                print("  > FALLBACK: Using first element from union: {}".format(chosen))                                            # <- TESTING
                 # print("element: {}, union_secs: {}".format(element_path[i].Id.ToString(), chosen))
-            # else:                                                                                                                   # <- TESTING
-                # print("  > WARNING: No sections available at all!")                                                                 # <- TESTING
+            else:                                                                                                                   # <- TESTING
+                print("  > WARNING: No sections available at all!")                                                                 # <- TESTING
 
-        # print("\nFinal decision for iteration {}:".format(i))                                                                       # <- TESTING
-        # print("  > chosen section: {}".format(chosen))                                                                              # <- TESTING
-        # print("  > last_sec: {}".format(last_sec))                                                                                  # <- TESTING
+        print("\nFinal decision for iteration {}:".format(i))                                                                       # <- TESTING
+        print("  > chosen section: {}".format(chosen))                                                                              # <- TESTING
+        print("  > last_sec: {}".format(last_sec))                                                                                  # <- TESTING
 
         if chosen is not None and chosen != last_sec:
             if isinstance(chosen, list):
                 sec_path.extend(chosen)
-                # print("  > APPENDED to sec_path (list): {}".format(chosen))
+                print("  > APPENDED to sec_path (list): {}".format(chosen))
                 last_sec = chosen[-1]
                 
             else:
                 sec_path.append(chosen)
-                # print("  > APPENDED to sec_path: {}".format(chosen))                                                                    # <- TESTING
+                print("  > APPENDED to sec_path: {}".format(chosen))                                                                    # <- TESTING
                 last_sec = chosen
-            # output_window.print_md("**CHOSEN SECTION: {}**".format(chosen))
-        # else:                                                                                                                       # <- TESTING
-        #     if chosen is None:                                                                                                      # <- TESTING
-        #         print("  > SKIPPED: chosen is None")                                                                                # <- TESTING
-        #     else:                                                                                                                   # <- TESTING
-        #         print("  > SKIPPED: chosen == last_sec (no change needed)")                                                         # <- TESTING
-        # output_window.print_md("---")
+            output_window.print_md("**CHOSEN SECTION: {}**".format(chosen))
+        else:                                                                                                                       # <- TESTING
+            if chosen is None:                                                                                                      # <- TESTING
+                print("  > SKIPPED: chosen is None")                                                                                # <- TESTING
+            else:                                                                                                                   # <- TESTING
+                print("  > SKIPPED: chosen == last_sec (no change needed)")                                                         # <- TESTING
+        output_window.print_md("---")
 
-    # print("\n=== COMPLETED element_path_to_section_path ===")                                                                       # <- TESTING
+    print("\n=== COMPLETED element_path_to_section_path ===")                                                                       # <- TESTING
     print("Final section path: {}".format(sec_path))                                                                                # <- TESTING
     return sec_path
 
@@ -1200,10 +1200,10 @@ for terminal in AirTerminals:
 # print(dict_all_flow_paths)
 
 
-from Autodesk.Revit.DB.Analysis import MEPAnalyticalSegment, MEPNetworkIterator, MEPNetworkSegmentData
+# from Autodesk.Revit.DB.Analysis import MEPAnalyticalSegment, MEPNetworkIterator, MEPNetworkSegmentData
 
 # DuctNetwork_Segments = MEPSystem_Obj.GetAnalyticalModel().GetSegments()
 
 
 # print("DuctNetwork_Segments (length): {}".format(len(DuctNetwork_Segments)))
-print("DuctNetwork_Segments: {}".format(doc.MEPNetworkIterator))
+# print("DuctNetwork_Segments: {}".format(doc.MEPNetworkIterator))
