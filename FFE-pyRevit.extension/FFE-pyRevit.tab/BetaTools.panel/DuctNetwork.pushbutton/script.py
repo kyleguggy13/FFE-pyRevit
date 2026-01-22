@@ -20,6 +20,7 @@ Author: Kyle Guggenheim"""
 from System import String
 from collections import defaultdict
 import time
+import math
 
 
 #____________________________________________________________________ IMPORTS (AUTODESK)
@@ -483,7 +484,7 @@ for data in DuctNetworkData:
 
 TableTitle = "Duct Network Elements: {}".format(len(TableRows))
 
-# output_window.print_table(table_data=TableRows, columns=ColumnOrder, title=TableTitle)
+output_window.print_table(table_data=TableRows, columns=ColumnOrder, title=TableTitle)
 
 
 
@@ -553,11 +554,12 @@ Dict mapping element IDs to sets of section numbers.
 
 for section_num, elements in Elements_BySection.items():
     elem_list = []
-    output_window.print_md("## Section Number: {}".format(section_num))  # <- TESTING
+    # output_window.print_md("## Section Number: {}".format(section_num))  # <- TESTING
     for elem in elements:
         eid = eid_key(elem)
+        elem_category = elem.Category.Name
         parttype = str(elem.MEPModel.PartType) if hasattr(elem, 'MEPModel') and hasattr(elem.MEPModel, 'PartType') else "N/A"
-        # output_window.print_md("### - Element ID: {} | Part Type: {}".format(eid, parttype))  # <- TESTING
+        # output_window.print_md("### - Element ID: {} | Category: {} | Part Type: {}".format(eid, elem_category, parttype))  # <- TESTING
         connectors = get_connectors_from_element(elem)
         for c in connectors:
             c_Id = c.Id
@@ -565,12 +567,13 @@ for section_num, elements in Elements_BySection.items():
                 c_Direction = c.Direction if c.Direction else "N/A"
                 c_ConnectorType = c.ConnectorType if c.ConnectorType else "N/A"
                 c_Flow = convertUnits(c.Flow, "air flow") if c.Flow else "N/A"
+                c_PD = "{:.4f}".format(convertUnits(c.PressureDrop, "pressure")) if c.PressureDrop else "N/A"
                 c_AllRefs = c.AllRefs
             except:
                 pass
             # output_window.print_md("- Connector ID: {} | Direction: {} | ConnectorType: {} | Flow: {}".format(c_Id, c_Direction, c_ConnectorType, c_Flow))  # <- TESTING
-            connector_obj = "{}-{}-{}-{}-{}".format(eid, c_Id, c_Direction, c_ConnectorType, c_Flow)
-            print("Section{} --> {}-{}-{}-{}-{}".format(section_num, eid, c_Id, c_Direction, c_ConnectorType, c_Flow))  # <- TESTING
+            connector_obj = "{}-{}-{}-{}-{}-{}".format(eid, c_Id, c_Direction, c_ConnectorType, c_Flow, c_PD)
+            # print("Section{} --> {}-{}-{}-{}-{}-{}".format(section_num, eid, c_Id, c_Direction, c_ConnectorType, c_Flow, c_PD))  # <- TESTING
 
             for ref in c_AllRefs:
                 # print("ref: {}".format(ref))  # <- TESTING
@@ -578,7 +581,8 @@ for section_num, elements in Elements_BySection.items():
                     ref_Direction = ref.Direction if ref.Direction else "N/A"
                     ref_ConnectorType = ref.ConnectorType if ref.ConnectorType else "N/A"
                     ref_Flow = convertUnits(ref.Flow, "air flow") if ref.Flow else "N/A"
-                    print("{} --> {}-{}-{}-{}-{}".format(connector_obj, eid_key(ref.Owner), ref.Id, ref_Direction, ref_ConnectorType, ref_Flow))  # <- TESTING
+                    ref_PD = "{:.4f}".format(convertUnits(ref.PressureDrop, "pressure")) if ref.PressureDrop else "N/A"
+                    # print("{} --> {}-{}-{}-{}-{}-{}".format(connector_obj, eid_key(ref.Owner), ref.Id, ref_Direction, ref_ConnectorType, ref_Flow, ref_PD))  # <- TESTING
                 except:
                     pass
                 ref_Id = ref.Id
@@ -849,6 +853,7 @@ source_ids = {eq.Id for eq in Equipment}
 ######################################################
 from Autodesk.Revit.DB import FlowDirectionType
 
+
 def _as_flow_dir(d):
     """Return FlowDirectionType or None safely."""
     try:
@@ -856,18 +861,55 @@ def _as_flow_dir(d):
     except:
         return None
 
+def is_close(x, y, epsilon=1e-9):
+    """Return True if two values are close in numeric value within a given epsilon."""
+    return abs(x - y) <= epsilon
+
+# a = 0.1 + 0.2
+# b = 0.3
+
+# print(f"Using custom function: {is_close(a, b)}")
+# print(f"Using custom function with different epsilon: {is_close(a, b, epsilon=1e-15)}") # May be False
+
+
 
 def find_sum_object(a, b, c):
     a_flow = AirFlow_BySection[a]
     b_flow = AirFlow_BySection[b]
     c_flow = AirFlow_BySection[c]
 
-    if a_flow == b_flow + c_flow:
+    print("Analyzing sections {} ({}), {} ({}), {} ({})".format(a_flow, type(a_flow), b_flow, type(b_flow), c_flow, type(c_flow)))  # <- TESTING
+    print("b + c = {}".format(int(b_flow)+int(c_flow) == int(a_flow)))
+    print("a + c = {}".format(int(a_flow)+int(c_flow) == int(b_flow)))
+    print("a + b = {}".format(int(a_flow)+int(b_flow) == int(c_flow)))
+
+    b_c = b_flow + c_flow
+    a_c = a_flow + c_flow
+    a_b = a_flow + b_flow
+    # Use math.isclose() to check for approximate equality
+    # if is_close(a_flow, b_c):
+    #     print("The numbers are close enough to be considered equal.")
+    # else:
+    #     print("The numbers are not close enough.")
+
+    if is_close(a_flow, b_c):
+        print("  > MATCH FOUND: Section {} equals sum of {} + {}".format(a, b, c))  # <- TESTING
         return a
-    if b_flow == a_flow + c_flow:
+    if is_close(b_flow, a_c):
+        print("  > MATCH FOUND: Section {} equals sum of {} + {}".format(b, a, c))  # <- TESTING
         return b
-    if c_flow == a_flow + b_flow:
+    if is_close(c_flow, a_b):
+        print("  > MATCH FOUND: Section {} equals sum of {} + {}".format(c, a, b))  # <- TESTING
         return c
+    # if a_flow == b_flow + c_flow:
+    #     print("  > MATCH FOUND: Section {} equals sum of {} + {}".format(a, b, c))  # <- TESTING
+    #     return a
+    # if b_flow == a_flow + c_flow:
+    #     print("  > MATCH FOUND: Section {} equals sum of {} + {}".format(b, a, c))  # <- TESTING
+    #     return b
+    # if c_flow == a_flow + b_flow:
+    #     print("  > MATCH FOUND: Section {} equals sum of {} + {}".format(c, a, b))  # <- TESTING
+    #     return c
     return None
 
 
@@ -890,11 +932,12 @@ def element_path_to_section_path(element_path, elem_sections_map):
 
     sec_path = []
     last_sec = None
-    print("\n=== STARTING element_path_to_section_path ===")                                                                        # <- TESTING
+    output_window.print_md("---")
+    output_window.print_md("## === STARTING element_path_to_section_path ===")                                                      # <- TESTING
     print("Total elements in path: {}".format(len(element_path)))                                                                   # <- TESTING
 
     for i in range(len(element_path) - 1):
-        print("\n--- ITERATION {}/{} ---".format(i, len(element_path) - 2))                                                         # <- TESTING
+        output_window.print_md("### --- ITERATION {}/{} ---".format(i, len(element_path) - 2))                                      # <- TESTING
         a_id = eid_key(element_path[i])
         b_id = eid_key(element_path[i + 1])
         print("Current element A: {} ({})".format(a_id, element_path[i].Category.Name if element_path[i].Category else "N/A"))      # <- TESTING
@@ -929,22 +972,22 @@ def element_path_to_section_path(element_path, elem_sections_map):
                 print("element: {}, # of shared: {}, sorted(shared)[0]: {}".format(element_path[i].Id.ToString(), len(shared), chosen))
                 
                 # Correctly chose branch
-                print("  > Attempting to find best fit using flow analysis")                                                    # <- TESTING
+                print("  > Attempting to find best fit using 'find_sum_object'")                                                    # <- TESTING
                 shared_list = list(shared)
                 shared_a = shared_list[0]
                 shared_b = shared_list[1]
-                print("  > Testing sections {} and {} against last_sec {}".format(shared_a, shared_b, last_sec))                # <- TESTING
+                print("  > Testing sections {} and {} against last_sec {}".format(shared_a, shared_b, last_sec))                    # <- TESTING
                 
                 chosen = find_sum_object(shared_a, shared_b, last_sec)
-                if chosen:                                                                                                      # <- TESTING
-                    print("  > FLOW ANALYSIS RESULT: {} (matches flow sum)".format(chosen))                                     # <- TESTING
-                else:                                                                                                           # <- TESTING
-                    print("  > FLOW ANALYSIS: No match found, keeping sorted choice")                                           # <- TESTING
+                if chosen:                                                                                                          # <- TESTING
+                    print("  > FLOW ANALYSIS RESULT: {} (matches flow sum)".format(chosen))                                         # <- TESTING
+                else:                                                                                                               # <- TESTING
+                    print("  > FLOW ANALYSIS: No match found, keeping sorted choice")                                               # <- TESTING
 
 
                 # for sec in shared:
                 #     sec_flow = AirFlow_BySection[sec]
-                #     # print("  > Analyzing section {} (flow: {})".format(sec, sec_flow))                                              # <- TESTING
+                #     # print("  > Analyzing section {} (flow: {})".format(sec, sec_flow))                                          # <- TESTING
                 #     connectors = get_connectors_from_element(element_path[i])
                 #     for c in connectors:
                 #         try:
@@ -965,10 +1008,10 @@ def element_path_to_section_path(element_path, elem_sections_map):
                 print("  > SPECIAL CASE: Single shared section for Duct element")                                                   # <- TESTING
                 # Check if Duct has multiple sections with increasing flow
                 duct_sections = list(elem_sections[eid_key(element_path[i])])
-                print("  > Duct sections before sorting: {}".format(duct_sections))                                               # <- TESTING
+                print("  > Duct sections before sorting: {}".format(duct_sections))                                                 # <- TESTING
                 
                 duct_airflows = [AirFlow_BySection[sec] for sec in duct_sections]
-                print("  > Duct airflows before sorting: {}".format(duct_airflows))                                               # <- TESTING
+                print("  > Duct airflows before sorting: {}".format(duct_airflows))                                                 # <- TESTING
                 
                 zipped_pairs = zip(duct_airflows, duct_sections)
                 sorted_pairs = sorted(zipped_pairs)
