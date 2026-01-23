@@ -548,8 +548,6 @@ elem_sections_dict = {}
 Dict mapping element IDs to sets of section numbers.
 """
 
-# AirTerminals = []
-# Equipment = []
 
 for section_num, elements in Elements_BySection.items():
     elem_list = []
@@ -605,13 +603,6 @@ for section_num, elements in Elements_BySection.items():
         # print("element: {}, section: {}".format(elem.Id, section_num)) # <- TESTING
 
 
-# print("elem_sections: {}".format(elem_sections))                  # <- TESTING
-
-# print("elem_sections_dict: {}".format(elem_sections_dict))        # <- TESTING
-
-# print("Elements_BySection: {}".format(Elements_BySection))        # <- TESTING
-
-# print("ElementIds_BySection: {}".format(ElementIds_BySection))    # <- TESTING
 
 
 
@@ -635,60 +626,6 @@ for section_num, elements in Elements_BySection.items():
 # 2) Build an undirected graph of sections based on connector connectivity
 #    section_graph: {section_number: set([neighbor_section_number, ...])}
 
-# print("elem_section: ", elem_section)# <- TESTING
-
-"""
-################################
-### BUILD DICT OF CONNECTORS ###
-section_graph = defaultdict(set)
-
-for A_elem_id, A_sec in elem_section.items():
-    output_window.print_md("## A_elem_id (section): {} ({})".format(A_elem_id, A_sec)) # <- TESTING
-    A_elem = doc.GetElement(A_elem_id)
-    if A_elem is None:
-        continue
-
-    connectors = get_connectors_from_element(A_elem)
-    # print("connectors: ", connectors) # <- TESTING
-    if not connectors:
-        continue
-
-    for c in connectors:
-        try:
-            output_window.print_md("### c: {}, {}".format(c.Direction, c.ConnectorType)) # <- TESTING
-            # c.AllRefs is a set of ConnectorRefs; each has an Owner element
-            for ref in c.AllRefs:
-                B_element = ref.Owner
-                
-                output_window.print_md("- B element: {}".format(B_element.Id.ToString())) # <- TESTING
-                if B_element is None:
-                    continue
-
-                B_element_id = B_element.Id
-                if B_element_id == A_elem_id:
-                    continue
-                if B_element_id not in elem_section:
-                    # connected to something outside the analyzed network
-                    continue
-
-                B_sec = elem_section[B_element_id]
-                if B_sec is None or B_sec == A_sec:
-                    continue
-
-                # Undirected edge between section numbers
-                section_graph[A_sec].add(B_sec)
-                section_graph[B_sec].add(A_sec)
-
-                # output_window.print_md("### B_sec: {}".format(B_sec)) # <- TESTING
-                # output_window.print_md("### A_sec: {}".format(A_sec)) # <- TESTING
-                # output_window.print_md("---") # <- TESTING
-            print("Section Graph: ", section_graph)
-        except:
-            # Some connectors may not expose AllRefs properly; ignore and continue
-            pass
-### BUILD DICT OF CONNECTORS ###
-################################
-# """
 
 
 section_graph = defaultdict(set)
@@ -700,7 +637,6 @@ Elements_All = []
 for A_section, elements in Elements_BySection.items():
 
     for A_elem in elements:
-        # output_window.print_md("### A_elem_id (section): {} ({})".format(A_elem.Id, A_section)) # <- TESTING
         # A_elem = doc.GetElement(A_elem_id)
         if A_elem is None:
             continue
@@ -710,7 +646,6 @@ for A_section, elements in Elements_BySection.items():
         dict_Connectors = {}    # { connector Id : section, c_Id, c_Direction, c_ConnectorType, c_Flow, c_Owner, c_AllRefs, connector }
 
         connectors = get_connectors_from_element(A_elem)
-        # print("connectors: ", connectors) # <- TESTING
         if not connectors:
             continue
 
@@ -750,12 +685,10 @@ for A_section, elements in Elements_BySection.items():
             
             # print(dict_Connectors[c.Id])
             try:
-                # output_window.print_md("Element: {} ({}) | c: {}, {}, {}, {}".format(A_elem.Id, A_section, c.Id, c.Direction, c.ConnectorType, c.Origin)) # <- TESTING
                 # c.AllRefs is a set of ConnectorRefs; each has an Owner element
                 for ref in c.AllRefs:
                     B_element = ref.Owner
                     
-                    # output_window.print_md("- B element: {} (connector: {} {} {} {})".format(B_element.Id.ToString(), ref.Id, ref.Direction, ref.ConnectorType, ref.Origin)) # <- TESTING
                     if B_element is None:
                         continue
 
@@ -774,9 +707,6 @@ for A_section, elements in Elements_BySection.items():
                     section_graph[A_section].add(B_sec)
                     section_graph[B_sec].add(A_section)
 
-                    # output_window.print_md("### B_sec: {}".format(B_sec)) # <- TESTING
-                    # output_window.print_md("### A_sec: {}".format(A_section)) # <- TESTING
-                    # output_window.print_md("---") # <- TESTING
                 # print("Section Graph: ", section_graph)
             except:
                 # Some connectors may not expose AllRefs properly; ignore and continue
@@ -788,32 +718,8 @@ for A_section, elements in Elements_BySection.items():
 
 
 
-# output_window.print_md("## TESTING IsConnectedTo on 2457958")
-# print("dict_Path: ", dict_Path.keys())
-# print("dict_Path (length): ", len(dict_Path.keys()))
-
-# elem_2457958 = dict_Path["2457958"] # <- dict of element's connectors
-# elem_2457958_c1 = elem_2457958[1]   # <- dict of connector 1
-# elem_2457958_c2 = elem_2457958[2]   # <- dict of connector 2
-
-
-# print("elem_2457958: {}".format(elem_2457958))
-# output_window.print_md("---")
-# print("elem_2457958_c1: {}".format(elem_2457958_c1['connector']))
-# output_window.print_md("---")
-# print("elem_2457958_c2: {}".format(elem_2457958_c2['connector']))
-
-
-# print("elem_2457958_c1: {}".format(elem_2457958_c1['connector'].IsConnectedTo(elem_2457958_c2['connector'])))
-
-
-
-
 Elements_All = list(set(Elements_All))
 
-# output_window.print_md("---")   # <- TESTING
-# print("Elements_All: {}".format(Elements_All))  # <- TESTING
-# output_window.print_md("---")   # <- TESTING
 
 print("Elements (length): {}".format(len(Elements_All)))
 # print("Elements: {}".format(Elements_All))
@@ -895,10 +801,6 @@ def find_sum_object(a, b, c):
     return None
 
 
-# print("AirFlow_BySection: {}".format(AirFlow_BySection))    # <- TESTING
-# output_window.print_md("---")   # <- TESTING
-
-# print("Elements_BySection: {}".format(Elements_BySection))    # <- TESTING
 
 def element_path_to_section_path(element_path, elem_sections_map):
     """
@@ -967,26 +869,6 @@ def element_path_to_section_path(element_path, elem_sections_map):
                     print("  >> FLOW ANALYSIS: No match found, keeping sorted choice")                                              # <- TESTING
 
 
-                """
-                # for sec in shared:
-                #     sec_flow = AirFlow_BySection[sec]
-                #     # print("  > Analyzing section {} (flow: {})".format(sec, sec_flow))                                          # <- TESTING
-                #     connectors = get_connectors_from_element(element_path[i])
-                #     for c in connectors:
-                #         try:
-                #             c_Direction = c.Direction if c.Direction else "N/A"
-                #             c_ConnectorType = c.ConnectorType if c.ConnectorType else "N/A"
-                #             c_Flow = convertUnits(c.Flow, "air flow") if c.Flow else "N/A"
-                #             c_AllRefs = c.AllRefs
-                #         except:
-                #             pass
-
-                        # print("- connector: {}, {}, {}, {}".format(c_Direction, c_ConnectorType, c_Flow, [c_ref.Owner.Id.ToString() for c_ref in c_AllRefs]))
-                    # print("EXTRA PRINT: element: {}, sec (flow): {} ({})".format(element_path[i].Id.ToString(), sec, sec_flow))
-                #     if sec_flow == last_sec_flow:
-                #         chosen = sec
-                #     print("section (flow): {} ({}), if sec_flow == last_sec_flow: {} ({})".format(sec, sec_flow, last_sec, last_sec_flow))
-                """
 
             elif len(shared) == 1 and element_path[i].Category.Name == "Ducts" and len(list(elem_sections[eid_key(element_path[i])])) > 1:
                 # Check if shared is length 1, element is Duct, and current element has multiple sections
@@ -1016,72 +898,10 @@ def element_path_to_section_path(element_path, elem_sections_map):
                         print("  > SPECIAL CASE CHOSEN (2 sections only): {} (flow: {})".format(chosen, airflow))                   # <- TESTING
                         break
 
-                """
-                # print("  > Duct sections: {}, flows: {}".format(duct_sections, duct_airflows))                                      # <- TESTING
-                # print("element: {}, sections: {}, air flows: {}".format(eid_key(element_path[i]), duct_sections, duct_airflows))
-                # connectors = get_connectors_from_element(element_path[i])
-                # print("  > Duct has {} connectors".format(len(connectors)))                                                         # <- TESTING
-                # # print(" - connectors: {}".format(len(connectors)))
-                # for c in connectors:
-                #     try:
-                #         c_Direction = c.Direction if c.Direction else "N/A"
-                #         c_ConnectorType = c.ConnectorType if c.ConnectorType else "N/A"
-                #         c_Flow = convertUnits(c.Flow, "air flow") if c.Flow else "N/A"
-                #         c_AllRefs = c.AllRefs
-                #     except:
-                #         pass
-                #     c_AllRefs = [c_ref.Owner.Id.ToString() for c_ref in c_AllRefs]
-                #     if eid_key(element_path[i - 1]) in c_AllRefs:
-                #         print("  > Found connector connected to previous element")                                                  # <- TESTING
-                #         print("- last element: {}, connector: {}, {}, {}, {}".format(element_path[i - 1].Id.ToString(), c_Direction, c_ConnectorType, c_Flow, c_AllRefs))
-                #         # section_index = duct_airflows.index(c_Flow)
-                #         # chosen = duct_sections[section_index]
-                """
             else:
                 print("  > NO CONDITIONS MET: Keeping sorted choice")                                                               # <- TESTING
                 chosen = sorted(shared)[0]  # stable deterministic pick
 
-            """
-            else:
-                print("  > MULTIPLE SHARED SECTIONS: {} sections shared".format(len(shared)))                                       # <- TESTING
-                chosen = sorted(shared)[0]  # stable deterministic pick
-                print("  > Initial choice (sorted): {}".format(chosen))                                                             # <- TESTING
-                # print("element: {}, # of shared: {}, sorted(shared)[0]: {}".format(element_path[i].Id.ToString(), len(shared), chosen))
-                
-                # Correctly chose branch
-                if len(shared) >= 2:
-                    print("  > Attempting to find best fit using flow analysis")                                                    # <- TESTING
-                    shared_list = list(shared)
-                    shared_a = shared_list[0]
-                    shared_b = shared_list[1]
-                    print("  > Testing sections {} and {} against last_sec {}".format(shared_a, shared_b, last_sec))                # <- TESTING
-                    
-                    chosen = find_sum_object(shared_a, shared_b, last_sec)
-                    if chosen:                                                                                                      # <- TESTING
-                        print("  > FLOW ANALYSIS RESULT: {} (matches flow sum)".format(chosen))                                     # <- TESTING
-                    else:                                                                                                           # <- TESTING
-                        print("  > FLOW ANALYSIS: No match found, keeping sorted choice")                                           # <- TESTING
-
-
-                for sec in shared:
-                    sec_flow = AirFlow_BySection[sec]
-                    print("  > Analyzing section {} (flow: {})".format(sec, sec_flow))                                              # <- TESTING
-                    connectors = get_connectors_from_element(element_path[i])
-                    for c in connectors:
-                        try:
-                            c_Direction = c.Direction if c.Direction else "N/A"
-                            c_ConnectorType = c.ConnectorType if c.ConnectorType else "N/A"
-                            c_Flow = convertUnits(c.Flow, "air flow") if c.Flow else "N/A"
-                            c_AllRefs = c.AllRefs
-                        except:
-                            pass
-
-                        print("- connector: {}, {}, {}, {}".format(c_Direction, c_ConnectorType, c_Flow, [c_ref.Owner.Id.ToString() for c_ref in c_AllRefs]))
-                    print("EXTRA PRINT: element: {}, sec (flow): {} ({})".format(element_path[i].Id.ToString(), sec, sec_flow))
-                #     if sec_flow == last_sec_flow:
-                #         chosen = sec
-                #     print("section (flow): {} ({}), if sec_flow == last_sec_flow: {} ({})".format(sec, sec_flow, last_sec, last_sec_flow))
-                """
 
         else:
             print("BRANCH: NO SHARED SECTIONS")                                                                                     # <- TESTING
@@ -1216,7 +1036,6 @@ def pick_upstream_neighbor(current_elem, visited_ids, allowed_elem_ids_set, mode
             nflow = c_neigh.Flow
             # note: internal units, but relative magnitude is sufficient for scoring
             if nflow:
-                # print("Neighbor flow: {} ({})".format(convertUnits(nflow, "air flow"), nflow))   # <- TESTING
                 score += float(nflow)
         except:
             pass
@@ -1264,11 +1083,6 @@ for terminal in AirTerminals:
         for sec in current_elem_sections:
             current_elem_flow.append(AirFlow_BySection.get(sec, None))
 
-        # print("Current Element: {} | Sections: {} | Air Flows: {}".format(
-        #     eid_key(current_elem),
-        #     current_elem_sections,
-        #     current_elem_flow
-        # ))  # <- TESTING
 
         next_elem = pick_upstream_neighbor(
             current_elem=current_elem,
@@ -1281,7 +1095,6 @@ for terminal in AirTerminals:
             # dead end: no upstream neighbor found
             break
 
-        # print("Next Element: {} | Sections: {} | Air Flows: {}".format(eid_key(next_elem), current_elem_sections, next_elem_flow))  # <- TESTING
 
         FlowPath.append(next_elem)
         visited.add(next_elem.Id.ToString())
