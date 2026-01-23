@@ -1338,14 +1338,14 @@ for terminal in AirTerminals:
 
 output_window.print_md("---")
 output_window.print_md("---")
-output_window.print_md("## FINAL Results: Terminal section paths")
+output_window.print_md("## Results: Terminal section paths")
 for term_mark, sec_path in dict_all_flow_paths_sections.items():
     if sec_path:
-        output_window.print_md("- Terminal {} FINAL section path: {}".format(
+        output_window.print_md("- Terminal {} section path: {}".format(
             term_mark, " -> ".join(str(s) for s in sec_path)
         ))
     else:
-        output_window.print_md("- Terminal {} FINAL section path: <none determined>".format(term_mark))
+        output_window.print_md("- Terminal {} section path: <none determined>".format(term_mark))
 
 
 
