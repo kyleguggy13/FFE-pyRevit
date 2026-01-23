@@ -75,6 +75,7 @@ def get_MEPSystem(element):
     return "N/A"
 
 
+### NOTES: Need to get sections by different method. Not always a consistent set of numbers.
 def get_MEPSystem_sections(element):
     """Get all sections in the duct network starting from the given element."""
     if hasattr(element, 'MEPSystem'):
@@ -343,7 +344,7 @@ output_window.print_md("### System Air Flow: {:.0f} CFM".format(System_AirFlow))
 
 # Collect all sections in the System
 system_sections = get_MEPSystem_sections(start_element)
-# print("system_sections: {}".format(system_sections))   # <- TESTING
+print("system_sections: {}".format(system_sections))   # <- TESTING
 
 
 Elements_BySection = {}
@@ -361,7 +362,10 @@ Friction_BySection = {}
 
 # Get all elements in each section
 for section in system_sections:
+    # print(section.Number, type(section.Number))  # <- TESTING
+    # sec_number = section.Number
     elements = get_MEPSection_elements(section)
+    
     Elements_BySection[system_sections.index(section) + 1] = elements
     
     ElementIds_BySection[system_sections.index(section) + 1] = [eid_key(elem) for elem in elements] # <- TESTING
@@ -483,7 +487,7 @@ for data in DuctNetworkData:
 
 TableTitle = "Duct Network Elements: {}".format(len(TableRows))
 
-output_window.print_table(table_data=TableRows, columns=ColumnOrder, title=TableTitle)
+# output_window.print_table(table_data=TableRows, columns=ColumnOrder, title=TableTitle)
 
 
 
@@ -560,6 +564,11 @@ for section_num, elements in Elements_BySection.items():
         connectors = get_connectors_from_element(elem)
         for c in connectors:
             c_Id = c.Id
+            c_Direction = "N/A"
+            c_ConnectorType = "N/A"
+            c_Flow = "N/A"
+            c_PD = "N/A"
+            c_AllRefs = []
             try:
                 c_Direction = c.Direction if c.Direction else "N/A"
                 c_ConnectorType = c.ConnectorType if c.ConnectorType else "N/A"
@@ -603,7 +612,8 @@ for section_num, elements in Elements_BySection.items():
         # print("element: {}, section: {}".format(elem.Id, section_num)) # <- TESTING
 
 
-
+print("elem_sections: {}".format(elem_sections))  # <- TESTING
+output_window.print_md("---")
 
 
 # Build quick sets of section numbers containing terminals and equipment
@@ -782,27 +792,27 @@ def find_sum_object(a, b, c):
     a_c = a_flow + c_flow
     a_b = a_flow + b_flow
     
-    print("Analyzing sections {} ({}), {} ({}), {} ({})".format(a, a_flow, b, b_flow, c, c_flow))                                   # <- TESTING
-    print("b + c = {}".format(is_close(a_flow, b_c)))
-    print("a + c = {}".format(is_close(b_flow, a_c)))
-    print("a + b = {}".format(is_close(c_flow, a_b)))
+    # print("Analyzing sections {} ({}), {} ({}), {} ({})".format(a, a_flow, b, b_flow, c, c_flow))                                   # <- TESTING
+    # print("b + c = {}".format(is_close(a_flow, b_c)))
+    # print("a + c = {}".format(is_close(b_flow, a_c)))
+    # print("a + b = {}".format(is_close(c_flow, a_b)))
 
     
 
     if is_close(a_flow, b_c):
-        print("  >>> MATCH FOUND: Section {} equals sum of {} + {}".format(a, b, c))                                                # <- TESTING
+        # print("  >>> MATCH FOUND: Section {} equals sum of {} + {}".format(a, b, c))                                                # <- TESTING
         return a
     if is_close(b_flow, a_c):
-        print("  >>> MATCH FOUND: Section {} equals sum of {} + {}".format(b, a, c))                                                # <- TESTING
+        # print("  >>> MATCH FOUND: Section {} equals sum of {} + {}".format(b, a, c))                                                # <- TESTING
         return b
     if is_close(c_flow, a_b):
-        print("  >>> MATCH FOUND: Section {} equals sum of {} + {}".format(c, a, b))                                                # <- TESTING
+        # print("  >>> MATCH FOUND: Section {} equals sum of {} + {}".format(c, a, b))                                                # <- TESTING
         return c
     return None
 
 
 
-def element_path_to_section_path(element_path, elem_sections_map):
+def element_path_to_section_path_(element_path, elem_sections_map):
     """
     Given elem_path = [Element, Element, ...]
     return a compact section path like [1,2,3,4,5]
@@ -930,7 +940,7 @@ def element_path_to_section_path(element_path, elem_sections_map):
                 
             else:
                 sec_path.append(chosen)
-                print("  > APPENDED to sec_path: {}".format(chosen))                                                                    # <- TESTING
+                print("  > APPENDED to sec_path: {}".format(chosen))                                                                # <- TESTING
                 last_sec = chosen
             output_window.print_md("**CHOSEN SECTION: {}**".format(chosen))
         else:                                                                                                                       # <- TESTING
@@ -942,6 +952,95 @@ def element_path_to_section_path(element_path, elem_sections_map):
 
     print("\n=== COMPLETED element_path_to_section_path ===")                                                                       # <- TESTING
     print("Final section path: {}".format(sec_path))                                                                                # <- TESTING
+    return sec_path
+
+
+def element_path_to_section_path(element_path, elem_sections_map):
+    """
+    Given elem_path = [Element, Element, ...]
+    return a compact section path like [1,2,3,4,5]
+    by selecting the shared section between each adjacent pair.
+
+    If an adjacent pair shares multiple sections (rare but possible),
+    we prefer continuity with the last chosen section.
+    """
+    if not element_path or len(element_path) < 2:
+        return []
+
+    sec_path = []
+    last_sec = None
+    
+    
+    for i in range(len(element_path) - 1):
+        a_id = eid_key(element_path[i])
+        b_id = eid_key(element_path[i + 1])
+        
+        a_secs = elem_sections_map.get(a_id, set())
+        b_secs = elem_sections_map.get(b_id, set())
+        
+        shared = set(a_secs) & set(b_secs)
+        
+        ### NEED TO USE THESE IF STATEMENTS TO CORRECTLY SELECT THE SECTION
+        chosen = None
+        if shared:
+            # Prefer to keep continuity if possible
+            if last_sec in shared:    
+                chosen = last_sec
+                last_sec_flow = AirFlow_BySection[last_sec]
+            
+            elif len(shared) >= 2:
+                # chosen = sorted(shared)[0]  # stable deterministic pick
+                
+                # Correctly chose branch
+                shared_list = list(shared)
+                shared_a = shared_list[0]
+                shared_b = shared_list[1]
+                                
+                chosen = find_sum_object(shared_a, shared_b, last_sec)
+
+            elif len(shared) == 1 and element_path[i].Category.Name == "Ducts" and len(list(elem_sections[eid_key(element_path[i])])) > 1:
+                # Check if shared is length 1, element is Duct, and current element has multiple sections
+
+                # Check if Duct has multiple sections with increasing flow
+                duct_sections = list(elem_sections[eid_key(element_path[i])])
+                duct_airflows = [AirFlow_BySection[sec] for sec in duct_sections]
+
+                # Sort Duct sections by Air Flow
+                zipped_pairs = zip(duct_airflows, duct_sections)
+                sorted_pairs = sorted(zipped_pairs)
+                duct_airflows, duct_sections = zip(*sorted_pairs)
+                
+                for airflow in duct_airflows:
+                    if airflow > AirFlow_BySection[last_sec] and airflow != duct_airflows[-1]:
+                        duct_index = duct_airflows.index(airflow)
+                        chosen = list(duct_sections[duct_index:])
+                        break
+
+                    elif len(duct_airflows) == 2:
+                        chosen = duct_sections[-1]    
+                        break
+
+            else:                
+                chosen = sorted(shared)[0]  # stable deterministic pick
+
+        else:
+            # No shared section found. This can happen if:
+            # - one element isn't in Elements_BySection
+            # - Revit sectioning produced a gap at this adjacency
+            # Fallback: pick something deterministic so output still exists.
+            union_secs = set(a_secs) | set(b_secs)
+            if union_secs:
+                chosen = sorted(union_secs)[0]
+
+        if chosen is not None and chosen != last_sec:
+            if isinstance(chosen, list):
+                sec_path.extend(chosen)
+                last_sec = chosen[-1]
+                
+            else:
+                sec_path.append(chosen)
+                last_sec = chosen
+            
     return sec_path
 
 
@@ -1055,12 +1154,38 @@ def pick_upstream_neighbor(current_elem, visited_ids, allowed_elem_ids_set, mode
 # Build equipment id set for termination
 equipment_ids = set([eq.Id.ToString() for eq in Equipment])
 
+source_ids = set()
+targets = set()
+for eq in Equipment:
+    conn = get_connectors_from_element(eq)
+    for c in conn:
+        eq_system = c.MEPSystem
+        if eq_system and eq_system.Name == MEPSystem_Obj.Name:
+            # Check if connector is In or Out
+            try:
+                c_Dir = c.Direction
+            except:
+                c_Dir = None
+            if c_Dir == FlowDirectionType.Out:
+                source_ids.add(eq.Id.ToString())
+            else:
+                targets.add(eq)
+
+print("AirTerminals: {}".format(AirTerminals))
+print("Source IDs: {}".format(source_ids))
+print("Target IDs: {}".format(targets))
+
+
 # Build analyzed-network id set (Elements_All currently contains ElementId objects)
 allowed_ids = set([eid.ToString() for eid in Elements_All])
 
 all_flow_paths = []  # optional: collect each terminal's path
 dict_all_flow_paths = {}
 dict_all_flow_paths_sections = {}
+
+
+AirTerminals.extend(list(targets))  # <- Temporary: include target equipment as terminals to trace to themselves
+equipment_ids = source_ids  # <- Temporary: only consider source equipment as valid termination points
 
 for terminal in AirTerminals:
     FlowPath = [terminal]
@@ -1075,6 +1200,7 @@ for terminal in AirTerminals:
         hops += 1
         if hops > max_hops:
             # prevent hang
+            output_window.print_md("**Max hops exceeded for terminal {}.**".format(terminal.Id.ToString()))
             break
 
         current_elem = FlowPath[-1]
