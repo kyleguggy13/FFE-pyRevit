@@ -20,7 +20,6 @@ Author: Kyle Guggenheim"""
 from System import String
 from collections import defaultdict
 import time
-import math
 
 
 #____________________________________________________________________ IMPORTS (AUTODESK)
@@ -865,11 +864,6 @@ def is_close(x, y, epsilon=1e-9):
     """Return True if two values are close in numeric value within a given epsilon."""
     return abs(x - y) <= epsilon
 
-# a = 0.1 + 0.2
-# b = 0.3
-
-# print(f"Using custom function: {is_close(a, b)}")
-# print(f"Using custom function with different epsilon: {is_close(a, b, epsilon=1e-15)}") # May be False
 
 
 
@@ -877,39 +871,27 @@ def find_sum_object(a, b, c):
     a_flow = AirFlow_BySection[a]
     b_flow = AirFlow_BySection[b]
     c_flow = AirFlow_BySection[c]
-
-    print("Analyzing sections {} ({}), {} ({}), {} ({})".format(a_flow, type(a_flow), b_flow, type(b_flow), c_flow, type(c_flow)))  # <- TESTING
-    print("b + c = {}".format(int(b_flow)+int(c_flow) == int(a_flow)))
-    print("a + c = {}".format(int(a_flow)+int(c_flow) == int(b_flow)))
-    print("a + b = {}".format(int(a_flow)+int(b_flow) == int(c_flow)))
-
+    
     b_c = b_flow + c_flow
     a_c = a_flow + c_flow
     a_b = a_flow + b_flow
-    # Use math.isclose() to check for approximate equality
-    # if is_close(a_flow, b_c):
-    #     print("The numbers are close enough to be considered equal.")
-    # else:
-    #     print("The numbers are not close enough.")
+    
+    print("Analyzing sections {} ({}), {} ({}), {} ({})".format(a, a_flow, b, b_flow, c, c_flow))                                   # <- TESTING
+    print("b + c = {}".format(is_close(a_flow, b_c)))
+    print("a + c = {}".format(is_close(b_flow, a_c)))
+    print("a + b = {}".format(is_close(c_flow, a_b)))
+
+    
 
     if is_close(a_flow, b_c):
-        print("  > MATCH FOUND: Section {} equals sum of {} + {}".format(a, b, c))  # <- TESTING
+        print("  >>> MATCH FOUND: Section {} equals sum of {} + {}".format(a, b, c))                                                # <- TESTING
         return a
     if is_close(b_flow, a_c):
-        print("  > MATCH FOUND: Section {} equals sum of {} + {}".format(b, a, c))  # <- TESTING
+        print("  >>> MATCH FOUND: Section {} equals sum of {} + {}".format(b, a, c))                                                # <- TESTING
         return b
     if is_close(c_flow, a_b):
-        print("  > MATCH FOUND: Section {} equals sum of {} + {}".format(c, a, b))  # <- TESTING
+        print("  >>> MATCH FOUND: Section {} equals sum of {} + {}".format(c, a, b))                                                # <- TESTING
         return c
-    # if a_flow == b_flow + c_flow:
-    #     print("  > MATCH FOUND: Section {} equals sum of {} + {}".format(a, b, c))  # <- TESTING
-    #     return a
-    # if b_flow == a_flow + c_flow:
-    #     print("  > MATCH FOUND: Section {} equals sum of {} + {}".format(b, a, c))  # <- TESTING
-    #     return b
-    # if c_flow == a_flow + b_flow:
-    #     print("  > MATCH FOUND: Section {} equals sum of {} + {}".format(c, a, b))  # <- TESTING
-    #     return c
     return None
 
 
@@ -961,30 +943,31 @@ def element_path_to_section_path(element_path, elem_sections_map):
                 print("  > CONTINUITY: Last section {} is in shared set".format(last_sec))                                          # <- TESTING
                 chosen = last_sec
                 last_sec_flow = AirFlow_BySection[last_sec]
-                print("  > CHOSEN: {} (flow: {})".format(chosen, last_sec_flow))                                                    # <- TESTING
+                print("  >> CHOSEN: {} (flow: {})".format(chosen, last_sec_flow))                                                   # <- TESTING
                 print("element: {}, if last_sec in shared: {} ({})".format(element_path[i].Id.ToString(), chosen, last_sec_flow))
             
 
             elif len(shared) >= 2:
                 print("  > MULTIPLE SHARED SECTIONS: {} sections shared".format(len(shared)))                                       # <- TESTING
-                chosen = sorted(shared)[0]  # stable deterministic pick
-                print("  > Initial choice (sorted): {}".format(chosen))                                                             # <- TESTING
-                print("element: {}, # of shared: {}, sorted(shared)[0]: {}".format(element_path[i].Id.ToString(), len(shared), chosen))
+                # chosen = sorted(shared)[0]  # stable deterministic pick
+                print("  >> Initial choice (sorted): {}".format(sorted(shared)[0]))                                                 # <- TESTING
+                print("element: {}, # of shared: {}".format(element_path[i].Id.ToString(), len(shared)))
                 
                 # Correctly chose branch
-                print("  > Attempting to find best fit using 'find_sum_object'")                                                    # <- TESTING
+                print("  >> Attempting to find best fit using 'find_sum_object'")                                                   # <- TESTING
                 shared_list = list(shared)
                 shared_a = shared_list[0]
                 shared_b = shared_list[1]
-                print("  > Testing sections {} and {} against last_sec {}".format(shared_a, shared_b, last_sec))                    # <- TESTING
+                print("  >> Testing sections {} and {} against last_sec {}".format(shared_a, shared_b, last_sec))                   # <- TESTING
                 
                 chosen = find_sum_object(shared_a, shared_b, last_sec)
                 if chosen:                                                                                                          # <- TESTING
-                    print("  > FLOW ANALYSIS RESULT: {} (matches flow sum)".format(chosen))                                         # <- TESTING
+                    print("  >> FLOW ANALYSIS RESULT: {} (matches flow sum)".format(chosen))                                        # <- TESTING
                 else:                                                                                                               # <- TESTING
-                    print("  > FLOW ANALYSIS: No match found, keeping sorted choice")                                               # <- TESTING
+                    print("  >> FLOW ANALYSIS: No match found, keeping sorted choice")                                              # <- TESTING
 
 
+                """
                 # for sec in shared:
                 #     sec_flow = AirFlow_BySection[sec]
                 #     # print("  > Analyzing section {} (flow: {})".format(sec, sec_flow))                                          # <- TESTING
@@ -1003,19 +986,24 @@ def element_path_to_section_path(element_path, elem_sections_map):
                 #     if sec_flow == last_sec_flow:
                 #         chosen = sec
                 #     print("section (flow): {} ({}), if sec_flow == last_sec_flow: {} ({})".format(sec, sec_flow, last_sec, last_sec_flow))
+                """
 
             elif len(shared) == 1 and element_path[i].Category.Name == "Ducts" and len(list(elem_sections[eid_key(element_path[i])])) > 1:
+                # Check if shared is length 1, element is Duct, and current element has multiple sections
                 print("  > SPECIAL CASE: Single shared section for Duct element")                                                   # <- TESTING
+                
                 # Check if Duct has multiple sections with increasing flow
                 duct_sections = list(elem_sections[eid_key(element_path[i])])
-                print("  > Duct sections before sorting: {}".format(duct_sections))                                                 # <- TESTING
-                
                 duct_airflows = [AirFlow_BySection[sec] for sec in duct_sections]
-                print("  > Duct airflows before sorting: {}".format(duct_airflows))                                                 # <- TESTING
-                
+
+                # Sort Duct sections by Air Flow
                 zipped_pairs = zip(duct_airflows, duct_sections)
                 sorted_pairs = sorted(zipped_pairs)
                 duct_airflows, duct_sections = zip(*sorted_pairs)
+                
+                print("  >> Duct sections after sorting: {}".format(duct_sections))                                                 # <- TESTING
+                print("  >> Duct airflows after sorting: {}".format(duct_airflows))                                                 # <- TESTING
+                
 
                 for airflow in duct_airflows:
                     if airflow > AirFlow_BySection[last_sec] and airflow != duct_airflows[-1]:
@@ -1023,8 +1011,12 @@ def element_path_to_section_path(element_path, elem_sections_map):
                         chosen = list(duct_sections[duct_index:])
                         print("  > SPECIAL CASE CHOSEN: {} (flow: {})".format(chosen, airflow))                                     # <- TESTING
                         break
+                    elif len(duct_airflows) == 2:
+                        chosen = duct_sections[-1]
+                        print("  > SPECIAL CASE CHOSEN (2 sections only): {} (flow: {})".format(chosen, airflow))                   # <- TESTING
+                        break
 
-
+                """
                 # print("  > Duct sections: {}, flows: {}".format(duct_sections, duct_airflows))                                      # <- TESTING
                 # print("element: {}, sections: {}, air flows: {}".format(eid_key(element_path[i]), duct_sections, duct_airflows))
                 # connectors = get_connectors_from_element(element_path[i])
@@ -1044,8 +1036,9 @@ def element_path_to_section_path(element_path, elem_sections_map):
                 #         print("- last element: {}, connector: {}, {}, {}, {}".format(element_path[i - 1].Id.ToString(), c_Direction, c_ConnectorType, c_Flow, c_AllRefs))
                 #         # section_index = duct_airflows.index(c_Flow)
                 #         # chosen = duct_sections[section_index]
+                """
             else:
-                print("  > FLOW ANALYSIS: No match found, keeping sorted choice")                                                   # <- TESTING
+                print("  > NO CONDITIONS MET: Keeping sorted choice")                                                               # <- TESTING
                 chosen = sorted(shared)[0]  # stable deterministic pick
 
             """
@@ -1341,8 +1334,8 @@ output_window.print_md("---")
 output_window.print_md("## Results: Terminal section paths")
 for term_mark, sec_path in dict_all_flow_paths_sections.items():
     if sec_path:
-        output_window.print_md("- Terminal {} section path: {}".format(
-            term_mark, " -> ".join(str(s) for s in sec_path)
+        output_window.print_md("- {} --- {}".format(
+            term_mark, " --> ".join(str(s) for s in sec_path)
         ))
     else:
         output_window.print_md("- Terminal {} section path: <none determined>".format(term_mark))
@@ -1350,4 +1343,4 @@ for term_mark, sec_path in dict_all_flow_paths_sections.items():
 
 
 
-
+print(dict_all_flow_paths_sections)
