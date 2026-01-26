@@ -90,6 +90,23 @@ def get_MEPSystem_sections(element):
     
     return []
 
+def _get_MEPSystem_sections(element):
+    """Get all sections in the duct network starting from the given element."""
+    if hasattr(element, 'MEPSystem'):
+        mep_system = element.MEPSystem            # Get the MEPSystem of the element
+        if mep_system:
+            sections_count = mep_system.SectionsCount   # Get Total number of sections
+            
+            # Get all sections related to MEPSystem
+            system_sections = [mep_system.GetSectionByIndex(i) for i in range(0, sections_count)]
+
+            # for i in range(1, len(system_sections)):
+            #     system_section = mep_system.GetSectionByNumber(i + 1)
+            
+            return system_sections
+    
+    return []
+
 
 def get_MEPSection_elements(section):
     """Get all elements in a given duct section."""
@@ -120,10 +137,11 @@ def get_MEPSection_PressureDrop(section, element):
     """Get pressure drop values for each element per section"""
     try:
         pressuredrop = section.GetPressureDrop(element)
+        pressuredrop = convertUnits(pressuredrop, "pressure")
     except:
         pressuredrop = "Invalid Section"
 
-    return convertUnits(pressuredrop, "pressure")
+    return pressuredrop
 
 
 def get_MEPSection_SegmentLength(section, element):
@@ -343,14 +361,15 @@ output_window.print_md("### System Air Flow: {:.0f} CFM".format(System_AirFlow))
 
 
 # Collect all sections in the System
-system_sections = get_MEPSystem_sections(start_element)
-print("system_sections: {}".format(system_sections))   # <- TESTING
+system_sections = _get_MEPSystem_sections(start_element)
 
 
+MEPSections_ByNumber = {section.Number: section for section in system_sections}
+"""Dict of MEPSections by their section number."""
 Elements_BySection = {}
 """Dict of Lists containing elements per section number."""
-ElementIds_BySection = {}
-"""Dict of Lists containing element ids per section number."""
+# ElementIds_BySection = {}
+# """Dict of Lists containing element ids per section number."""
 AirFlow_BySection = {}
 """Dict of Air Flow values per section number."""
 PressureDrop_BySection = {}
@@ -362,22 +381,20 @@ Friction_BySection = {}
 
 # Get all elements in each section
 for section in system_sections:
-    # print(section.Number, type(section.Number))  # <- TESTING
-    # sec_number = section.Number
+    sec_number = section.Number
     elements = get_MEPSection_elements(section)
     
-    Elements_BySection[system_sections.index(section) + 1] = elements
-    
-    ElementIds_BySection[system_sections.index(section) + 1] = [eid_key(elem) for elem in elements] # <- TESTING
+    Elements_BySection[sec_number] = elements
 
     # Get Air Flow per section
-    AirFlow_BySection[system_sections.index(section) + 1] = convertUnits(section.Flow, "air flow")
+    AirFlow_BySection[sec_number] = convertUnits(section.Flow, "air flow")
 
     # Get Velocity per section
-    Velocity_BySection[system_sections.index(section) + 1] = convertUnits(section.Velocity, "velocity")
+    Velocity_BySection[sec_number] = convertUnits(section.Velocity, "velocity")
 
     # Get Friction per section
-    Friction_BySection[system_sections.index(section) + 1] = convertUnits(section.Friction, "friction")
+    Friction_BySection[sec_number] = convertUnits(section.Friction, "friction")
+
 
 
 # Get coefficient table schema
@@ -443,7 +460,7 @@ for section_num, elements in Elements_BySection.items():    # Iterate over dict 
         elem_data["Section"] = section_num
         
         # elem_data["Flow (CFM)"] = "{:.0f}".format(AirFlow_BySection[section_num])
-        elem_data["Flow (CFM)"] = "{:.0f} ({:.4f})".format(AirFlow_BySection[section_num], system_sections[section_num - 1].Flow)
+        elem_data["Flow (CFM)"] = "{:.0f} ({:.4f})".format(AirFlow_BySection[section_num], MEPSections_ByNumber[section_num].Flow)  # <- TESTING
 
         # Get Velocity and Friction Values
         if elem_category in ["Ducts", "Flex Ducts"]:
@@ -456,10 +473,10 @@ for section_num, elements in Elements_BySection.items():    # Iterate over dict 
             elem_data["Velocity (FPM)"] = ""
             elem_data["Friction (in-wg/100ft)"] = ""
 
-        pd = get_MEPSection_PressureDrop(system_sections[section_num - 1], elem.Id)
+        pd = get_MEPSection_PressureDrop(MEPSections_ByNumber[section_num], elem.Id)
         elem_data["Pressure Drop (in-wg)"] = "{:.4f}".format(pd)
 
-        length = get_MEPSection_SegmentLength(system_sections[section_num - 1], elem.Id)
+        length = get_MEPSection_SegmentLength(MEPSections_ByNumber[section_num], elem.Id)
         elem_data["Length (ft)"] = length
 
         if elem_category in ["Duct Fittings", "Duct Accessories"]:
@@ -487,7 +504,7 @@ for data in DuctNetworkData:
 
 TableTitle = "Duct Network Elements: {}".format(len(TableRows))
 
-# output_window.print_table(table_data=TableRows, columns=ColumnOrder, title=TableTitle)
+output_window.print_table(table_data=TableRows, columns=ColumnOrder, title=TableTitle)
 
 
 
@@ -907,6 +924,11 @@ def element_path_to_section_path_(element_path, elem_sections_map):
                         chosen = duct_sections[-1]
                         print("  > SPECIAL CASE CHOSEN (2 sections only): {} (flow: {})".format(chosen, airflow))                   # <- TESTING
                         break
+                if list(shared)[0] == duct_sections[-1]:
+                    chosen = duct_sections[-1]
+                    print("  > SPECIAL CASE CHOSEN (max flow): {} (flow: {})".format(chosen, duct_airflows[-1]))                    # <- TESTING
+                    break
+
 
             else:
                 print("  > NO CONDITIONS MET: Keeping sorted choice")                                                               # <- TESTING
@@ -1018,6 +1040,10 @@ def element_path_to_section_path(element_path, elem_sections_map):
 
                     elif len(duct_airflows) == 2:
                         chosen = duct_sections[-1]    
+                        break
+
+                    elif list(shared)[0] == duct_sections[-1]:
+                        chosen = duct_sections[-1]
                         break
 
             else:                
