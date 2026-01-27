@@ -871,9 +871,9 @@ def element_path_to_section_path_(element_path, elem_sections_map):
             if last_sec in shared:
                 print("  > CONTINUITY: Last section {} is in shared set".format(last_sec))                                          # <- TESTING
                 chosen = last_sec
-                last_sec_flow = AirFlow_BySection[last_sec]
+                last_sec_flow = AirFlow_BySection[last_sec]                                                                         # <- TESTING
                 print("  >> CHOSEN: {} (flow: {})".format(chosen, last_sec_flow))                                                   # <- TESTING
-                print("element: {}, if last_sec in shared: {} ({})".format(element_path[i].Id.ToString(), chosen, last_sec_flow))
+                print("element: {}, if last_sec in shared: {} ({})".format(element_path[i].Id.ToString(), chosen, last_sec_flow))   # <- TESTING
             
 
             elif len(shared) >= 2:
@@ -913,7 +913,6 @@ def element_path_to_section_path_(element_path, elem_sections_map):
                 print("  >> Duct sections after sorting: {}".format(duct_sections))                                                 # <- TESTING
                 print("  >> Duct airflows after sorting: {}".format(duct_airflows))                                                 # <- TESTING
                 
-
                 for airflow in duct_airflows:
                     if airflow > AirFlow_BySection[last_sec] and airflow != duct_airflows[-1]:
                         duct_index = duct_airflows.index(airflow)
@@ -924,10 +923,12 @@ def element_path_to_section_path_(element_path, elem_sections_map):
                         chosen = duct_sections[-1]
                         print("  > SPECIAL CASE CHOSEN (2 sections only): {} (flow: {})".format(chosen, airflow))                   # <- TESTING
                         break
-                if list(shared)[0] == duct_sections[-1]:
-                    chosen = duct_sections[-1]
-                    print("  > SPECIAL CASE CHOSEN (max flow): {} (flow: {})".format(chosen, duct_airflows[-1]))                    # <- TESTING
-                    break
+                    elif airflow == duct_airflows[-1]:
+                        chosen = duct_sections[-1]
+                        print("  > SPECIAL CASE CHOSEN (max flow): {} (flow: {})".format(chosen, airflow))                          # <- TESTING
+                        break
+                    else:                                                                                                           # <- TESTING            
+                        print("  > SPECIAL CASE: No increasing flow found, keeping sorted choice")                                  #<- TESTING
 
 
             else:
@@ -1008,7 +1009,7 @@ def element_path_to_section_path(element_path, elem_sections_map):
             # Prefer to keep continuity if possible
             if last_sec in shared:    
                 chosen = last_sec
-                last_sec_flow = AirFlow_BySection[last_sec]
+                # last_sec_flow = AirFlow_BySection[last_sec]
             
             elif len(shared) >= 2:
                 # chosen = sorted(shared)[0]  # stable deterministic pick
@@ -1042,7 +1043,7 @@ def element_path_to_section_path(element_path, elem_sections_map):
                         chosen = duct_sections[-1]    
                         break
 
-                    elif list(shared)[0] == duct_sections[-1]:
+                    elif airflow == duct_sections[-1]:
                         chosen = duct_sections[-1]
                         break
 
@@ -1267,7 +1268,7 @@ for terminal in AirTerminals:
 
 
     # Build section path from element path
-    sec_path = element_path_to_section_path(FlowPath, elem_sections)
+    sec_path = element_path_to_section_path_(FlowPath, elem_sections)
     dict_all_flow_paths_sections[term_mark] = sec_path   # Main Output of Flow Paths
     
     # Print results
