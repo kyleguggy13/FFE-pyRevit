@@ -82,6 +82,12 @@ else:
         .ToElements()
     )
 
+
+# fittings = fittings[:100]
+
+fittings_with_code = []
+fittings_without_code = []
+fittings_parttype = []
 if not fittings:
     output.print_md("**No duct fittings found (in selection or model).**")
 else:
@@ -96,23 +102,56 @@ else:
 
         for f in fittings:
             code = get_ashrae_code(f, coeff_schema) or "<no ASHRAE table set>"
-
+            if code != "<no ASHRAE table set>":
+                fittings_with_code.append(f)
+            else:
+                fittings_without_code.append(f)
+            if f.Category.Name == "Duct Fittings":
+                parttype = str(f.MEPModel.PartType)
+                fittings_parttype.append(parttype)
+            elif f.Category.Name == "Air Terminals":
+                parttype = "Air Terminals"
+                fittings_parttype.append(parttype)
+            elif f.Category.Name == "Duct Accessories":
+                parttype = "Duct Accessories"
+                fittings_parttype.append(parttype)
             fam_name = (
                 f.Symbol.Family.Name
                 if f.Symbol and f.Symbol.Family else "<no family>"
             )
             type_name = f.Symbol if f.Symbol else "<no type>"
 
-            output.print_md(
-                "ID: {0:7} | Family: {1} | Type: {2} | ASHRAE Table: {3}".format(
-                    f.Id, fam_name, type_name, code
-                )
-            )
+            # output.print_md(
+            #     "ID: {0:7} | Family: {1} | Type: {2} | ASHRAE Table: {3}, Part Type: {4}".format(
+            #         f.Id, fam_name, type_name, code, parttype
+            #     )
+            # )
+
+
+fittings = list(fittings)
+
+# print(fittings, type(fittings))
+# print(fittings_with_code, type(fittings_with_code))
+# parts_dict = {part: str(part.MEPModel.PartType) for part in fittings}
+
+parts_dict = {part: fittings_parttype.count(part) for part in fittings_parttype}
 
 
 
+fittings_length = float(len(fittings))
+fittings_with_code_length = float(len(fittings_with_code))
+fittings_without_code_length = float(len(fittings_without_code))
 
+output.print_md("---")
+print(parts_dict)
+output.print_md("---")
+print("fittings: {}".format(fittings_length))
+print("fittings_with_code: {}".format(fittings_with_code_length))
+print("fittings_without_code: {}".format(fittings_without_code_length))
+output.print_md("---")
 
+print("fittings_with_code: {:02f}".format(fittings_with_code_length/fittings_length))
+print("fittings_without_code: {:.02f}".format(fittings_without_code_length/fittings_length))
 
 ### CARD TESTING ###
 """
@@ -209,3 +248,15 @@ def print_colorized_table(rows):
 
 if __name__ == "__main__":
     print_colorized_table(TABLE_ROWS)
+
+
+
+#####################################################
+#####################################################
+#####################################################
+
+# TableRows = [
+#     {"fittings_with_code": len(fittings_with_code)/len(fittings)},
+#     {"fittings_without_code": len(fittings_without_code)/len(fittings)}
+# ]
+
