@@ -306,6 +306,14 @@ def get_connector_properties(connectors):
 uidoc = revit.uidoc
 doc = revit.doc
 
+
+
+MermaidGraph = forms.ask_for_one_item(["YES", "NO"],prompt="Select One", title="Print Mermaid Graph")
+DebugOutput = forms.ask_for_one_item(["YES", "NO"],prompt="Select One", title="Print Debuging Information?")
+
+print("MermaidGraph: {}, DebugOutput: {}".format(MermaidGraph, DebugOutput))
+
+
 # Select one duct element first
 try:
     ref = uidoc.Selection.PickObject(UI.Selection.ObjectType.Element, "Select a duct.")
@@ -629,8 +637,8 @@ for section_num, elements in Elements_BySection.items():
         # print("element: {}, section: {}".format(elem.Id, section_num)) # <- TESTING
 
 
-print("elem_sections: {}".format(elem_sections))  # <- TESTING
-output_window.print_md("---")
+# print("elem_sections: {}".format(elem_sections))  # <- TESTING
+# output_window.print_md("---")
 
 
 # Build quick sets of section numbers containing terminals and equipment
@@ -1356,7 +1364,7 @@ for eq in Equipment:
             else:
                 targets.add(eq)
 
-print("AirTerminals: {}".format(AirTerminals))
+# print("AirTerminals: {}".format(AirTerminals))
 print("Source IDs: {}".format(source_ids))
 print("Target IDs: {}".format(targets))
 
@@ -1424,29 +1432,33 @@ for terminal in AirTerminals:
     path_ids = [e.Id.ToString() for e in FlowPath]
     # output_window.print_md("- Terminal {} path: {}".format(term_mark, " --> ".join([str(i) for i in path_ids])))
 
-
-    # Build section path from element path
-    sec_path = element_path_to_section_path(FlowPath, elem_sections)
-    dict_all_flow_paths_sections[term_mark] = sec_path   # Main Output of Flow Paths
+    if DebugOutput == "YES":
+        # Build section path from element path
+        sec_path = element_path_to_section_path_(FlowPath, elem_sections)
+        dict_all_flow_paths_sections[term_mark] = sec_path   # Main Output of Flow Paths
     
-    # Print results
-    try:
-        term_mark = get_Mark(terminal) or eid_key(terminal)
-    except:
-        term_mark = eid_key(terminal)
+    
+        # Print results
+        try:
+            term_mark = get_Mark(terminal) or eid_key(terminal)
+        except:
+            term_mark = eid_key(terminal)
 
-    path_ids = [eid_key(e) for e in FlowPath]
-    output_window.print_md("- Terminal {} element path: {}".format(
-        term_mark, " -> ".join(str(i) for i in path_ids)
-    ))
-
-    if sec_path:
-        output_window.print_md("  - Terminal {} section path: {}".format(
-            term_mark, " -> ".join(str(s) for s in sec_path)
+        path_ids = [eid_key(e) for e in FlowPath]
+        output_window.print_md("- Terminal {} element path: {}".format(
+            term_mark, ", ".join(str(i) for i in path_ids)
         ))
+
+        if sec_path:
+            output_window.print_md("  - Terminal {} section path: {}".format(
+                term_mark, " -> ".join(str(s) for s in sec_path)
+            ))
+        else:
+            output_window.print_md("  - Terminal {} section path: <none determined>".format(term_mark))
     else:
-        output_window.print_md("  - Terminal {} section path: <none determined>".format(term_mark))
-
+        # Build section path from element path
+        sec_path = element_path_to_section_path(FlowPath, elem_sections)
+        dict_all_flow_paths_sections[term_mark] = sec_path   # Main Output of Flow Paths
 
 
 ######################################################
@@ -1455,7 +1467,7 @@ for terminal in AirTerminals:
 
 output_window.print_md("---")
 output_window.print_md("---")
-output_window.print_md("## Results: Terminal section paths")
+output_window.print_md("## Results: Section paths")
 
 sorted_dict_keys = sorted(dict_all_flow_paths_sections.items(), key=lambda item: len(item[1]), reverse=True)
 
@@ -1463,7 +1475,7 @@ path_keys = []
 for key in sorted_dict_keys:
     path_keys.append(key[0])
 
-print(path_keys)
+# print(path_keys)    # <- TESTING
 
 # for term_mark, sec_path in dict_all_flow_paths_sections.items():
 #     if sec_path:
@@ -1473,22 +1485,24 @@ print(path_keys)
 #     else:
 #         output_window.print_md("- Terminal {} section path: <none determined>".format(term_mark))
 
-print(sorted_dict_keys, type(sorted_dict_keys))  # <- TESTING
-print(dict_all_flow_paths_sections)   # <- TESTING
-
-for term_mark in path_keys:
-    sec_path = dict_all_flow_paths_sections[term_mark]
-    if sec_path:
-        output_window.print_md("- {} --- {}".format(
-            term_mark, " --> ".join(str(s) for s in sec_path)
-        ))
-    else:
-        output_window.print_md("- Terminal {} section path: <none determined>".format(term_mark))
+# print(sorted_dict_keys, type(sorted_dict_keys))  # <- TESTING
+# print(dict_all_flow_paths_sections)   # <- TESTING
 
 
+if MermaidGraph == "YES":
+    for term_mark in path_keys:
+        sec_path = dict_all_flow_paths_sections[term_mark]
+        if sec_path:
+            output_window.print_md("- {} --- {}".format(
+                term_mark, " --> ".join(str(s) for s in sec_path)
+            ))
+        else:
+            output_window.print_md("- Terminal {} section path: <none determined>".format(term_mark))
 
 
-output_window.print_md("---")   # <- TESTING
+
+
+# output_window.print_md("---")   # <- TESTING
 
 
 # IronPython 2.7 safe: no type hints, no f-strings
@@ -1574,7 +1588,7 @@ mermaid_text = emit_mermaid(directed_edges, undirected_edges, direction="LR")
 # print(mermaid_text)
 
 
-print("source_ids: {}".format(source_ids))
+# print("source_ids: {}".format(source_ids))
 
 
 max_len = max(len(p[1]) for p in sorted_dict_keys)
