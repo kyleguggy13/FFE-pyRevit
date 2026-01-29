@@ -1457,7 +1457,7 @@ output_window.print_md("---")
 output_window.print_md("---")
 output_window.print_md("## Results: Terminal section paths")
 
-sorted_dict_keys = sorted(dict_all_flow_paths_sections.items(), key=lambda item: len(item[1]))
+sorted_dict_keys = sorted(dict_all_flow_paths_sections.items(), key=lambda item: len(item[1]), reverse=True)
 
 path_keys = []
 for key in sorted_dict_keys:
@@ -1474,7 +1474,7 @@ print(path_keys)
 #         output_window.print_md("- Terminal {} section path: <none determined>".format(term_mark))
 
 print(sorted_dict_keys, type(sorted_dict_keys))  # <- TESTING
-# print(dict_all_flow_paths_sections, type(dict_all_flow_paths_sections))   # <- TESTING
+print(dict_all_flow_paths_sections)   # <- TESTING
 
 for term_mark in path_keys:
     sec_path = dict_all_flow_paths_sections[term_mark]
@@ -1488,4 +1488,108 @@ for term_mark in path_keys:
 
 
 
-# print(dict_all_flow_paths_sections)   # <- TESTING
+output_window.print_md("---")   # <- TESTING
+
+
+# IronPython 2.7 safe: no type hints, no f-strings
+
+def build_unique_edges(paths, start_link_style="-->", chain_style="-->"):
+    """
+    paths: dict like {"7-TU-25": [106,107,86,...], ...}
+
+    start_link_style:
+        "-->" for directed start->first
+        "---" for undirected start---first
+
+    chain_style:
+        "-->" recommended for numeric chain
+    """
+    directed = set()     # set of (src, dst, op)
+    undirected = set()   # set of (a, b, op) where a<=b
+
+    for start, seq in paths.items():
+        if not seq:
+            continue
+
+        start_s = str(start)
+        first_s = str(seq[0])
+
+        # Start -> first
+        if start_link_style == "---":
+            a = start_s
+            b = first_s
+            if a <= b:
+                undirected.add((a, b, "---"))
+            else:
+                undirected.add((a, b, "---"))
+        else:
+            directed.add((start_s, first_s, "-->"))
+
+        # Chain edges
+        for i in range(len(seq) - 1):
+            a = str(seq[i])
+            b = str(seq[i + 1])
+            directed.add((a, b, chain_style))
+
+    return directed, undirected
+
+
+def emit_mermaid(directed, undirected, direction="LR"):
+    """
+    Returns Mermaid text with one unique connection per line.
+    """
+    lines = []
+    lines.append("flowchart " + direction)
+
+    # stable ordering
+    undirected_list = sorted(list(undirected))
+    directed_list = sorted(list(directed))
+
+    for a, b, op in undirected_list:
+        lines.append("  {0} {1} {2}".format(a, op, b))
+
+    for a, b, op in directed_list:
+        lines.append("  {0} {1} {2}".format(a, op, b))
+
+    return "\n".join(lines)
+
+
+# -------------------------
+# USAGE
+# -------------------------
+# paths = {...}  # your dict
+
+directed_edges, undirected_edges = build_unique_edges(
+    dict_all_flow_paths_sections,
+    start_link_style="---",  # set to "-->" if you want directed instead
+    chain_style="-->"
+)
+
+mermaid_text = emit_mermaid(directed_edges, undirected_edges, direction="LR")
+
+# In pyRevit you might do:
+# output = script.get_output()
+# output.print_md("```mermaid\n{0}\n```".format(mermaid_text))
+
+# print(mermaid_text)
+
+
+print("source_ids: {}".format(source_ids))
+
+
+max_len = max(len(p[1]) for p in sorted_dict_keys)
+
+table = []
+
+for to, sections in sorted_dict_keys:
+    row = [list(source_ids)[0], to] + sections + [""] * (max_len - len(sections))
+    table.append(row)
+
+
+headers = ["From", "To"] + ["col{}".format(i+1) for i in range(max_len)]
+
+
+
+TableTitle_Paths = "Duct Network Paths: {}".format(len(table))
+
+output_window.print_table(table_data=table, columns=headers, title=TableTitle_Paths)
