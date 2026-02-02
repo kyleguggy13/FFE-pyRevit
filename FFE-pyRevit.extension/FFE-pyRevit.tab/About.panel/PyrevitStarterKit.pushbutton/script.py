@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-__title__   = "FFE-pyRevit \nv1.9.0"
-__doc__ = """Version = v1.9.0
-Date    = 12.15.2025
+__title__   = "FFE-pyRevit \nv1.10.0"
+__doc__ = """Version = v1.10.0
+Date    = 02.02.2026
 __________________________________________________________________
 Description:
 pyRevit About Form
@@ -23,6 +23,7 @@ Last update:
 - [11.07.2025] - v1.8.0 Added Revision Comparison Tool
 - [11.14.2025] - RevisionCompare: v1.8.1 Updated to fully support "Per Sheet" revision numbering.
 - [12.15.2025] - v1.9.0 Added Design Guide Model Splitter Tool
+- [02.02.2026] - v1.10.0 Added Duct Network Summary to MEPTools
 __________________________________________________________________
 Author: Kyle Guggenheim from FFE Inc."""
 # ↑ This module docstring doubles as the default changelog text.
