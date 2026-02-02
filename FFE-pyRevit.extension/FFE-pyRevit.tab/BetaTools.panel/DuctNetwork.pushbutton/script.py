@@ -403,6 +403,9 @@ for section in system_sections:
     # Get Friction per section
     Friction_BySection[sec_number] = convertUnits(section.Friction, "friction")
 
+    # Get TotalPressureLoss per section
+    PressureDrop_BySection[sec_number] = convertUnits(section.TotalPressureLoss, "pressure")
+
 
 
 # Get coefficient table schema
@@ -521,7 +524,7 @@ output_window.print_table(table_data=TableRows, columns=ColumnOrder, title=Table
 
 
 
-
+print("PressureDrop_BySection: {}".format(PressureDrop_BySection))
 
 
 ############################################################
@@ -1375,6 +1378,7 @@ allowed_ids = set([eid.ToString() for eid in Elements_All])
 all_flow_paths = []  # optional: collect each terminal's path
 dict_all_flow_paths = {}
 dict_all_flow_paths_sections = {}
+dict_flow_paths_totalpressureloss = {}
 
 
 AirTerminals.extend(list(targets))  # <- Temporary: include target equipment as terminals to trace to themselves
@@ -1459,6 +1463,9 @@ for terminal in AirTerminals:
         # Build section path from element path
         sec_path = element_path_to_section_path(FlowPath, elem_sections)
         dict_all_flow_paths_sections[term_mark] = sec_path   # Main Output of Flow Paths
+        total_sum = sum(PressureDrop_BySection[key] for key in sec_path)
+        dict_flow_paths_totalpressureloss[term_mark] = total_sum
+        
 
 
 ######################################################
@@ -1602,7 +1609,8 @@ for to, sections in sorted_dict_keys:
 
 headers = ["From", "To"] + ["col{}".format(i+1) for i in range(max_len)]
 
-
+for term, pd_sec in dict_flow_paths_totalpressureloss.items():
+    print("{}: {}".format(term, pd_sec))
 
 TableTitle_Paths = "Duct Network Paths: {}".format(len(table))
 
