@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 __title__     = "Duct Network \nSummary"
-__version__   = 'Version = 0.2'
-__doc__       = """Version = 0.2
-Date    = 01.08.2026
+__version__   = 'Version = 1.0'
+__doc__       = """Version = 1.0
+Date    = 02.02.2026
 ______________________________________________________________
 Description:
 -> Creates a table of the duct network selected for pressure loss calculations.
@@ -13,6 +13,7 @@ ______________________________________________________________
 Last update:
 - [07.08.2025] - v0.1 BETA RELEASE
 - [01.08.2026] - v0.2 BETA - Changed to Duct Network Summary
+- [02.02.2026] - v1.0 RELEASE
 ______________________________________________________________
 Author: Kyle Guggenheim"""
 
@@ -306,12 +307,13 @@ def get_connector_properties(connectors):
 uidoc = revit.uidoc
 doc = revit.doc
 
+MermaidGraph = "NO"
+DebugOutput = "NO"
 
+# MermaidGraph = forms.ask_for_one_item(["YES", "NO"],prompt="Select One", title="Print Mermaid Graph")
+# DebugOutput = forms.ask_for_one_item(["YES", "NO"],prompt="Select One", title="Print Debuging Information?")
 
-MermaidGraph = forms.ask_for_one_item(["YES", "NO"],prompt="Select One", title="Print Mermaid Graph")
-DebugOutput = forms.ask_for_one_item(["YES", "NO"],prompt="Select One", title="Print Debuging Information?")
-
-print("MermaidGraph: {}, DebugOutput: {}".format(MermaidGraph, DebugOutput))
+# print("MermaidGraph: {}, DebugOutput: {}".format(MermaidGraph, DebugOutput))
 
 
 # Select one duct element first
@@ -470,8 +472,8 @@ for section_num, elements in Elements_BySection.items():    # Iterate over dict 
 
         elem_data["Section"] = section_num
         
-        # elem_data["Flow (CFM)"] = "{:.0f}".format(AirFlow_BySection[section_num])
-        elem_data["Flow (CFM)"] = "{:.0f} ({:.4f})".format(AirFlow_BySection[section_num], MEPSections_ByNumber[section_num].Flow)  # <- TESTING
+        elem_data["Flow (CFM)"] = "{:.0f}".format(AirFlow_BySection[section_num])
+        # elem_data["Flow (CFM)"] = "{:.0f} ({:.4f})".format(AirFlow_BySection[section_num], MEPSections_ByNumber[section_num].Flow)  # <- TESTING
 
         # Get Velocity and Friction Values
         if elem_category in ["Ducts", "Flex Ducts"]:
@@ -515,6 +517,7 @@ for data in DuctNetworkData:
 
 TableTitle = "Duct Network Elements: {}".format(len(TableRows))
 
+output_window.print_md("---")
 output_window.print_table(table_data=TableRows, columns=ColumnOrder, title=TableTitle)
 
 
@@ -524,7 +527,6 @@ output_window.print_table(table_data=TableRows, columns=ColumnOrder, title=Table
 
 
 
-print("PressureDrop_BySection: {}".format(PressureDrop_BySection))
 
 
 ############################################################
@@ -759,8 +761,8 @@ for A_section, elements in Elements_BySection.items():
 Elements_All = list(set(Elements_All))
 
 
-print("Elements (length): {}".format(len(Elements_All)))
-# print("Elements: {}".format(Elements_All))
+# print("Elements (length): {}".format(len(Elements_All)))  # <- TESTING
+# print("Elements: {}".format(Elements_All))    # <- TESTING
 
 
 Connectors_All = []
@@ -779,7 +781,7 @@ for elem_id in Elements_All:
         # print("connector: {}, Owner: {}, Id: {}, Direction: {}, Flow: {}, ConnectorType: {}".format(c, c.Owner.Id, c.Id, c_Direction, c_Flow, c_ConnectorType))
 
 
-print("Connectors: {}".format(len(Connectors_All)))
+# print("Connectors: {}".format(len(Connectors_All))) # <- TESTING
 
 
 
@@ -1368,8 +1370,8 @@ for eq in Equipment:
                 targets.add(eq)
 
 # print("AirTerminals: {}".format(AirTerminals))
-print("Source IDs: {}".format(source_ids))
-print("Target IDs: {}".format(targets))
+# print("Source IDs: {}".format(source_ids))
+# print("Target IDs: {}".format(targets))
 
 
 # Build analyzed-network id set (Elements_All currently contains ElementId objects)
@@ -1472,9 +1474,9 @@ for terminal in AirTerminals:
 ######################################################
 ######################################################
 
-output_window.print_md("---")
-output_window.print_md("---")
-output_window.print_md("## Results: Section paths")
+# output_window.print_md("---")
+# output_window.print_md("---")
+# output_window.print_md("## Results: Section paths")
 
 sorted_dict_keys = sorted(dict_all_flow_paths_sections.items(), key=lambda item: len(item[1]), reverse=True)
 
@@ -1598,20 +1600,105 @@ mermaid_text = emit_mermaid(directed_edges, undirected_edges, direction="LR")
 # print("source_ids: {}".format(source_ids))
 
 
+
+###############################################
+# OUTPUT DUCT NETWORK PATH TABLE
+###############################################
 max_len = max(len(p[1]) for p in sorted_dict_keys)
 
 table = []
 
 for to, sections in sorted_dict_keys:
-    row = [list(source_ids)[0], to] + sections + [""] * (max_len - len(sections))
+    row = [list(source_ids)[0], to, "{:.4f}".format(dict_flow_paths_totalpressureloss[to])] + sections[::-1] + [""] * (max_len - len(sections))
     table.append(row)
 
 
-headers = ["From", "To"] + ["col{}".format(i+1) for i in range(max_len)]
 
-for term, pd_sec in dict_flow_paths_totalpressureloss.items():
-    print("{}: {}".format(term, pd_sec))
+
+headers = ["From", "To", "TPL"] + ["path{}".format(i+1) for i in range(max_len)]
 
 TableTitle_Paths = "Duct Network Paths: {}".format(len(table))
 
-output_window.print_table(table_data=table, columns=headers, title=TableTitle_Paths)
+# output_window.print_table(table_data=table, columns=headers, title=TableTitle_Paths)
+
+
+
+###############################################
+# OUTPUT DUCT NETWORK PATH TABLE (HTML)
+###############################################
+def tpl_to_red_hex(value, min_v, max_v):
+    """
+    Low TPL  -> light red
+    High TPL -> dark red
+    """
+    if max_v == min_v:
+        t = 1.0
+    else:
+        t = (value - min_v) / float(max_v - min_v)
+
+    # Red gradient: white -> dark red
+    r = 255
+    g = int(255 * (1 - t))
+    b = int(255 * (1 - t))
+
+    return "#{:02X}{:02X}{:02X}".format(r, g, b)
+
+
+tpl_values = list(dict_flow_paths_totalpressureloss.values())
+tpl_min = min(tpl_values)
+tpl_max = max(tpl_values)
+
+
+html = """
+<style>
+table {
+    border-collapse: collapse;
+    width: 100%;
+}
+th {
+    background: #1f2f3f;
+    color: white;
+    padding: 2px;
+    text-align: left;
+}
+td {
+    border: 1px solid #999;
+    padding: 2px;
+    text-align: left;
+}
+</style>
+<table>
+<tr>
+"""
+
+html += "<caption style='font-size:16px; font-weight:bold; text-align:left'>{}</caption>".format(TableTitle_Paths)
+
+for h in headers:
+    html += "<th style='text-align:left;'>{}</th>".format(h)
+html += "</tr>"
+
+
+
+for to, sections in sorted_dict_keys:
+    tpl = dict_flow_paths_totalpressureloss[to]
+    color = tpl_to_red_hex(tpl, tpl_min, tpl_max)
+
+    row = ([list(source_ids)[0], to, tpl] + sections[::-1] + [""] * (max_len - len(sections)))
+
+    html += "<tr>"
+    for i, cell in enumerate(row):
+        if headers[i] == "TPL":
+            html += (
+                "<td style='background:{}; font-weight:bold;'>"
+                "{:.4f}</td>".format(color, cell)
+            )
+        else:
+            html += "<td>{}</td>".format(cell)
+    html += "</tr>"
+
+
+html += "</table>"
+
+
+
+output_window.print_html(html)
