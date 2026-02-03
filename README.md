@@ -21,6 +21,9 @@ FFE's pyRevit add-in extension.
 - Project Info Comparision
 - Revision Comparison
 
+### MEPTools
+- Duct Network Summary
+
 ### BetaTools
 - Text Leader Position
 - Keynote Update
