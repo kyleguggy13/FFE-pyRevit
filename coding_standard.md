@@ -1,4 +1,4 @@
-# B45 Labs Coding Standard (Revit 2025/2026)
+Coding Standard (Revit 2025/2026)
 
 ## 1) Purpose and Scope
 
