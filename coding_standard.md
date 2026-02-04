@@ -2,23 +2,23 @@
 
 ## 1) Purpose and Scope
 
-All add-in code must target Autodesk Revit 2025 and 2026 APIs.
-Priority order: correctness > robustness > maintainability > performance > brevity.
-The codebase should remain predictable for long-term maintenance and team handoff.
+- All add-in code must target Autodesk Revit 2025 and 2026 APIs.
+- Priority order: correctness > robustness > maintainability > performance > brevity.
+- The codebase should remain predictable for long-term maintenance and team handoff.
 ## 2) File Organization and Structure
 
-Every C# file must start with a standard header describing:
-Purpose
-Key behaviors
-Revit API notes (2025/2026 constraints)
-Design decisions (trade-offs)
-Organize code with clear sections (use #region when it improves navigation):
-Construction / Setup
-Core Workflow
-Revit API Helpers
-UI / MVVM
-Error Handling / Reporting
-Cleanup / Disposal
+- Every C# file must start with a standard header describing:
+    - Purpose
+    - Key behaviors
+    - Revit API notes (2025/2026 constraints)
+    - Design decisions (trade-offs)
+- Organize code with clear sections (use #region when it improves navigation):
+    - Construction / Setup
+    - Core Workflow
+    - Revit API Helpers
+    - UI / MVVM
+    - Error Handling / Reporting
+    - Cleanup / Disposal
 ## 3) Comments and Documentation (English Only)
 
 All comments must be written in English.
