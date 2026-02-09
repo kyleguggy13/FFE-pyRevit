@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 __title__     = "Duct Network \nSummary"
-__version__   = 'Version = 1.0'
-__doc__       = """Version = 1.0
-Date    = 02.02.2026
+__version__   = 'Version = 1.1'
+__doc__       = """Version = 1.1
+Date    = 02.09.2026
 ______________________________________________________________
 Description:
 -> Creates a table of the duct network selected for pressure loss calculations.
@@ -14,6 +14,7 @@ Last update:
 - [07.08.2025] - v0.1 BETA RELEASE
 - [01.08.2026] - v0.2 BETA - Changed to Duct Network Summary
 - [02.02.2026] - v1.0 RELEASE
+- [02.09.2026] - v1.1 WORKS ON SUPPLY, RETURN, & EXHAUST
 ______________________________________________________________
 Author: Kyle Guggenheim"""
 
@@ -334,12 +335,15 @@ print("Timestamp: {}".format(time.strftime("%Y-%m-%d %H:%M:%S")))
 
 # Collect MEPSystem Data
 MEPSystem_Obj = get_MEPSystem(start_element)
-# print("MEPSystem_Obj: ", MEPSystem_Obj, type(MEPSystem_Obj)) # <- TESTING
+# print("MEPSystem_Obj: ", MEPSystem_Obj, type(MEPSystem_Obj))  # <- TESTING
+
+MEPSystem_SystemType = MEPSystem_Obj.SystemType
+output_window.print_md("### System Type: {}".format(MEPSystem_SystemType))
 
 
 # Collect System Name
 SystemName = MEPSystem_Obj.Name if MEPSystem_Obj != "N/A" else "N/A"
-output_window.print_md("### MEP System Name: {}".format(SystemName))
+output_window.print_md("### System Name: {}".format(SystemName))
 
 
 # Check System Connection Status
@@ -799,6 +803,8 @@ source_ids = {eq.Id for eq in Equipment}
 ######################################################
 ######################################################
 from Autodesk.Revit.DB import FlowDirectionType
+from Autodesk.Revit.DB import Connector
+from Autodesk.Revit.DB.Mechanical import DuctSystemType
 
 
 def _as_flow_dir(d):
@@ -1356,6 +1362,11 @@ equipment_ids = set([eq.Id.ToString() for eq in Equipment])
 
 source_ids = set()
 targets = set()
+
+if not Equipment:
+    forms.alert("Flow Path Not Computed. Please Connect Duct to Equipment", title="Invalid Selection", exitscript=True)
+    
+
 for eq in Equipment:
     conn = get_connectors_from_element(eq)
     for c in conn:
@@ -1366,14 +1377,28 @@ for eq in Equipment:
                 c_Dir = c.Direction
             except:
                 c_Dir = None
-            if c_Dir == FlowDirectionType.Out:
-                source_ids.add(eq.Id.ToString())
+            # Check connector's DuctSystemType
+            try:
+                c_sysType = c.DuctSystemType
+            except:
+                c_sysType = None
+            if c_sysType == DuctSystemType.SupplyAir:
+                if c_Dir == FlowDirectionType.Out:
+                    source_ids.add(eq.Id.ToString())
+                else:
+                    targets.add(eq)
             else:
-                targets.add(eq)
+            # elif c_sysType == DuctSystemType.ReturnAir or c_sysType == DuctSystemType.ExhaustAir:
+                if c_Dir == FlowDirectionType.In:
+                    source_ids.add(eq.Id.ToString())
+                else:
+                    targets.add(eq)
+            
 
-# print("AirTerminals: {}".format(AirTerminals))
-# print("Source IDs: {}".format(source_ids))
-# print("Target IDs: {}".format(targets))
+print("Equipment: {}".format(Equipment))    # <- TESTING
+print("AirTerminals: {}".format(AirTerminals))    # <- TESTING
+print("Source IDs: {}".format(source_ids))    # <- TESTING
+print("Target IDs: {}".format(targets))   # <- TESTING
 
 
 # Build analyzed-network id set (Elements_All currently contains ElementId objects)
@@ -1384,6 +1409,11 @@ dict_all_flow_paths = {}
 dict_all_flow_paths_sections = {}
 dict_flow_paths_totalpressureloss = {}
 
+
+if MEPSystem_SystemType == DuctSystemType.SupplyAir:
+    mode = "terminal_to_equipment_supply"
+else:
+    mode = "terminal_to_equipment_return"
 
 AirTerminals.extend(list(targets))  # <- Temporary: include target equipment as terminals to trace to themselves
 equipment_ids = source_ids  # <- Temporary: only consider source equipment as valid termination points
@@ -1415,7 +1445,7 @@ for terminal in AirTerminals:
             current_elem=current_elem,
             visited_ids=visited,
             allowed_elem_ids_set=allowed_ids,
-            mode="terminal_to_equipment_supply"  # change if needed
+            mode=mode
         )
 
         if next_elem is None:
