@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 __title__     = "Duct Network \nSummary"
-__version__   = 'Version = 1.1'
-__doc__       = """Version = 1.1
+__version__   = 'Version = v1.1'
+__doc__       = """Version = v1.1
 Date    = 02.09.2026
 ______________________________________________________________
 Description:
