@@ -95,12 +95,10 @@ def parameter_exists_on_category(doc, param_name, bic):
     it = bindings.ForwardIterator()
     it.Reset()
 
-    print("bic: {}, {}".format(bic, type(bic)))
 
     while it.MoveNext():
         definition = it.Key
-        binding = it.Current
-        print("definition.Name: {}, {}".format(definition.Name, type(definition.Name)))
+        # binding = it.Current
 
         if definition.Name == param_name:
             return True
@@ -137,6 +135,7 @@ def validate_required_parameters(doc):
     if missing:
         forms.alert(
             "Required parameters are missing:\n\n" + "\n".join(missing) +
+            "\n\nAdd Parameters from Parameter Service" +
             "\n\nScript cancelled.",
             title="FFE Sheet Counter – Missing Parameters",
             warn_icon=True
