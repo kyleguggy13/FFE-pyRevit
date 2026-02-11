@@ -20,6 +20,7 @@ FFE's pyRevit add-in extension.
 - Phase Filter Comparision
 - Project Info Comparision
 - Revision Comparison
+- Sheet Counter
 
 ### MEPTools
 - Duct Network Summary
