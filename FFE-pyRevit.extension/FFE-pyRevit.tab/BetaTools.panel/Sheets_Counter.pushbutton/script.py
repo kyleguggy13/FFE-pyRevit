@@ -1,25 +1,25 @@
 # -*- coding: utf-8 -*-
 __title__     = "Sheets Counter"
-__version__   = 'Version = v0.1'
-__doc__       = """Version = v0.1
-Date    = 02.09.2026
+__version__   = 'Version = v1.0'
+__doc__       = """Version = v1.0
+Date    = 02.11.2026
 ______________________________________________________________
 Description:
--> 
+-> Enumerates Sheets for "SHEET ## OUT OF ###" on the Titleblock.
 ______________________________________________________________
 How-to:
--> 
+-> Press Button and select option.
+-> Check results
 ______________________________________________________________
 Last update:
 - [02.09.2026] - v0.1 BETA RELEASE
+- [02.11.2026] - v1.1 RELEASE
 ______________________________________________________________
 Author: Kyle Guggenheim"""
 
 
 #____________________________________________________________________ IMPORTS (SYSTEM)
 from System import String
-from collections import defaultdict
-import time
 
 
 #____________________________________________________________________ IMPORTS (AUTODESK)
@@ -29,7 +29,6 @@ clr.AddReference("System")
 from Autodesk.Revit.DB import *
 from Autodesk.Revit.UI import *
 from Autodesk.Revit.DB import FilteredElementCollector, BuiltInCategory
-from Autodesk.Revit.DB import ElementCategoryFilter, ElementId, FamilyInstance
 
 
 #____________________________________________________________________ IMPORTS (PYREVIT)
@@ -87,7 +86,67 @@ WRITE_PARAMETERS = True  # False = read/count only
 EXCLUDE_PLACEHOLDERS = True
 REQUIRE_APPEARS_IN_SHEET_LIST = True
 
-# ------------------------------------------------------------------
+
+# ----------------------- PARAMETER VALIDATION -----------------------
+
+def parameter_exists_on_category(doc, param_name, bic):
+    """Check if a parameter is bound to a category."""
+    bindings = doc.ParameterBindings
+    it = bindings.ForwardIterator()
+    it.Reset()
+
+    print("bic: {}, {}".format(bic, type(bic)))
+
+    while it.MoveNext():
+        definition = it.Key
+        binding = it.Current
+        print("definition.Name: {}, {}".format(definition.Name, type(definition.Name)))
+
+        if definition.Name == param_name:
+            return True
+
+    return False
+
+
+def project_info_has_param(doc, param_name):
+    p = doc.ProjectInformation.LookupParameter(param_name)
+    return p is not None
+
+
+def validate_required_parameters(doc):
+    missing = []
+
+    # Required sheet parameters
+    required_sheet_params = [
+        DISCIPLINE_PARAM,
+        ORDER_PARAM
+    ]
+
+    if WRITE_PARAMETERS and SHEET_INDEX_PARAM:
+        required_sheet_params.append(SHEET_INDEX_PARAM)
+
+    for pname in required_sheet_params:
+        if not parameter_exists_on_category(doc, pname, DB.BuiltInCategory.OST_Sheets):
+            missing.append("Sheet parameter missing: '{}'".format(pname))
+
+    # Required Project Information parameter
+    if WRITE_PARAMETERS and PROJECT_INFO_TOTAL_PARAM:
+        if not project_info_has_param(doc, PROJECT_INFO_TOTAL_PARAM):
+            missing.append("Project Information parameter missing: '{}'".format(PROJECT_INFO_TOTAL_PARAM))
+
+    if missing:
+        forms.alert(
+            "Required parameters are missing:\n\n" + "\n".join(missing) +
+            "\n\nScript cancelled.",
+            title="FFE Sheet Counter – Missing Parameters",
+            warn_icon=True
+        )
+        return False
+
+    return True
+
+
+# ----------------------- FUNCTIONS -----------------------
 
 
 def natural_key(text):
@@ -191,12 +250,13 @@ def sheet_sort_key(sheet):
 
 
 
-##########################
-##########################
-### NEED TO UPDATE SO THAT COUNT STARTS AT APPROPRIATE LOCATION ###
-
+# ----------------------- MAIN -----------------------
 def main():
-    doc = revit.doc
+    host_doc = revit.doc
+
+    # Validate parameters BEFORE doing anything else
+    if not validate_required_parameters(host_doc):
+        return
 
     scope = forms.CommandSwitchWindow.show(
         ["Current model only", "Current + all links (count links too)"],
@@ -207,58 +267,78 @@ def main():
 
     include_links = scope.startswith("Current + all links")
 
-    # Current model sheets sorted by (Discipline Index, Order)
-    current_sheets = collect_sheets(doc)
-    current_sorted = sorted(current_sheets, key=sheet_sort_key)
-    seq = list(range(1, len(current_sorted) + 1))
+    # ---- Build MASTER list ----
+    host_sheets = collect_sheets(host_doc)
+
+    master = []  # list of tuples: (doc, sheet, is_host)
+    for s in host_sheets:
+        master.append((host_doc, s, True))
+
 
     # Linked sheets count only (cannot write to link docs)
-    linked_total = 0
     link_breakdown = []
     if include_links:
-        for ldoc in get_link_documents(doc):
+        for ldoc in get_link_documents(host_doc):
             lsheets = collect_sheets(ldoc)
-            linked_total += len(lsheets)
             link_breakdown.append((ldoc.Title, len(lsheets)))
+            for s in lsheets:
+                master.append((ldoc, s, False))
 
-    total_all = len(current_sorted) + (linked_total if include_links else 0)
+    # Sort master by the sheet parameters (same sort applied to host+links)
+    master_sorted = sorted(master, key=lambda t: sheet_sort_key(t[1]))
 
+    # Global sequence over MASTER list
+    # We build a lookup for host sheets: sheet.UniqueId -> global_index
+    host_index_by_uid = {}
+    for idx, (d, s, is_host) in enumerate(master_sorted, start=1):
+        if is_host:
+            host_index_by_uid[s.UniqueId] = idx
+
+    total_all = len(master_sorted)
+
+    # ---- Write (host only) ----
     write_notes = []
     if WRITE_PARAMETERS:
-        with revit.Transaction("FFE Sheet Counter (Discipline+Order)"):
+        with revit.Transaction("FFE Sheet Counter (Host+Links)"):
             if PROJECT_INFO_TOTAL_PARAM:
-                ok, err = set_param_value(doc.ProjectInformation, PROJECT_INFO_TOTAL_PARAM, total_all)
+                ok, err = set_param_value(host_doc.ProjectInformation, PROJECT_INFO_TOTAL_PARAM, total_all)
                 if not ok:
                     write_notes.append("ProjectInfo: {}".format(err))
 
             if SHEET_INDEX_PARAM:
-                for s, i in zip(current_sorted, seq):
-                    ok2, err2 = set_param_value(s, SHEET_INDEX_PARAM, i)
-                    if not ok2 and len(write_notes) < 8:
+                # write sequence to host sheets using master index
+                for s in host_sheets:
+                    global_i = host_index_by_uid.get(s.UniqueId)
+                    if global_i is None:
+                        continue
+                    ok2, err2 = set_param_value(s, SHEET_INDEX_PARAM, global_i)
+                    if not ok2 and len(write_notes) < 10:
                         write_notes.append("Sheet {}: {}".format(s.SheetNumber, err2))
 
-    # Preview
-    # print(current_sorted)
-    preview_n = min(12, len(current_sorted))
+
+    # ---- Preview ----
+    preview_n = min(15, len(master_sorted))
     lines = []
-    for s, i in zip(current_sorted[:preview_n], seq[:preview_n]):
-        di = s.LookupParameter(DISCIPLINE_PARAM).AsString()
-        od = s.LookupParameter(ORDER_PARAM).AsString()
-        lines.append("{:>3} | DI={} | ORD={} | {}  —  {}".format(
-            i, di, od, s.SheetNumber, s.Name
+    for i in range(preview_n):
+        d, s, is_host = master_sorted[i]
+        di = get_param_as_python(s, DISCIPLINE_PARAM)
+        od = get_param_as_python(s, ORDER_PARAM)
+        tag = "HOST" if is_host else "LINK"
+        lines.append("{:>3} | {:4} | DI={} | ORD={} | {} — {}".format(
+            i + 1, tag, di, od, s.SheetNumber, s.Name
         ))
     preview = "\n".join(lines) or "(no sheets found)"
 
     link_lines = "\n".join(["- {}: {}".format(t, c) for t, c in link_breakdown]) or "(none)"
 
     msg = []
-    msg.append("Current model sheets: {}".format(len(current_sorted)))
-    msg.append("Linked model sheets:  {}".format(linked_total if include_links else 0))
-    msg.append("TOTAL: {}".format(total_all))
+    msg.append("Mode: {}".format("Host + Links" if include_links else "Host only"))
+    msg.append("Host sheets: {}".format(len(host_sheets)))
+    msg.append("Master total (host+links): {}".format(total_all))
     msg.append("")
     msg.append("Sorted by: ({}, {})".format(DISCIPLINE_PARAM, ORDER_PARAM))
     msg.append("")
-    msg.append("Top {} preview:".format(preview_n))
+    msg.append("Master preview (top {}):".format(preview_n))
     msg.append(preview)
     msg.append("")
     msg.append("Link breakdown:")
@@ -269,8 +349,80 @@ def main():
         msg.append("Write notes (first few):")
         msg.extend(["- " + n for n in write_notes])
 
-    forms.alert("\n".join(msg), title="FFE Sheet Counter (Discipline+Order)", warn_icon=False)
+    forms.alert("\n".join(msg), title="FFE Sheet Counter (Host+Links)", warn_icon=False)
 
 
 if __name__ == "__main__":
     main()
+
+
+log_status = "Success"
+#______________________________________________________ LOG ACTION
+def log_action(action, log_status):
+    """Log action to user JSON log file."""
+    import os, json, time
+    from pyrevit import revit
+
+    doc = revit.doc
+    doc_path = doc.PathName or "<Untitled>"
+
+    doc_title = doc.Title
+    version_build = doc.Application.VersionBuild
+    version_number = doc.Application.VersionNumber
+    username = doc.Application.Username
+    action = action
+
+    # json log location
+    # \FFE Inc\FFE Revit Users - Documents\00-General\Revit_Add-Ins\FFE-pyRevit\Logs
+    log_dir = os.path.join(os.path.expanduser("~"), "FFE Inc", "FFE Revit Users - Documents", "00-General", "Revit_Add-Ins", "FFE-pyRevit", "Logs")
+    log_file = os.path.join(log_dir, username + "_revit_log.json")
+
+    dataEntry = {
+        "datetime": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "username": username,
+        "doc_title": doc_title,
+        "doc_path": doc_path,
+        "revit_version_number": version_number,
+        "revit_build": version_build,
+        "action": action,
+        "status": log_status
+    }
+
+    # Function to write JSON data
+    def write_json(dataEntry, filename=log_file):
+        with open(filename,'r+') as file:
+            file_data = json.load(file)                 # First we load existing data into a dict.   
+            file_data['action'].append(dataEntry)       # Join new_data with file_data inside emp_details
+            file.seek(0)                                # Sets file's current position at offset.
+            json.dump(file_data, file, indent = 4)      # convert back to json.
+
+
+    # Check if log file exists, if not create it
+    logcheck = False
+    if not os.path.exists(log_file):
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        with open(log_file, 'w') as file:    
+            file.write('{"action": []}')                # create json structure
+        
+        # output_window.print_md("### **Created log file:** `{}`".format(log_file))
+
+    # If it does exist, write to it
+    # Check if "action" key exists, if not create it
+    with open(log_file,'r+') as file:
+        file_data = json.load(file)
+        if 'action' not in file_data:
+            file_data['action'] = []
+            file.seek(0)
+            json.dump(file_data, file, indent = 4)
+
+    try:
+        write_json(dataEntry)
+        logcheck = True
+        # output_window.print_md("### **Logged sync to JSON:** `{}`".format(log_file))
+    except Exception as e:
+        logcheck = False
+
+    return dataEntry
+
+log_action(action, log_status)
