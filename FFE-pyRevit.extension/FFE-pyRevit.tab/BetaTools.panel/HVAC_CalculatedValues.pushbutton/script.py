@@ -44,7 +44,7 @@ doc         = __revit__.ActiveUIDocument.Document   #type: Document
 selection   = uidoc.Selection                       #type: Selection
 
 log_status = ""
-action = "Sheets_Counter"
+action = "HVAC Calculated Values"
 
 output_window = output.get_output()
 """Output window for displaying results."""
@@ -54,7 +54,7 @@ output_window = output.get_output()
 #____________________________________________________________________ FUNCTIONS
 
 """
-pyRevit | FFE - Calculcated Values
+pyRevit | HVAC Calculcated Values
 
 - Collect Spaces from current model
 - Filter: FFE_Space_Air Handling Unit_Mark (Or other parameter)
@@ -82,41 +82,7 @@ WRITE_PARAMETERS = True  # False = read/count only
 EXCLUDE_WITHOUT_VALUE = True
 REQUIRE_VALUE_IN_AHU_MARK = True
 
-# ------------------------------------------------------------------
-
-
-def natural_key(text):
-    parts = re.split(r"(\d+)", text or "")
-    key = []
-    for part in parts:
-        key.append(int(part) if part.isdigit() else part.lower())
-    return key
-
-
-def parse_int_maybe(val):
-    """Parse int from parameter value that might be int, string '00', ' 11 ', etc."""
-    if val is None:
-        return None
-    if isinstance(val, int):
-        return val
-    s = str(val).strip()
-    # keep only leading sign + digits
-    m = re.match(r"^-?\d+", s)
-    return int(m.group(0)) if m else None
-
-
-def get_param_as_python(elem, param_name):
-    p = elem.LookupParameter(param_name)
-    if not p:
-        return None
-    st = p.StorageType
-    if st == DB.StorageType.Integer:
-        return p.AsInteger()
-    if st == DB.StorageType.String:
-        return p.AsString()
-    if st == DB.StorageType.Double:
-        return p.AsDouble()
-    return None
+#_________________________________________________________ FUNCTIONS
 
 
 def set_param_value(elem, param_name, value):
@@ -138,23 +104,23 @@ def set_param_value(elem, param_name, value):
         return False, str(ex)
 
 
-def collect_sheets(doc):
-    sheets = (DB.FilteredElementCollector(doc)
-              .OfClass(DB.ViewSheet)
-              .WhereElementIsNotElementType()
-              .ToElements())
+def collect_spaces(doc):
+    # sheets = (DB.FilteredElementCollector(doc)
+    #           .OfClass(DB.ViewSheet)
+    #           .WhereElementIsNotElementType()
+    #           .ToElements())
 
     out = []
-    for s in sheets:
-        if EXCLUDE_PLACEHOLDERS and getattr(s, "IsPlaceholder", False):
-            continue
+    # for s in sheets:
+    #     if EXCLUDE_PLACEHOLDERS and getattr(s, "IsPlaceholder", False):
+    #         continue
 
-        if REQUIRE_APPEARS_IN_SHEET_LIST:
-            p = s.get_Parameter(DB.BuiltInParameter.SHEET_SCHEDULED)
-            if p and p.StorageType == DB.StorageType.Integer and p.AsInteger() != 1:
-                continue
+    #     if REQUIRE_APPEARS_IN_SHEET_LIST:
+    #         p = s.get_Parameter(DB.BuiltInParameter.SHEET_SCHEDULED)
+    #         if p and p.StorageType == DB.StorageType.Integer and p.AsInteger() != 1:
+    #             continue
 
-        out.append(s)
+    #     out.append(s)
     return out
 
 
