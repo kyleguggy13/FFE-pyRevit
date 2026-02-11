@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-__title__     = "Sheets Counter"
+__title__     = "Sheet \nCounter"
 __version__   = 'Version = v1.0'
 __doc__       = """Version = v1.0
 Date    = 02.11.2026

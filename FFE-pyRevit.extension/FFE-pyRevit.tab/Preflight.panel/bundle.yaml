@@ -2,3 +2,4 @@ layout:
   - PhaseFilterCompare
   - ProjectInfoCompare
   - RevisionCompare
+  - SheetCounter
