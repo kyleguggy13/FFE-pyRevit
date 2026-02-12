@@ -43,7 +43,7 @@ doc         = __revit__.ActiveUIDocument.Document   #type: Document
 selection   = uidoc.Selection                       #type: Selection
 
 log_status = ""
-action = "Sheets_Counter"
+action = "Sheet Counter"
 
 output_window = output.get_output()
 """Output window for displaying results."""
