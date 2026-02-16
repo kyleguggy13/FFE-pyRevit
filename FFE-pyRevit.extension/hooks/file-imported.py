@@ -83,6 +83,16 @@ if not os.path.exists(log_file):
 
 
 # If it does exist, write to it
+# Check if "action" key exists, if not create it
+with open(log_file,'r+') as file:
+    file_data = json.load(file)
+    if 'action' not in file_data:
+        file_data['action'] = []
+        file.seek(0)
+        json.dump(file_data, file, indent = 4)
+        
+
+# If it does exist, write to it
 try:
     write_json(dataEntry)
     logcheck = True
