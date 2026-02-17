@@ -38,11 +38,36 @@ username = doc.Application.Username
 
 args = EXEC_PARAMS.event_args
 print_args = {
+    "datetime": time.strftime("%Y-%m-%d %H:%M:%S"),
     "cancellable?": str(args.Cancellable),
     "doc": str(revit.doc),
-    "source_doc": str(args.SourceDocument),
-    "target_doc": str(args.TargetDocument),
+    "source_doc": str(args.SourceDocument.PathName),
+    "target_doc": str(args.TargetDocument.PathName),
     "ext_items": str(args.GetExternalItems()),
 }
 print("transferring-project-standards: {}".format(print_args))
 
+
+
+
+
+
+
+# json log location
+# \FFE Inc\FFE Revit Users - Documents\00-General\Revit_Add-Ins\FFE-pyRevit\Logs
+# C:\Users\kyleg\FFE Inc\FFE Revit Users - Documents\00-General\Revit_Add-Ins\FFE-pyRevit\Logs
+log_dir = os.path.join(os.path.expanduser("~"), "FFE Inc", "FFE Revit Users - Documents", "00-General", "Revit_Add-Ins", "FFE-pyRevit", "Logs")
+
+log_file = os.path.join(log_dir, username + "_revit_log.json")
+
+dataEntry = {
+    "datetime": time.strftime("%Y-%m-%d %H:%M:%S"),
+    "username": username,
+    "doc_title": doc_title,
+    "doc_path": doc_path,
+    "revit_version_number": version_number,
+    "revit_build": version_build,
+    "action": "transferred-project-standards"
+}
+
+output_window.print_md("{}".format(dataEntry))

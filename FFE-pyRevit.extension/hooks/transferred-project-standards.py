@@ -40,6 +40,7 @@ username = doc.Application.Username
 
 args = EXEC_PARAMS.event_args
 print_args = {
+    "datetime": time.strftime("%Y-%m-%d %H:%M:%S"),
     "cancellable?": str(args.Cancellable),
     "source_doc": str(args.SourceDocument.PathName),
     "target_doc": str(args.TargetDocument.PathName),
