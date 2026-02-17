@@ -45,7 +45,6 @@ doc = revit.doc
 doc_path = doc.PathName or "<Untitled>"
 
 
-print(doc.RevitPost)
 
 output_window.print_md(doc.Title)
 

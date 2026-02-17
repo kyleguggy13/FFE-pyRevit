@@ -1,13 +1,13 @@
 # -*- coding: UTF-8 -*-
 """
-__title__   = "transferred-project-standards"
+__title__   = "command-before-exec[ID_FILE_IMPORT]"
 __doc__     = Version = v1.0
 Date    = 02.17.2026
 ________________________________________________________________
 Tested Revit Versions: 
 ________________________________________________________________
 Description:
-# This hook runs after a transfer project standards is completed.
+# This hook runs after ImportCAD is completed.
 # It logs the event to a JSON file.
 ________________________________________________________________
 Last update:
@@ -99,7 +99,7 @@ dataEntry = {
     "doc_path": doc_path,
     "revit_version_number": version_number,
     "revit_build": version_build,
-    "action": "ID_FILE_IMPORT",
+    "action": "ImportCAD",
 }
 
 output_window.print_md("{}".format(dataEntry))
