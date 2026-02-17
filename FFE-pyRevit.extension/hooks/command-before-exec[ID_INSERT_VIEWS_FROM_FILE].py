@@ -24,17 +24,39 @@ import os, json, time
 from pyrevit import forms, revit
 from pyrevit.script import output
 
+from Autodesk.Revit.DB.Events import RevitEventArgs, RevitAPIPostEventArgs
+from Autodesk.Revit.UI.Events import ExecutedEventArgs
 #____________________________________________________________________ VARIABLES
 sender = __eventsender__ # UIApplication
 args   = __eventargs__   # Autodesk.Revit.UI.Events.BeforeExecutedEventArgs
+
+
+
+
+
+
 # doc = revit.doc
 
-doc = args.GetDocument()
-
-### TEST THIS ###
 output_window = output.get_output()
 
+
+# Gather doc info
+doc = revit.doc
+doc_path = doc.PathName or "<Untitled>"
+
+
+print(doc.RevitPost)
+
+output_window.print_md(doc.Title)
+
+output_window.print_md("---")
+
 output_window.print_md("### **Logging 'Insert Views from File' command**")
+
+print(sender)
+print(args)
+print(args.ActiveDocument.Title)
+print(args.CommandId)
 
 ### TEST THIS ###
 
