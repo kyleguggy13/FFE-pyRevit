@@ -3,12 +3,12 @@
 """
 __title__   = "command-before-exec[ID_INSERT_VIEWS_FROM_FILE]"
 __doc__     = Version = v0.1
-Date    = 10.24.2025
+Date        = 10.24.2025
 ________________________________________________________________
 Tested Revit Versions: 
 ________________________________________________________________
 Description:
-# This hook runs before the "Insert Views from File" command is executed.
+# This hook runs before the "InsertViewsFromFile" command is executed.
 # It logs the sevent to a JSON file.
 ________________________________________________________________
 Last update:
@@ -86,7 +86,7 @@ dataEntry = {
     "doc_path": doc_path,
     "revit_version_number": version_number,
     "revit_build": version_build,
-    "action": "Insert Views from File"
+    "action": "InsertViewsFromFile"
 }
 
 

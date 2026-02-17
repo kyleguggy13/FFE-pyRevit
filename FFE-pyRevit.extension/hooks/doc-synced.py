@@ -55,6 +55,7 @@ dataEntry = {
     "action": "sync"
 }
 
+output.get_output().print_md(dataEntry)
 
 
 # Function to write JSON data
