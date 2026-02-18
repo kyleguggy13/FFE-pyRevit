@@ -26,7 +26,7 @@ import os, json, time
 from pyrevit import forms, revit
 from pyrevit.script import output
 
-# output_window = output.get_output()
+output_window = output.get_output()
 
 doc = revit.doc
 doc_path = doc.PathName or "<Untitled>"
@@ -55,7 +55,6 @@ dataEntry = {
     "action": "sync"
 }
 
-output.get_output().print_md(dataEntry)
 
 
 # Function to write JSON data
