@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-__title__   = "FFE-pyRevit \nv1.11.0"
-__doc__ = """Version = v1.11.0
-Date    = 02.11.2026
+__title__   = "FFE-pyRevit \nv1.12.0"
+__doc__ = """Version = v1.12.0
+Date    = 02.17.2026
 __________________________________________________________________
 Description:
 pyRevit About Form
@@ -26,6 +26,7 @@ Last update:
 - [02.02.2026] - v1.10.0 Added Duct Network Summary to MEPTools
 - [02.09.2026] - v1.10.1 Updated Duct Network Summary to work on all duct system types.
 - [02.11.2026] - v1.11.0 Added Sheets_Counter tool.
+- [02.17.2026] - v1.12.0 Added transferred-project-standards hook.
 __________________________________________________________________
 Author: Kyle Guggenheim from FFE Inc."""
 # ↑ This module docstring doubles as the default changelog text.
