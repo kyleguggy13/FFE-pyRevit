@@ -43,7 +43,7 @@ args_dict = {
     "source_doc": str(args.SourceDocument.Title),
     "source_doc_path": str(args.SourceDocument.PathName),
     "target_doc": str(args.TargetDocument.Title),
-    "target_doc_path": str(args.SourceDocument.PathName)
+    "target_doc_path": str(args.TargetDocument.PathName)
 }
 
 
