@@ -114,15 +114,38 @@ def param_type_label(fp):
 # Data Models (WPF binding needs attributes)
 # ----------------------------
 
+# from System.ComponentModel import INotifyPropertyChanged, PropertyChangedEventArgs
+
+# class NotifyBase(INotifyPropertyChanged):
+#     def __init__(self):
+#         self.PropertyChanged = None
+
+#     def _raise(self, prop_name):
+#         if self.PropertyChanged:
+#             self.PropertyChanged(self, PropertyChangedEventArgs(prop_name))
+
+
 class FamilyRow(object):
     def __init__(self, fam_name, cat_name):
-        self.IsChecked = False
+        self.IsCheckedFamily = False
+        # self.IsChecked = False
         self.FamilyName = fam_name
         self.CategoryName = cat_name
+
+    # @property
+    # def IsChecked(self):
+    #     return self.IsCheckedFamily
+
+    # @IsChecked.setter
+    # def IsChecked(self, val):
+    #     self.IsCheckedFamily = bool(val)
+    #     self._raise("IsChecked")
 
 
 class ParamRow(object):
     def __init__(self, dct):
+        self.IsCheckedParameter = False
+        # self.IsChecked = False
         self.Name = dct.get("name") or ""
         self.ParameterTypeLabel = dct.get("parameter_type_label") or ""
         self.ParamValueType = dct.get("param_value_type") or ""
@@ -133,6 +156,15 @@ class ParamRow(object):
         # Keep a key used for deletion lookup
         self._key_name = self.Name
         self._key_group = self.Group
+
+    # @property
+    # def IsChecked(self):
+    #     return self.IsCheckedParameter
+
+    # @IsChecked.setter
+    # def IsChecked(self, val):
+    #     self.IsCheckedParameter = bool(val)
+    #     self._raise("IsChecked")
 
 
 # ----------------------------
@@ -219,7 +251,7 @@ class FamiliesWindow(forms.WPFWindow):
         self.DgParams.ItemsSource = []
         self.LblFamiliesCount.Text = str(len(self._families))
         self.LblSelectedFamily.Text = "(no family selected)"
-        self.LblStatus.Text = "Ready"
+        # self.LblStatus.Text = "Ready"
 
         # events
         self.DgFamilies.SelectionChanged += self.on_family_selection_changed
@@ -228,13 +260,13 @@ class FamiliesWindow(forms.WPFWindow):
         self.CmbParamTypeFilter.SelectionChanged += self.on_param_filter_changed
 
         self.BtnRefresh.Click += self.on_refresh
-        self.BtnClear.Click += self.on_clear
+        # self.BtnClear.Click += self.on_clear
 
         # (3) modify dropdown -> delete selected
         self.CmbModify.SelectionChanged += self.on_modify_action_changed
 
         # optional: keep Apply as “Export JSON” if you want
-        self.BtnApply.Click += self.on_export_json
+        # self.BtnApply.Click += self.on_export_json
 
     # ------------------------
     # UI helpers
@@ -270,7 +302,7 @@ class FamiliesWindow(forms.WPFWindow):
 
         self._current_param_rows = rows
         self.DgParams.ItemsSource = rows
-        self.LblStatus.Text = "Parameters: {}".format(len(rows))
+        # self.LblStatus.Text = "Parameters: {}".format(len(rows))
 
     # ------------------------
     # Data loaders
@@ -279,7 +311,7 @@ class FamiliesWindow(forms.WPFWindow):
     def _load_params_for_family(self, fam_name):
         self._current_family_name = fam_name
         self.LblSelectedFamily.Text = fam_name
-        self.LblStatus.Text = "Loading parameters..."
+        # self.LblStatus.Text = "Loading parameters..."
 
         fam_elem = None
         for f in FilteredElementCollector(doc).OfClass(Family).ToElements():
@@ -290,7 +322,7 @@ class FamiliesWindow(forms.WPFWindow):
         if fam_elem is None:
             self._current_param_dicts = []
             self._apply_param_filters()
-            self.LblStatus.Text = "Family not found in document."
+            # self.LblStatus.Text = "Family not found in document."
             return
 
         try:
@@ -330,7 +362,7 @@ class FamiliesWindow(forms.WPFWindow):
             self._apply_param_filters()
 
     def on_refresh(self, sender, args):
-        self.LblStatus.Text = "Refreshing..."
+        # self.LblStatus.Text = "Refreshing..."
         self._families = collect_family_list(doc)
         self.DgFamilies.ItemsSource = self._families
         self.LblFamiliesCount.Text = str(len(self._families))
@@ -339,17 +371,17 @@ class FamiliesWindow(forms.WPFWindow):
         self._current_param_dicts = []
         self.DgParams.ItemsSource = []
         self.LblSelectedFamily.Text = "(no family selected)"
-        self.LblStatus.Text = "Ready"
+        # self.LblStatus.Text = "Ready"
 
-    def on_clear(self, sender, args):
-        self.TxtFamilySearch.Text = ""
-        self.TxtParamFilter.Text = ""
-        self.DgFamilies.SelectedItem = None
-        self.DgParams.ItemsSource = []
-        self._current_family_name = None
-        self._current_param_dicts = []
-        self.LblSelectedFamily.Text = "(no family selected)"
-        self.LblStatus.Text = "Ready"
+    # def on_clear(self, sender, args):
+    #     self.TxtFamilySearch.Text = ""
+    #     self.TxtParamFilter.Text = ""
+    #     self.DgFamilies.SelectedItem = None
+    #     self.DgParams.ItemsSource = []
+    #     self._current_family_name = None
+    #     self._current_param_dicts = []
+    #     self.LblSelectedFamily.Text = "(no family selected)"
+    #     self.LblStatus.Text = "Ready"
 
     # ------------------------
     # (3) Delete selected parameters
@@ -486,7 +518,8 @@ class FamiliesWindow(forms.WPFWindow):
                 report += "\n\nFailures (first 10):\n" + "\n".join(fail_messages[:10])
             forms.alert(report, title="Delete Parameters Result")
         else:
-            self.LblStatus.Text = report.replace("\n", " | ")
+            # self.LblStatus.Text = report.replace("\n", " | ")
+            pass
 
     # ------------------------
     # Optional: export JSON (Apply button)
@@ -505,9 +538,10 @@ class FamiliesWindow(forms.WPFWindow):
                 data["_note"] = "Select a family to export its parameters."
             with open(fp, "w") as f:
                 json.dump(data, f, indent=2)
-            self.LblStatus.Text = "Exported JSON to Downloads"
+            # self.LblStatus.Text = "Exported JSON to Downloads"
         except:
-            self.LblStatus.Text = "Export failed."
+            # self.LblStatus.Text = "Export failed."
+            pass
 
 
 # Run
