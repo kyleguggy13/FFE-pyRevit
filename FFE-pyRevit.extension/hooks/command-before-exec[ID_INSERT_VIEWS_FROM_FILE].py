@@ -56,7 +56,7 @@ print(sender)
 print(args)
 print(args.ActiveDocument.Title)
 print(args.CommandId)
-
+print(args.CommandId.Name)
 ### TEST THIS ###
 
 
