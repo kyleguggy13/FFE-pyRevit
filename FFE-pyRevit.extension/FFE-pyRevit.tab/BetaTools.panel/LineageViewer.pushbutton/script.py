@@ -60,18 +60,20 @@ pyRevit | Lineage Viewer
 
 """
 
+# -*- coding: utf-8 -*-
 """
-"Linked Items Graph"
-"Collect linked items in the active Revit model and generate a relationship graphic."
+__title__ = "Lineage Viewer"
+__doc__   = "Collect linked items in the active Revit model and generate a relationship graphic."
 """
 
 import os
 import re
-import sys
-import math
+import io
 import time
+import math
 import tempfile
 import traceback
+import subprocess
 
 from collections import defaultdict
 
@@ -81,22 +83,20 @@ from Autodesk.Revit.DB import (
     RevitLinkInstance,
     RevitLinkType,
     ImportInstance,
+    ImageInstance,
     ImageType,
     PointCloudType,
     ExternalFileUtils,
     ModelPathUtils
 )
 
-from System.Diagnostics import Process
-
-
 output = script.get_output()
 doc = revit.doc
 
 
-# -----------------------------------------------------------------------------
+# =============================================================================
 # helpers
-# -----------------------------------------------------------------------------
+# =============================================================================
 
 def html_escape(text):
     if text is None:
@@ -124,8 +124,33 @@ def basename_or_value(path_value):
         return str(path_value)
 
 
+def shorten_text(text, max_len):
+    if not text:
+        return ""
+    s = str(text)
+    if len(s) <= max_len:
+        return s
+    return s[:max_len - 3] + "..."
+
+
+def open_file(filepath):
+    try:
+        os.startfile(filepath)
+        return True
+    except:
+        pass
+
+    try:
+        subprocess.Popen(['cmd', '/c', 'start', '', filepath], shell=True)
+        return True
+    except:
+        pass
+
+    return False
+
+
 def try_get_external_path(owner_doc, element_id):
-    """Try to resolve external file path from an element/type id."""
+    """Try to resolve an external file path from an element/type id."""
     try:
         ext_ref = ExternalFileUtils.GetExternalFileReference(owner_doc, element_id)
         if ext_ref:
@@ -169,7 +194,7 @@ def get_image_path(img_type):
 
 
 def get_pointcloud_path(pc_type):
-    # API availability varies by version; try a few options
+    # API availability varies by version
     for attr in ["Path", "GetPath"]:
         try:
             value = getattr(pc_type, attr)
@@ -184,17 +209,22 @@ def get_pointcloud_path(pc_type):
     return ""
 
 
-def is_element_visible_like(imp):
-    # not filtering by active view; this is a full model relationship report
+def doc_key(xdoc):
     try:
-        return not imp.IsHidden(doc.ActiveView)
+        if xdoc.PathName:
+            return xdoc.PathName
     except:
-        return True
+        pass
+
+    try:
+        return "DOCID:{}".format(xdoc.GetHashCode())
+    except:
+        return "DOC:{}".format(id(xdoc))
 
 
-# -----------------------------------------------------------------------------
-# graph storage
-# -----------------------------------------------------------------------------
+# =============================================================================
+# graph data
+# =============================================================================
 
 class GraphNode(object):
     def __init__(self, node_id, label, sublabel, kind, depth, parent_id=None, status=""):
@@ -229,21 +259,9 @@ def add_node(label, sublabel, kind, depth, parent_id=None, status=""):
     return nid
 
 
-def doc_key(xdoc):
-    try:
-        if xdoc.PathName:
-            return xdoc.PathName
-    except:
-        pass
-    try:
-        return "DOCID:{}".format(xdoc.GetHashCode())
-    except:
-        return "DOC:{}".format(id(xdoc))
-
-
-# -----------------------------------------------------------------------------
+# =============================================================================
 # collection
-# -----------------------------------------------------------------------------
+# =============================================================================
 
 def collect_imports(owner_doc, parent_node_id, depth):
     try:
@@ -252,8 +270,15 @@ def collect_imports(owner_doc, parent_node_id, depth):
         imports = []
 
     for imp in imports:
+        if imp.IsLinked:
+            kind = "cadlink"
+        else:
+            kind = "cadimport"
+        
         try:
-            name = get_import_name(imp, owner_doc)
+            # name = get_import_name(imp, owner_doc)
+            name = imp.Parameter[DB.BuiltInParameter.IMPORT_SYMBOL_NAME].AsString()
+
             is_link = False
             try:
                 is_link = imp.IsLinked
@@ -263,43 +288,185 @@ def collect_imports(owner_doc, parent_node_id, depth):
             path_value = try_get_external_path(owner_doc, imp.GetTypeId())
             sub = basename_or_value(path_value) if path_value else "No path available"
 
-            kind = "cadlink" if is_link else "cadimport"
-            status = "Linked" if is_link else "Imported"
+            # kind = "cadlink" if is_link else "cadimport"
+            # status = "Linked" if is_link else "Imported"
 
             add_node(
                 label=name,
                 sublabel=sub,
                 kind=kind,
                 depth=depth,
-                parent_id=parent_node_id,
-                status=status
+                parent_id=parent_node_id
             )
         except:
             pass
 
 
-def collect_images(owner_doc, parent_node_id, depth):
-    try:
-        image_types = FilteredElementCollector(owner_doc).OfClass(ImageType).ToElements()
-    except:
-        image_types = []
+def collect_images_and_pdfs(owner_doc, parent_node_id, depth):
+    """Collect placed images/PDFs first, then unplaced image types as fallback."""
 
-    for img_type in image_types:
+    placed_type_ids = set()
+
+    # -------------------------------------------------------------------------
+    # placed image/pdf instances
+    # -------------------------------------------------------------------------
+    try:
+        image_instances = (
+            FilteredElementCollector(owner_doc)
+            .OfClass(ImageInstance)
+            .WhereElementIsNotElementType()
+            .ToElements()
+        )
+        print("Found {} image instances.".format(len(image_instances)))     # <-- TESTING
+    except:
+        image_instances = []
+
+    for img_inst in image_instances:
+        print("Processing image instance with id {} (Name: {})).".format(img_inst.Id.ToString(), img_inst.Name))     # <-- TESTING
         try:
-            path_value = get_image_path(img_type)
-            if not path_value:
+            # img_type = owner_doc.GetElement(img_inst.GetTypeId())
+            img_inst_id = img_inst.Id.ToString()
+            
+            if not img_inst_id:
+                print("no img_inst_id")     # <-- TESTING
                 continue
+            # if not img_type:
+                # continue
+
+            # placed_type_ids.add(img_type.Id.ToString())
+            placed_type_ids.add(img_inst.Id.ToString())
+
+            # try:
+            #     source_str = str(img_type.Source)
+            # except:
+            #     source_str = "Image"
+
+            # try:
+            #     status_str = str(img_type.Status)
+            # except:
+            #     status_str = ""
+
+            # try:
+            #     page_number = img_type.PageNumber
+            # except:
+            #     page_number = 1
+
+            # try:
+            #     path_value = img_type.Path
+            # except:
+            #     path_value = ""
+
+            # try:
+            #     owner_view = owner_doc.GetElement(img_inst.OwnerViewId)
+            #     owner_view_name = owner_view.Name if owner_view else "Unknown View"
+            # except:
+            #     owner_view_name = "Unknown View"
+
+
+            source_str = "Image"
+            status_str = ""
+            page_number = 1
+            path_value = ""
+            owner_view_name = "Unknown View"
+
+            ext = os.path.splitext(path_value)[1].lower() if path_value else ""
+            is_pdf = ext == ".pdf" or page_number > 1
+
+            if is_pdf:
+                # label = img_type.Name or "PDF"
+                label = img_inst.Name or "PDF"
+                sub = "{} | Page {} | View: {}".format(
+                    basename_or_value(path_value) if path_value else "PDF",
+                    page_number,
+                    owner_view_name
+                )
+                kind = "pdf"
+            else:
+                # label = img_type.Name or "Image"
+                label = img_inst.Name or "Image"
+                sub = "{} | View: {}".format(
+                    basename_or_value(path_value) if path_value else "Image",
+                    owner_view_name
+                )
+                kind = "image"
 
             add_node(
-                label=img_type.Name,
-                sublabel=basename_or_value(path_value),
-                kind="image",
+                label=label,
+                sublabel=sub,
+                kind=kind,
                 depth=depth,
-                parent_id=parent_node_id,
-                status="Linked"
+                parent_id=parent_node_id
             )
+            print("add_node: {}, {}, {}, {}, {}, {}".format(
+                label, sub, kind, depth, parent_node_id, status_str if status_str else source_str
+            ))     # <-- TESTING
         except:
             pass
+
+    # -------------------------------------------------------------------------
+    # fallback image/pdf types not currently placed
+    # -------------------------------------------------------------------------
+    # try:
+    #     image_types = FilteredElementCollector(owner_doc).OfClass(ImageType).ToElements()
+    # except:
+    #     image_types = []
+
+    # for img_type in image_types:
+    #     try:
+    #         # Skip types that already have placed instances collected above
+    #         try:
+    #             if img_type.Id.ToString() in placed_type_ids:
+    #                 continue
+    #         except:
+    #             pass
+
+    #         try:
+    #             path_value = img_type.Path
+    #         except:
+    #             path_value = ""
+
+    #         try:
+    #             source_str = str(img_type.Source)
+    #         except:
+    #             source_str = "Image"
+
+    #         try:
+    #             status_str = str(img_type.Status)
+    #         except:
+    #             status_str = ""
+
+    #         try:
+    #             page_number = img_type.PageNumber
+    #         except:
+    #             page_number = 1
+
+    #         ext = os.path.splitext(path_value)[1].lower() if path_value else ""
+    #         is_pdf = ext == ".pdf" or page_number > 1
+
+    #         if is_pdf:
+    #             label = img_type.Name or "PDF"
+    #             sub = "{} | Page {} | Unplaced".format(
+    #                 basename_or_value(path_value) if path_value else "PDF",
+    #                 page_number
+    #             )
+    #             kind = "pdf"
+    #         else:
+    #             label = img_type.Name or "Image"
+    #             sub = "{} | Unplaced".format(
+    #                 basename_or_value(path_value) if path_value else "Image"
+    #             )
+    #             kind = "image"
+
+    #         add_node(
+    #             label=label,
+    #             sublabel=sub,
+    #             kind=kind,
+    #             depth=depth,
+    #             parent_id=parent_node_id,
+    #             status=status_str if status_str else source_str
+    #         )
+    #     except:
+    #         pass
 
 
 def collect_pointclouds(owner_doc, parent_node_id, depth):
@@ -318,8 +485,7 @@ def collect_pointclouds(owner_doc, parent_node_id, depth):
                 sublabel=sub,
                 kind="pointcloud",
                 depth=depth,
-                parent_id=parent_node_id,
-                status="Linked"
+                parent_id=parent_node_id
             )
         except:
             pass
@@ -341,6 +507,7 @@ def collect_revit_links(owner_doc, parent_node_id, depth):
                 instance_name = inst.Name
             except:
                 pass
+
             if not instance_name and link_type:
                 instance_name = link_type.Name
             if not instance_name:
@@ -358,11 +525,10 @@ def collect_revit_links(owner_doc, parent_node_id, depth):
                 sublabel=sub,
                 kind="revitlink",
                 depth=depth,
-                parent_id=parent_node_id,
-                status=status
+                parent_id=parent_node_id
             )
 
-            # Recurse only for loaded link docs
+            # Recurse into loaded linked docs only
             if link_doc:
                 k = doc_key(link_doc)
                 if k not in visited_doc_keys:
@@ -376,13 +542,13 @@ def collect_revit_links(owner_doc, parent_node_id, depth):
 def collect_doc_contents(owner_doc, parent_node_id, depth):
     collect_revit_links(owner_doc, parent_node_id, depth)
     collect_imports(owner_doc, parent_node_id, depth)
-    collect_images(owner_doc, parent_node_id, depth)
+    collect_images_and_pdfs(owner_doc, parent_node_id, depth)
     collect_pointclouds(owner_doc, parent_node_id, depth)
 
 
-# -----------------------------------------------------------------------------
-# layout and html
-# -----------------------------------------------------------------------------
+# =============================================================================
+# styling / layout
+# =============================================================================
 
 def node_style(kind):
     styles = {
@@ -395,56 +561,64 @@ def node_style(kind):
         },
         "revitlink": {
             "icon": "R",
-            "border": "#8AA1B1",
-            "icon_fill": "#F4F7FA",
-            "icon_stroke": "#8AA1B1",
+            "border": "#7E9CB2",
+            "icon_fill": "#F3F7FA",
+            "icon_stroke": "#7E9CB2",
             "tag": "Revit Link"
         },
         "cadlink": {
             "icon": "C",
-            "border": "#9A8FB8",
-            "icon_fill": "#F5F1FB",
-            "icon_stroke": "#9A8FB8",
+            "border": "#9B8DB9",
+            "icon_fill": "#F5F2FB",
+            "icon_stroke": "#9B8DB9",
             "tag": "CAD Link"
         },
         "cadimport": {
             "icon": "C",
-            "border": "#B39B6B",
-            "icon_fill": "#FBF7EE",
-            "icon_stroke": "#B39B6B",
+            "border": "#B69561",
+            "icon_fill": "#FBF6EC",
+            "icon_stroke": "#B69561",
             "tag": "CAD Import"
         },
         "image": {
             "icon": "I",
-            "border": "#C28A5B",
-            "icon_fill": "#FDF3EC",
-            "icon_stroke": "#C28A5B",
+            "border": "#C68957",
+            "icon_fill": "#FCF2EA",
+            "icon_stroke": "#C68957",
             "tag": "Image"
         },
         "pointcloud": {
             "icon": "P",
-            "border": "#6B9FB3",
+            "border": "#6E9FB2",
             "icon_fill": "#EEF7FA",
-            "icon_stroke": "#6B9FB3",
+            "icon_stroke": "#6E9FB2",
             "tag": "Point Cloud"
-        }
+        },
+        "pdf": {
+            "icon": "P",
+            "border": "#D08A57",
+            "icon_fill": "#FCF3EC",
+            "icon_stroke": "#D08A57",
+            "tag": "PDF"
+        },
     }
     return styles.get(kind, styles["revitlink"])
 
 
 def compute_layout():
     columns = defaultdict(list)
+
     for n in nodes.values():
         columns[n.depth].append(n)
 
     for depth in columns:
         columns[depth] = sorted(columns[depth], key=lambda x: (x.kind, x.label.lower()))
 
-    node_w = 340
-    node_h = 92
-    x_gap = 120
-    y_gap = 22
-    margin_x = 40
+    node_w = 370
+    node_h = 96
+    x_gap = 130
+    y_gap = 24
+    margin_x = 50
     margin_y = 40
 
     positions = {}
@@ -456,12 +630,12 @@ def compute_layout():
         if col_height > max_column_height:
             max_column_height = col_height
 
-    total_h = max(max_column_height + margin_y * 2, 250)
+    total_h = max(max_column_height + margin_y * 2, 350)
     total_w = margin_x * 2 + (max_depth[0] + 1) * node_w + max_depth[0] * x_gap
 
     for depth in range(0, max_depth[0] + 1):
         col_nodes = columns.get(depth, [])
-        x = margin_x + (max_depth[0] - depth) * (node_w + x_gap)
+        x = margin_x + depth * (node_w + x_gap)
 
         col_height = len(col_nodes) * node_h + max(0, len(col_nodes) - 1) * y_gap
         start_y = margin_y + max(0, (max_column_height - col_height) / 2.0)
@@ -480,33 +654,72 @@ def build_svg():
     svg.append('<svg xmlns="http://www.w3.org/2000/svg" width="{0}" height="{1}" viewBox="0 0 {0} {1}">'.format(int(total_w), int(total_h)))
     svg.append("""
     <defs>
-      <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-        <feDropShadow dx="0" dy="1.5" stdDeviation="2" flood-color="#000000" flood-opacity="0.12"/>
+      <filter id="shadow" x="-20%" y="-20%" width="160%" height="160%">
+        <feDropShadow dx="0" dy="2" stdDeviation="2.4" flood-color="#000000" flood-opacity="0.12"/>
       </filter>
     </defs>
     """)
 
-    # Edges first
+    # connections
     for child_id, parent_id in edges:
         if child_id not in positions or parent_id not in positions:
             continue
 
+        child_node = nodes[child_id]
+        parent_node = nodes[parent_id]
+
         cx, cy = positions[child_id]
         px, py = positions[parent_id]
 
-        x1 = cx + node_w
-        y1 = cy + (node_h / 2.0)
-        x2 = px
-        y2 = py + (node_h / 2.0)
+        child_left_x = cx
+        child_right_x = cx + node_w
+        child_mid_y = cy + (node_h / 2.0)
 
-        dx = max(40, (x2 - x1) / 2.0)
+        parent_left_x = px
+        parent_right_x = px + node_w
+        parent_mid_y = py + (node_h / 2.0)
+
+        if parent_node.depth < child_node.depth:
+            # parent -> child
+            x1 = parent_right_x
+            y1 = parent_mid_y
+            x2 = child_left_x
+            y2 = child_mid_y
+        elif parent_node.depth > child_node.depth:
+            # reverse fallback
+            x1 = parent_left_x
+            y1 = parent_mid_y
+            x2 = child_right_x
+            y2 = child_mid_y
+        else:
+            # same column fallback
+            if px <= cx:
+                x1 = parent_right_x
+                y1 = parent_mid_y
+                x2 = child_left_x
+                y2 = child_mid_y
+            else:
+                x1 = parent_left_x
+                y1 = parent_mid_y
+                x2 = child_right_x
+                y2 = child_mid_y
+
+        dx = max(50, abs(x2 - x1) / 2.0)
+
+        if x1 <= x2:
+            c1x = x1 + dx
+            c2x = x2 - dx
+        else:
+            c1x = x1 - dx
+            c2x = x2 + dx
+
         path_d = "M {0} {1} C {2} {1}, {3} {4}, {5} {4}".format(
-            x1, y1, x1 + dx, x2 - dx, y2, x2
+            x1, y1, c1x, c2x, y2, x2
         )
 
-        svg.append('<path d="{0}" fill="none" stroke="#B8BFC7" stroke-width="2.2"/>'.format(path_d))
+        svg.append('<path d="{0}" fill="none" stroke="#C4CAD1" stroke-width="2.2"/>'.format(path_d))
 
-    # Nodes
+    # nodes
     for n in nodes.values():
         if n.id not in positions:
             continue
@@ -514,42 +727,44 @@ def build_svg():
         x, y = positions[n.id]
         st = node_style(n.kind)
 
+        # node container with shadow
         svg.append('<g filter="url(#shadow)">')
-        svg.append('<rect x="{0}" y="{1}" rx="10" ry="10" width="{2}" height="{3}" fill="#FFFFFF" stroke="{4}" stroke-width="2"/>'.format(
+
+        # node background
+        svg.append('<rect x="{0}" y="{1}" rx="10" ry="10" width="{2}" height="{3}" fill="#FFFFFF" stroke="{4}" stroke-width="1.8"/>'.format(
             x, y, node_w, node_h, st["border"]
         ))
         svg.append('</g>')
 
-        # icon
+        # icon background
         svg.append('<rect x="{0}" y="{1}" rx="6" ry="6" width="26" height="26" fill="{2}" stroke="{3}" stroke-width="1.2"/>'.format(
             x + 14, y + 14, st["icon_fill"], st["icon_stroke"]
         ))
-        svg.append('<text x="{0}" y="{1}" font-family="Segoe UI, Arial" font-size="13" font-weight="700" fill="{2}">{3}</text>'.format(
-            x + 22, y + 32, st["icon_stroke"], html_escape(st["icon"])
+
+        # icon label
+        svg.append('<text x="{0}" y="{1}" font-family="Segoe UI, Arial" font-size="14" font-weight="700" fill="{2}">{3}</text>'.format(
+            x + 21, y + 32, st["icon_stroke"], html_escape(st["icon"])
         ))
 
         # main label
-        svg.append('<text x="{0}" y="{1}" font-family="Segoe UI, Arial" font-size="16" font-weight="700" fill="#333333">{2}</text>'.format(
-            x + 52, y + 28, html_escape(n.label)
+        svg.append('<text x="{0}" y="{1}" font-family="Segoe UI, Arial" font-size="14" font-weight="700" fill="#2F3438">{2}</text>'.format(
+            x + 52, y + 28, html_escape(shorten_text(n.label, 42))
         ))
 
-        # tag
-        svg.append('<text x="{0}" y="{1}" font-family="Segoe UI, Arial" font-size="13" fill="#6A6F75">{2}</text>'.format(
+        # sub label
+        svg.append('<text x="{0}" y="{1}" font-family="Segoe UI, Arial" font-size="12" fill="#676E75">{2}</text>'.format(
             x + 52, y + 50, html_escape(st["tag"])
         ))
 
-        # sublabel
-        sub_text = n.sublabel or ""
-        if len(sub_text) > 46:
-            sub_text = sub_text[:43] + "..."
-        svg.append('<text x="{0}" y="{1}" font-family="Segoe UI, Arial" font-size="12.5" fill="#7D848C">{2}</text>'.format(
-            x + 52, y + 70, html_escape(sub_text)
+        # additional sub label
+        svg.append('<text x="{0}" y="{1}" font-family="Segoe UI, Arial" font-size="12" fill="#80878E">{2}</text>'.format(
+            x + 52, y + 71, html_escape(shorten_text(n.sublabel, 48))
         ))
 
-        # status
+        # status label
         if n.status:
-            svg.append('<text x="{0}" y="{1}" font-family="Segoe UI, Arial" font-size="12" fill="#7D848C">{2}</text>'.format(
-                x + node_w - 90, y + 28, html_escape(n.status)
+            svg.append('<text x="{0}" y="{1}" font-family="Segoe UI, Arial" font-size="12" fill="#7B8288">{2}</text>'.format(
+                x + 52, y + 88, html_escape(n.status)
             ))
 
     svg.append("</svg>")
@@ -571,18 +786,18 @@ def build_html():
 <html>
 <head>
 <meta charset="utf-8">
-<title>Revit Linked Items Graph</title>
+<title>Revit Linked Items Relationship Graph</title>
 <style>
     body {{
         margin: 0;
         background: #F3F4F6;
         font-family: Segoe UI, Arial, sans-serif;
-        color: #333;
+        color: #333333;
     }}
     .header {{
-        padding: 20px 24px 12px 24px;
-        border-bottom: 1px solid #D9DDE2;
         background: #FFFFFF;
+        border-bottom: 1px solid #D7DCE1;
+        padding: 18px 24px 14px 24px;
     }}
     .title {{
         font-size: 24px;
@@ -591,14 +806,18 @@ def build_html():
     }}
     .meta {{
         font-size: 13px;
-        color: #6D737A;
-        line-height: 1.5;
+        color: #6A7178;
+        line-height: 1.55;
     }}
     .wrap {{
-        padding: 18px 20px 24px 20px;
+        padding: 16px 20px 22px 20px;
     }}
-    .stats {{
+    .summary {{
         margin-bottom: 14px;
+        padding: 10px 12px;
+        background: #FFFFFF;
+        border: 1px solid #D7DCE1;
+        border-radius: 8px;
         font-size: 13px;
         color: #5F666D;
     }}
@@ -615,16 +834,20 @@ def build_html():
         <div class="meta"><strong>Model:</strong> {host_name}</div>
         <div class="meta"><strong>Path:</strong> {host_path}</div>
         <div class="meta"><strong>Generated:</strong> {generated}</div>
-        <div class="meta"><strong>Note:</strong> Nested contents are only available for loaded Revit links.</div>
+        <div class="meta"><strong>Note:</strong> Nested contents are only shown for loaded Revit links.</div>
     </div>
+
     <div class="wrap">
-        <div class="stats">
-            Revit Links: {revit_count} &nbsp;|&nbsp;
-            CAD Links: {cadlink_count} &nbsp;|&nbsp;
-            CAD Imports: {cadimport_count} &nbsp;|&nbsp;
-            Images: {image_count} &nbsp;|&nbsp;
+        <div class="summary">
+            <strong>Counts</strong><br>
+            Revit Links: {revit_count} &nbsp; | &nbsp;
+            CAD Links: {cadlink_count} &nbsp; | &nbsp;
+            CAD Imports: {cadimport_count} &nbsp; | &nbsp;
+            Images: {image_count} &nbsp; | &nbsp;
+            PDFs: {pdf_count} &nbsp; | &nbsp;
             Point Clouds: {pc_count}
         </div>
+
         <div class="canvas">
             {svg}
         </div>
@@ -639,6 +862,7 @@ def build_html():
         cadlink_count=summary_counts.get("cadlink", 0),
         cadimport_count=summary_counts.get("cadimport", 0),
         image_count=summary_counts.get("image", 0),
+        pdf_count=summary_counts.get("pdf", 0),
         pc_count=summary_counts.get("pointcloud", 0),
         svg=svg_markup
     )
@@ -646,9 +870,9 @@ def build_html():
     return html
 
 
-# -----------------------------------------------------------------------------
+# =============================================================================
 # main
-# -----------------------------------------------------------------------------
+# =============================================================================
 
 try:
     host_node_id = add_node(
@@ -657,8 +881,14 @@ try:
         kind="host",
         depth=0,
         parent_id=None,
-        status=""
     )
+    # host_node_id = add_node(
+    #     label="label",
+    #     sublabel="sublabel",
+    #     kind="kind",
+    #     depth=0,
+    #     parent_id="parent_id"
+    # )
 
     visited_doc_keys.add(doc_key(doc))
     collect_doc_contents(doc, host_node_id, 1)
@@ -672,14 +902,16 @@ try:
     out_name = "Revit_Linked_Items_Graph_{0}.html".format(clean_filename(doc.Title))
     out_path = os.path.join(out_dir, out_name)
 
-    with open(out_path, "w") as f:
+    with io.open(out_path, "w", encoding="utf-8") as f:
         f.write(html)
 
     output.print_md("### Linked Items Graph Created")
     output.print_md("**File:** `{}`".format(out_path))
-    output.print_md("Opening report in default browser...")
 
-    Process.Start(out_path)
+    if open_file(out_path):
+        output.print_md("Opened report in default browser.")
+    else:
+        output.print_md("Could not auto-open report. Open it manually from the path above.")
 
 except Exception as ex:
     output.print_md("### Script Failed")
@@ -687,6 +919,4 @@ except Exception as ex:
     output.print_md("```")
     output.print_md(traceback.format_exc())
     output.print_md("```")
-
-
 
