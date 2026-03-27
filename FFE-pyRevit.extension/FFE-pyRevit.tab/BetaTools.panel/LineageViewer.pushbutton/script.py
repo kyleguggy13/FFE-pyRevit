@@ -317,18 +317,18 @@ def collect_images_and_pdfs(owner_doc, parent_node_id, depth):
             .WhereElementIsNotElementType()
             .ToElements()
         )
-        print("Found {} image instances.".format(len(image_instances)))     # <-- TESTING
+        # print("Found {} image instances.".format(len(image_instances)))     # <-- TESTING
     except:
         image_instances = []
 
     for img_inst in image_instances:
-        print("Processing image instance with id {} (Name: {})).".format(img_inst.Id.ToString(), img_inst.Name))     # <-- TESTING
+        # print("Processing image instance with id {} (Name: {})).".format(img_inst.Id.ToString(), img_inst.Name))     # <-- TESTING
         try:
             # img_type = owner_doc.GetElement(img_inst.GetTypeId())
             img_inst_id = img_inst.Id.ToString()
             
             if not img_inst_id:
-                print("no img_inst_id")     # <-- TESTING
+                # print("no img_inst_id")     # <-- TESTING
                 continue
             # if not img_type:
                 # continue
@@ -397,9 +397,9 @@ def collect_images_and_pdfs(owner_doc, parent_node_id, depth):
                 depth=depth,
                 parent_id=parent_node_id
             )
-            print("add_node: {}, {}, {}, {}, {}, {}".format(
-                label, sub, kind, depth, parent_node_id, status_str if status_str else source_str
-            ))     # <-- TESTING
+            # print("add_node: {}, {}, {}, {}, {}, {}".format(
+            #     label, sub, kind, depth, parent_node_id, status_str if status_str else source_str
+            # ))     # <-- TESTING
         except:
             pass
 
@@ -505,6 +505,7 @@ def collect_revit_links(owner_doc, parent_node_id, depth):
             instance_name = ""
             try:
                 instance_name = inst.Name
+                instance_Title = link_doc.Title
             except:
                 pass
 
@@ -742,8 +743,8 @@ def build_svg():
         ))
 
         # icon label
-        svg.append('<text x="{0}" y="{1}" font-family="Segoe UI, Arial" font-size="14" font-weight="700" fill="{2}">{3}</text>'.format(
-            x + 21, y + 32, st["icon_stroke"], html_escape(st["icon"])
+        svg.append('<text x="{0}" y="{1}" font-family="Segoe UI, Arial" font-size="14" font-weight="700" text-anchor="middle" fill="{2}">{3}</text>'.format(
+            x + 27, y + 32, st["icon_stroke"], html_escape(st["icon"])
         ))
 
         # main label
@@ -898,7 +899,8 @@ try:
 
     html = build_html()
 
-    out_dir = tempfile.gettempdir()
+    # out_dir = tempfile.gettempdir()
+    out_dir = os.path.join(os.path.expanduser("~"), "Downloads")
     out_name = "Revit_Linked_Items_Graph_{0}.html".format(clean_filename(doc.Title))
     out_path = os.path.join(out_dir, out_name)
 
