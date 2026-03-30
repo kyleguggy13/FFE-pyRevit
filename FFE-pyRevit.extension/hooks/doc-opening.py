@@ -25,9 +25,9 @@ from pyrevit.script import output
 output_window = output.get_output()
 
 doc = revit.doc
-doc_path = doc.PathName or "<Untitled>"
+# doc_path = doc.PathName or "<Untitled>"
 
-doc_title = doc.Title
+# doc_title = doc.Title
 version_build = doc.Application.VersionBuild
 version_number = doc.Application.VersionNumber
 username = doc.Application.Username
@@ -44,8 +44,8 @@ log_file = os.path.join(log_dir, username + "_revit_log.json")
 dataEntry = {
     "datetime": time.strftime("%Y-%m-%d %H:%M:%S"),
     "username": username,
-    "doc_title": doc_title,
-    "doc_path": doc_path,
+    # "doc_title": doc_title,
+    # "doc_path": doc_path,
     "revit_version_number": version_number,
     "revit_build": version_build,
     "action": "document opening"
