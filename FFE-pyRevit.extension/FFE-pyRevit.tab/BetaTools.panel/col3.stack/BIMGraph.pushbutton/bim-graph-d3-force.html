@@ -16,7 +16,9 @@
       background: rgba(20, 25, 35, 0.6);
       padding: 10px 12px;
       border-radius: 12px;
+      -webkit-backdrop-filter: blur(6px);
       backdrop-filter: blur(6px);
+      -webkit-user-select: none;
       user-select: none;
     }
 
@@ -82,6 +84,7 @@
       font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
       box-shadow: 0 10px 30px rgba(0,0,0,.35);
       padding: 12px 12px 10px;
+      -webkit-backdrop-filter: blur(6px);
       backdrop-filter: blur(6px);
       display: none;
       z-index: 10;
@@ -121,7 +124,9 @@
       background: rgba(20, 25, 35, 0.55);
       padding: 8px 10px;
       border-radius: 10px;
+      -webkit-backdrop-filter: blur(6px);
       backdrop-filter: blur(6px);
+      -webkit-user-select: none;
       user-select: none;
     }
   </style>
@@ -131,7 +136,7 @@
     <div id="topbar">
       <div>
         <strong>Load graph JSON:</strong>
-        <input id="file" type="file" accept=".json" />
+        <input id="file" title="Load graph JSON" type="file" accept=".json" />
         <span id="meta"></span>
       </div>
       <div id="filterPanel" style="display: none;">
