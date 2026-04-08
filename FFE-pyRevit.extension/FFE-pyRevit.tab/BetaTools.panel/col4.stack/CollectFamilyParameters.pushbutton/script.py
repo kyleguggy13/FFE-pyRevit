@@ -4,6 +4,8 @@ __version__   = 'Version = v0.1'
 __doc__       = """Version = v0.1
 Date    = 02.19.2026
 ______________________________________________________________
+Tested Revit Versions: 2024
+______________________________________________________________
 Description:
 -> Export all loadable families and their Family Parameters to JSON.
 ______________________________________________________________
