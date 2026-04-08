@@ -524,8 +524,92 @@ for data in DuctNetworkData:
 TableTitle = "Duct Network Elements: {}".format(len(TableRows))
 
 output_window.print_md("---")
-output_window.print_table(table_data=TableRows, columns=ColumnOrder, title=TableTitle)
+# output_window.print_table(table_data=TableRows, columns=ColumnOrder, title=TableTitle)
 
+
+
+
+###############################################
+# OUTPUT DUCT NETWORK SUMMARY TABLE (HTML)
+###############################################
+
+headers = ColumnOrder
+
+TableTitle_Paths = "Duct Network Paths: {}".format(len(TableRows))
+
+
+###############################################
+# OUTPUT DUCT NETWORK PATH TABLE (HTML)
+###############################################
+def tpl_to_red_hex(value):
+    """
+    CD3-11  -> orange
+    """
+    if value == "CD3-11":
+        r = 229
+        g = 141
+        b = 51
+        return "#{:02X}{:02X}{:02X}".format(r, g, b)
+    else:
+        return None
+
+
+html = """
+<style>
+table {
+    border-collapse: collapse;
+    width: 100%;
+}
+th {
+    background: #1f2f3f;
+    color: white;
+    padding: 2px;
+    text-align: left;
+}
+td {
+    border: 1px solid #999;
+    padding: 2px;
+    text-align: left;
+}
+</style>
+<table>
+<tr>
+"""
+
+html += "<caption style='font-size:16px; font-weight:bold; text-align:left'>{}</caption>".format(TableTitle_Paths)
+
+for h in headers:
+    html += "<th style='text-align:left;'>{}</th>".format(h)
+html += "</tr>"
+
+
+
+for elem in TableRows:
+    ASHRAE_Code = elem[6]
+
+    color = tpl_to_red_hex(ASHRAE_Code)
+
+    row = elem
+
+    html += "<tr>"
+    for i, cell in enumerate(row):
+        if headers[i] == "ASHRAE Table" and color!=None:
+            html += (
+                "<td style='background:{}; font-weight:bold;'>"
+                "{}</td>".format(color, cell)
+            )
+        else:
+            html += "<td>{}</td>".format(cell)
+    html += "</tr>"
+
+html += "</table>"
+
+output_window.print_html(html)
+
+
+###############################################
+# OUTPUT DUCT NETWORK SUMMARY TABLE (HTML)
+###############################################
 
 
 
