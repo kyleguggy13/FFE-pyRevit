@@ -43,9 +43,10 @@
                 <Button Grid.Column="0" x:Name="BtnAddParam" Content="Add Parameter" Padding="10,5" Margin="0,0,8,0"/>
 
                 <!-- NEW (3): Modify dropdown (actions incl delete) -->
-                <ComboBox Grid.Column="1" x:Name="CmbModify" Width="170" Height="28" Margin="0,0,8,0" VerticalAlignment="Center">
+                <ComboBox Grid.Column="1" x:Name="CmbModify" Width="200" Height="28" Margin="0,0,8,0" VerticalAlignment="Center">
                     <ComboBoxItem Content="Modify" IsSelected="True"/>
                     <ComboBoxItem Content="Delete Selected Parameters"/>
+                    <ComboBoxItem Content="Delete From All Families"/>
                 </ComboBox>
 
                 <Button Grid.Column="2" x:Name="BtnRefresh" Content="⟳" Width="36" Margin="0,0,12,0"/>
@@ -60,127 +61,150 @@
             </Grid>
         </Border>
 
-        <!-- Main content (tabs removed) -->
-        <Grid Margin="8">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="420"/>
-                <ColumnDefinition Width="12"/>
-                <ColumnDefinition Width="11*"/>
-                <ColumnDefinition Width="53*"/>
-            </Grid.ColumnDefinitions>
+        <!-- Main content -->
+        <TabControl Margin="8">
+            <TabItem Header="Families">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="420"/>
+                        <ColumnDefinition Width="12"/>
+                        <ColumnDefinition Width="11*"/>
+                        <ColumnDefinition Width="53*"/>
+                    </Grid.ColumnDefinitions>
 
-            <!-- LEFT: Families list -->
-            <Border Grid.Column="0" Background="White" BorderBrush="#FFD0D0D0" BorderThickness="1" CornerRadius="10,10,10,10">
-                <DockPanel>
+                    <!-- LEFT: Families list -->
+                    <Border Grid.Column="0" Background="White" BorderBrush="#FFD0D0D0" BorderThickness="1" CornerRadius="10,10,10,10">
+                        <DockPanel>
 
-                    <Border DockPanel.Dock="Top" Background="#FFF8F8F8" BorderBrush="#FF688CAF" BorderThickness="5,5,5,0" CornerRadius="10,10,0,0">
-                        <Grid Height="32">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="Families" VerticalAlignment="Center" Margin="10,0,0,0" FontWeight="SemiBold"/>
-                            <TextBlock Grid.Column="1" x:Name="LblFamiliesCount" Text="0"
-                         VerticalAlignment="Center" Margin="0,0,10,0" Foreground="#FF666666"/>
-                        </Grid>
+                            <Border DockPanel.Dock="Top" Background="#FFF8F8F8" BorderBrush="#FF688CAF" BorderThickness="5,5,5,0" CornerRadius="10,10,0,0">
+                                <Grid Height="32">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="Families" VerticalAlignment="Center" Margin="10,0,0,0" FontWeight="SemiBold"/>
+                                    <TextBlock Grid.Column="1" x:Name="LblFamiliesCount" Text="0"
+                                 VerticalAlignment="Center" Margin="0,0,10,0" Foreground="#FF666666"/>
+                                </Grid>
+                            </Border>
+
+                            <DataGrid x:Name="DgFamilies"
+                            AutoGenerateColumns="False"
+                            CanUserAddRows="False"
+                            SelectionMode="Single"
+                            SelectionUnit="FullRow"
+                            HeadersVisibility="Column"
+                            GridLinesVisibility="Horizontal"
+                            BorderThickness="5,0,5,5"
+                            RowHeaderWidth="0">
+                                <DataGrid.RowStyle>
+                                    <Style TargetType="DataGridRow">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsCheckedFamily}" Value="True">
+                                                <Setter Property="Background" Value="#FFAAFBAA"/>
+                                                <Setter Property="Foreground" Value="Black"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </DataGrid.RowStyle>
+                                <DataGrid.Columns>
+                                    <DataGridCheckBoxColumn Width="30" Binding="{Binding IsCheckedFamily}"/>
+                                    <DataGridTextColumn Header="Family Name" Width="*" Binding="{Binding FamilyName}" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Category Name" Width="160" Binding="{Binding CategoryName}" IsReadOnly="True"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+
+                        </DockPanel>
                     </Border>
 
-                    <DataGrid x:Name="DgFamilies"
-                    AutoGenerateColumns="False"
-                    CanUserAddRows="False"
-                    SelectionMode="Single"
-                    SelectionUnit="FullRow"
-                    HeadersVisibility="Column"
-                    GridLinesVisibility="Horizontal"
-                    BorderThickness="5,0,5,5"
-                    RowHeaderWidth="0">
-                        <DataGrid.RowStyle>
-                            <Style TargetType="DataGridRow">
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsCheckedFamily}" Value="True">
-                                        <Setter Property="Background" Value="#FFAAFBAA"/>
-                                        <Setter Property="Foreground" Value="Black"/>
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </DataGrid.RowStyle>
-                        <DataGrid.Columns>
-                            <DataGridCheckBoxColumn Width="30" Binding="{Binding IsCheckedFamily}"/>
-                            <DataGridTextColumn Header="Family Name" Width="*" Binding="{Binding FamilyName}" IsReadOnly="True"/>
-                            <DataGridTextColumn Header="Category Name" Width="160" Binding="{Binding CategoryName}" IsReadOnly="True"/>
-                        </DataGrid.Columns>
-                    </DataGrid>
+                    <!-- RIGHT: Parameters list -->
+                    <Border Grid.Column="2" Background="White" BorderBrush="#FFD0D0D0" BorderThickness="1" Grid.ColumnSpan="2" CornerRadius="10,10,10,10">
+                        <DockPanel>
 
-                </DockPanel>
-            </Border>
+                            <!-- Filter row -->
+                            <Border DockPanel.Dock="Top" Background="#FFF8F8F8" BorderBrush="#FF688CAF" BorderThickness="5,5,5,1" CornerRadius="10,10,0,0">
+                                <Grid Height="40">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="240"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="160"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
 
-            <!-- RIGHT: Parameters list -->
-            <Border Grid.Column="2" Background="White" BorderBrush="#FFD0D0D0" BorderThickness="1" Grid.ColumnSpan="2" CornerRadius="10,10,10,10">
-                <DockPanel>
+                                    <CheckBox Grid.Column="0" x:Name="ChkAllParams" VerticalAlignment="Center" Margin="10,0,8,0" IsChecked="True"/>
+                                    <TextBox Grid.Column="1" x:Name="TxtParamFilter" Height="26" VerticalContentAlignment="Center"
+                               Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                    <!-- (1) NEW filter dropdown -->
+                                    <ComboBox Grid.Column="2" x:Name="CmbParamTypeFilter" Width="150" Height="26"
+                                Margin="0,0,8,0" VerticalAlignment="Center">
+                                        <ComboBoxItem Content="All" IsSelected="True"/>
+                                        <ComboBoxItem Content="Shared Parameter"/>
+                                        <ComboBoxItem Content="Family Parameter"/>
+                                        <ComboBoxItem Content="Built In Parameter"/>
+                                    </ComboBox>
 
-                    <!-- Filter row -->
-                    <Border DockPanel.Dock="Top" Background="#FFF8F8F8" BorderBrush="#FF688CAF" BorderThickness="5,5,5,1" CornerRadius="10,10,0,0">
-                        <Grid Height="40">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="240"/>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="160"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="3" x:Name="LblSelectedFamily" Text="(no family selected)"
+                                 VerticalAlignment="Center" Foreground="#FF666666"/>
+                                </Grid>
+                            </Border>
 
-                            <CheckBox Grid.Column="0" x:Name="ChkAllParams" VerticalAlignment="Center" Margin="10,0,8,0" IsChecked="True"/>
-                            <TextBox Grid.Column="1" x:Name="TxtParamFilter" Height="26" VerticalContentAlignment="Center"
-                       Margin="0,0,8,0" VerticalAlignment="Center"/>
-                            <!-- (1) NEW filter dropdown -->
-                            <ComboBox Grid.Column="2" x:Name="CmbParamTypeFilter" Width="150" Height="26"
-                        Margin="0,0,8,0" VerticalAlignment="Center">
-                                <ComboBoxItem Content="All" IsSelected="True"/>
-                                <ComboBoxItem Content="Shared Parameter"/>
-                                <ComboBoxItem Content="Family Parameter"/>
-                                <ComboBoxItem Content="Built In Parameter"/>
-                            </ComboBox>
+                            <DataGrid x:Name="DgParams"
+                            AutoGenerateColumns="False"
+                            CanUserAddRows="False"
+                            SelectionMode="Extended"
+                            SelectionUnit="FullRow"
+                            HeadersVisibility="Column"
+                            GridLinesVisibility="Horizontal"
+                            BorderThickness="5,0,5,5"
+                            RowHeaderWidth="0" Background="#FFF0F0F0">
+                                <DataGrid.RowStyle>
+                                    <Style TargetType="DataGridRow">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsCheckedParameter}" Value="True">
+                                                <Setter Property="Background" Value="#FFAAFBAA"/>
+                                                <Setter Property="Foreground" Value="Black"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </DataGrid.RowStyle>
+                                <DataGrid.Columns>
+                                    <DataGridCheckBoxColumn Width="30" Binding="{Binding IsCheckedParameter, UpdateSourceTrigger=PropertyChanged}"/>
+                                    <DataGridTextColumn Header="Parameter Name" Width="240" Binding="{Binding Name}" IsReadOnly="True"/>
+                                    <!-- (2) renamed Discipline -> Parameter Type -->
+                                    <DataGridTextColumn Header="Parameter Type" Width="140" Binding="{Binding ParameterTypeLabel}" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Type of Parameter" Width="200" Binding="{Binding ParamValueType}" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Group Under" Width="170" Binding="{Binding Group}" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Instance/Type" Width="110" Binding="{Binding InstanceTypeLabel}" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Formula" Width="180" Binding="{Binding Formula}" IsReadOnly="True"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
 
-                            <TextBlock Grid.Column="3" x:Name="LblSelectedFamily" Text="(no family selected)"
-                         VerticalAlignment="Center" Foreground="#FF666666"/>
-                        </Grid>
+                        </DockPanel>
                     </Border>
 
-                    <DataGrid x:Name="DgParams"
-                    AutoGenerateColumns="False"
-                    CanUserAddRows="False"
-                    SelectionMode="Extended"
-                    SelectionUnit="FullRow"
-                    HeadersVisibility="Column"
-                    GridLinesVisibility="Horizontal"
-                    BorderThickness="5,0,5,5"
-                    RowHeaderWidth="0" Background="#FFF0F0F0">
-                        <DataGrid.RowStyle>
-                            <Style TargetType="DataGridRow">
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsCheckedParameter}" Value="True">
-                                        <Setter Property="Background" Value="#FFAAFBAA"/>
-                                        <Setter Property="Foreground" Value="Black"/>
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </DataGrid.RowStyle>
-                        <DataGrid.Columns>
-                            <DataGridCheckBoxColumn Width="30" Binding="{Binding IsCheckedParameter, UpdateSourceTrigger=PropertyChanged}"/>
-                            <DataGridTextColumn Header="Parameter Name" Width="240" Binding="{Binding Name}" IsReadOnly="True"/>
-                            <!-- (2) renamed Discipline -> Parameter Type -->
-                            <DataGridTextColumn Header="Parameter Type" Width="140" Binding="{Binding ParameterTypeLabel}" IsReadOnly="True"/>
-                            <DataGridTextColumn Header="Type of Parameter" Width="200" Binding="{Binding ParamValueType}" IsReadOnly="True"/>
-                            <DataGridTextColumn Header="Group Under" Width="170" Binding="{Binding Group}" IsReadOnly="True"/>
-                            <DataGridTextColumn Header="Instance/Type" Width="110" Binding="{Binding InstanceTypeLabel}" IsReadOnly="True"/>
-                            <DataGridTextColumn Header="Formula" Width="180" Binding="{Binding Formula}" IsReadOnly="True"/>
-                        </DataGrid.Columns>
-                    </DataGrid>
-
-                </DockPanel>
-            </Border>
-
-        </Grid>
+                </Grid>
+            </TabItem>
+            <TabItem Header="Master Parameters">
+                <DataGrid x:Name="DgMasterParams"
+                AutoGenerateColumns="False"
+                CanUserAddRows="False"
+                SelectionMode="Single"
+                SelectionUnit="FullRow"
+                HeadersVisibility="Column"
+                GridLinesVisibility="Horizontal"
+                BorderThickness="1"
+                RowHeaderWidth="0"
+                Background="White">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Parameter Name" Width="*" Binding="{Binding Name}" IsReadOnly="True"/>
+                        <DataGridTextColumn Header="Parameter Type" Width="200" Binding="{Binding ParameterTypeLabel}" IsReadOnly="True"/>
+                        <DataGridTextColumn Header="Type of Parameter" Width="200" Binding="{Binding ParamValueType}" IsReadOnly="True"/>
+                        <DataGridTextColumn Header="Family Count" Width="100" Binding="{Binding FamilyCount}" IsReadOnly="True"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </TabItem>
+        </TabControl>
 
         <!-- Bottom bar -->
         <!--<Border DockPanel.Dock="Bottom" Background="#FFF3F3F3" BorderBrush="#FFD0D0D0" BorderThickness="1,0,0,0" Padding="10,8">
