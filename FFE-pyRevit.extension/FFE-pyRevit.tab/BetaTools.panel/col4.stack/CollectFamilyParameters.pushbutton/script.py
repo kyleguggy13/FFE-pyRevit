@@ -54,9 +54,7 @@ output_window = output.get_output()
 
 
 
-# ----------------------------
-# Utilities
-# ----------------------------
+#____________________________________________________________________ UTILITIES
 
 def safe_str(x):
     try:
@@ -113,9 +111,7 @@ def param_type_label(fp):
     return "Family Parameter"
 
 
-# ----------------------------
-# Cache/Log Management
-# ----------------------------
+#____________________________________________________________________ CACHE/LOG MANAGEMENT
 
 def get_family_params_cache_file():
     """Get the path to the family parameters cache file in the temp folder."""
