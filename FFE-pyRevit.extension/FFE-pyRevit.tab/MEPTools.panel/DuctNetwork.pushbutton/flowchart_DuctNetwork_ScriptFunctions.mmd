@@ -1,45 +1,81 @@
 flowchart TD
 
+
     A["User selects duct element
-    start_element"] --> B["get_MEPSystem(element)
+    start_element"]
+
+    B["get_MEPSystem(element)
     input: element
     output: MEPSystem"]
 
-    B --> C["_get_MEPSystem_sections(element)
+    C["_get_MEPSystem_sections(element)
     input: element
     output: system_sections"]
 
-    C --> D["get_MEPSection_elements(section)
+    D["get_MEPSection_elements(section)
     input: section
     output: elements"]
-    C --> E["convertUnits(value, units)
+
+    E["convertUnits(value, units)
     input: value
     output: converted value"]
+
+    F["find_coefficient_schema()
+        output: schema"]
+
+
+    A --> B
+    B --> C
+    C --> D
+    C --> E
+
 
     subgraph System_Data
         B
         C
         D
         E
-        F["find_coefficient_schema()
-        output: schema"]
+        F
     end
 
-    D --> G["get_element_data(element, SystemName)
+
+    G["get_element_data(element, SystemName)
     output: element data dict"]
-    D --> H["get_Mark(element)
+
+    H["get_Mark(element)
     output: mark string"]
-    D --> I["get_MEPSection_PressureDrop(section, element)
+    
+    I["get_MEPSection_PressureDrop(section, element)
     output: pressure drop"]
-    D --> J["get_MEPSection_SegmentLength(section, element)
+
+    J["get_MEPSection_SegmentLength(section, element)
     output: segment length"]
-    D --> K["get_ashrae_code(fitting, schema)
+
+    K["get_ashrae_code(fitting, schema)
     output: ASHRAE code"]
 
-    D --> L["get_connectors_from_element(elem)
+    L["get_connectors_from_element(elem)
     output: connectors"]
-    L --> M["get_connector_properties(connectors)
+
+    M["get_connector_properties(connectors)
     output: connector property list"]
+
+    
+    D --> G
+    D --> H
+    D --> I
+    D --> J
+    D --> K
+    D --> L
+    L --> M
+
+
+    N["DuctNetworkData
+    list of element dictionaries"]
+
+    O["print_table()
+    network summary table"]
+
 
     subgraph Element_Data
         G
@@ -49,11 +85,10 @@ flowchart TD
         K
         L
         M
-        N["DuctNetworkData
-        list of element dictionaries"]
-        O["print_table()
-        network summary table"]
+        N
+        O
     end
+
 
     G --> N
     H --> N
@@ -63,26 +98,47 @@ flowchart TD
     M --> N
     N --> O
 
-    D --> P["eid_key(eid_or_elem)
+
+    P["eid_key(eid_or_elem)
     output: stable element id"]
-    L --> Q["iter_connected_neighbors(element)
+    
+    Q["iter_connected_neighbors(element)
     output: neighbor elements"]
-    Q --> R["_as_flow_dir(direction)
+    
+    R["_as_flow_dir(direction)
     output: normalized direction"]
-    R --> S["pick_upstream_neighbor()
+    
+    S["pick_upstream_neighbor()
     output: next upstream element"]
+
+
+    D --> P
+    L --> Q
+    Q --> R
+    R --> S
+
+
+    T["is_close(x, y)
+    output: boolean"]
+
+    U["find_sum_object(a, b, c)
+    output: matching object"]
+
+    V["element_path_to_section_path_(path)
+    output: debug section path"]
+
+    W["element_path_to_section_path(path)
+    output: section path"]
+
 
     subgraph Path_Logic
         P
-        T["is_close(x, y)
-        output: boolean"]
-        U["find_sum_object(a, b, c)
-        output: matching object"]
-        V["element_path_to_section_path_(path)
-        output: debug section path"]
-        W["element_path_to_section_path(path)
-        output: section path"]
+        T
+        U
+        V
+        W
     end
+
 
     subgraph Pathfinding
         X["Map elements to sections"]
@@ -95,6 +151,7 @@ flowchart TD
         AE["dict_flow_paths_totalpressureloss"]
     end
 
+
     D --> X
     L --> X
     X --> Y
@@ -106,21 +163,35 @@ flowchart TD
     AA --> AB
     AB --> AE
 
+
+    AF["build_unique_edges(paths)
+    output: edges"]
+
+    AG["emit_mermaid(edges)
+    output: mermaid graph"]
+
+
     subgraph Mermaid_Output
-        AF["build_unique_edges(paths)
-        output: edges"]
-        AG["emit_mermaid(edges)
-        output: mermaid graph"]
+        AF
+        AG
     end
 
     AD --> AF
     AF --> AG
 
+
+    AH["tpl_to_red_hex(value)
+    output: color"]
+
+    AI["build HTML results table"]
+
+    AJ["output_window.print_html"]
+
+
     subgraph HTML_Output
-        AH["tpl_to_red_hex(value)
-        output: color"]
-        AI["build HTML results table"]
-        AJ["output_window.print_html"]
+        AH
+        AI
+        AJ
     end
 
     AE --> AH
@@ -129,9 +200,13 @@ flowchart TD
     AH --> AI
     AI --> AJ
 
+
+    AK["log_action(action, status)
+    output: json log"]
+
+
     subgraph Logging
-        AK["log_action(action, status)
-        output: json log"]
+        AK
     end
 
     AJ --> AK
