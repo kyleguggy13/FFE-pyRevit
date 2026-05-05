@@ -1269,6 +1269,8 @@ def ashrae_color(value):
     """Highlight one specific ASHRAE code used by the original script."""
     if value == "CD3-11":
         return "#E58D33"
+    if value == "CD3-14":
+        return "#E58D33"
     return None
 
 
