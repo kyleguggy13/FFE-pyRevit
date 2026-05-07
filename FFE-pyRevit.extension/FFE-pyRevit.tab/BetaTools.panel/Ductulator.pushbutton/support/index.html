@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HVAC Design Tools | Duct Sizer</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="site.js" defer></script>
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <div class="page-shell">
+      <div class="site-header">
+        <div class="site-titlebar">
+          <a class="site-title" href="index.html">HVAC Design Tools</a>
+        </div>
+        <nav class="tool-ribbon" aria-label="Calculator pages">
+          <a class="tool-ribbon__link is-active" href="index.html" aria-current="page">Duct Sizer</a>
+          <!-- <a class="tool-ribbon__link" href="/psych-chart.html">Psychrometric Chart</a>
+          <a class="tool-ribbon__link" href="/chiller-plant-optimizer.html">Pipe Network Failure Analysis</a>
+          <a class="tool-ribbon__link" href="/weather-data.html">Weather Data</a>
+          <a class="tool-ribbon__link" href="/about.html">About</a>
+          <a class="tool-ribbon__link tool-ribbon__link--contact" href="#contact">Contact Us</a> -->
+        </nav>
+      </div>
+
+      <header class="hero">
+        <h1>Duct Size Calculator</h1>
+        <p class="hero-copy">
+          Solve velocity, flow, or pressure drop for round and rectangular ducts using Darcy-Weisbach.
+        </p>
+      </header>
+
+      <nav class="tab-bar" role="tablist">
+        <button class="tab-btn" role="tab" aria-selected="true"  data-tab="calculator">Calculator</button>
+        <button class="tab-btn is-active"           role="tab" aria-selected="false" data-tab="ductulator">Ductulator</button>
+      </nav>
+
+      <!-- ── Calculator tab ──────────────────────────────────────── -->
+      <div id="tab-calculator" class="tab-panel">
+
+        <main class="layout">
+          <section class="panel inputs-panel">
+            <div class="panel-heading">
+              <h2>Inputs</h2>
+              <p>Enter duct geometry and at least one parameter.</p>
+            </div>
+
+            <form id="calculator-form" novalidate>
+              <fieldset class="duct-type">
+                <legend>Duct shape</legend>
+                <label class="type-option">
+                  <input type="radio" name="ductType" value="round" />
+                  <span>Round</span>
+                </label>
+                <label class="type-option">
+                  <input type="radio" name="ductType" value="rectangular" checked />
+                  <span>Rectangular</span>
+                </label>
+              </fieldset>
+
+              <div class="form-grid">
+                <div class="input-group" data-shape="round">
+                  <label for="diameter">Diameter</label>
+                  <div class="field">
+                    <input id="diameter" name="diameter" type="number" min="0" step="0.01" />
+                    <span>in</span>
+                  </div>
+                </div>
+
+                <div class="input-group is-hidden" data-shape="rectangular">
+                  <label for="width">Width</label>
+                  <div class="field">
+                    <input id="width" name="width" type="number" min="0" step="0.01" />
+                    <span>in</span>
+                  </div>
+                </div>
+
+                <div class="input-group is-hidden" data-shape="rectangular">
+                  <label for="height">Height</label>
+                  <div class="field">
+                    <input id="height" name="height" type="number" min="0" step="0.01" />
+                    <span>in</span>
+                  </div>
+                </div>
+
+                <div class="input-group is-hidden" data-shape="rectangular">
+                  <label for="maxAspectRatio">Max aspect ratio</label>
+                  <div class="field">
+                    <input id="maxAspectRatio" name="maxAspectRatio" type="number" min="1" step="0.1" value="4.0" />
+                    <span>: 1</span>
+                  </div>
+                </div>
+
+                <div class="input-group">
+                  <label for="pressureDrop">Pressure drop / 100'</label>
+                  <div class="field">
+                    <input id="pressureDrop" name="pressureDrop" type="number" min="0" step="0.0001" />
+                    <span>in. w.c.</span>
+                  </div>
+                </div>
+
+                <div class="input-group">
+                  <label for="velocity">Velocity</label>
+                  <div class="field">
+                    <input id="velocity" name="velocity" type="number" min="0" step="0.01" />
+                    <span>fpm</span>
+                  </div>
+                </div>
+
+                <div class="input-group">
+                  <label for="flowRate">Flow rate</label>
+                  <div class="field">
+                    <input id="flowRate" name="flowRate" type="number" min="0" step="0.01" />
+                    <span>CFM</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="actions">
+                <button type="button" id="clear-button"   class="button button-ghost">Clear</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="panel results-panel">
+            <div class="panel-heading">
+              <h2>Results</h2>
+              <p>Calculated from the current geometry and operating inputs.</p>
+            </div>
+
+            <div id="status-banner" class="status-banner">
+              Enter geometry and one operating value to solve the remaining fields.
+            </div>
+
+            <div class="result-grid">
+              <article class="result-card">
+                <span class="result-label">Pressure drop</span>
+                <strong id="pressure-result">-</strong>
+                <span class="result-unit">in. w.c. / 100'</span>
+              </article>
+              <article class="result-card">
+                <span class="result-label">Velocity</span>
+                <strong id="velocity-result">-</strong>
+                <span class="result-unit">fpm</span>
+              </article>
+              <article class="result-card">
+                <span class="result-label">Flow rate</span>
+                <strong id="flow-result">-</strong>
+                <span class="result-unit">CFM</span>
+              </article>
+              <article class="result-card accent-card">
+                <span class="result-label">Reynolds number</span>
+                <strong id="reynolds-result">-</strong>
+                <span class="result-unit">dimensionless</span>
+              </article>
+            </div>
+
+            <dl class="details-list">
+              <div><dt>Hydraulic diameter</dt><dd id="hydraulic-result">-</dd></div>
+              <div><dt>Duct area</dt>          <dd id="area-result">-</dd></div>
+              <div><dt>Darcy friction factor</dt><dd id="friction-result">-</dd></div>
+              <div><dt>Solve path</dt>         <dd id="solve-path-result">-</dd></div>
+            </dl>
+          </section>
+        </main>
+
+        <section class="panel notes-panel">
+          <div class="panel-heading">
+            <h2>Assumptions</h2>
+          </div>
+          <div class="notes-grid">
+            <article>
+              <h3>Darcy-Weisbach</h3>
+              <p>Pressure drop is computed over 100' using Darcy-Weisbach with a laminar branch and a Colebrook friction factor for galvanized steel in transitional and turbulent flow.</p>
+            </article>
+            <article>
+              <h3>Rectangular duct</h3>
+              <p>Hydraulic diameter <code>Dh = 2WH / (W + H)</code>.</p>
+            </article>
+            <article>
+              <h3>Air and duct properties</h3>
+              <p>Standard air at ~70&thinsp;°F with density 1.204&thinsp;kg/m³, viscosity 1.81&times;10⁻⁵&thinsp;Pa·s, and galvanized steel roughness of 0.15&thinsp;mm.</p>
+            </article>
+          </div>
+        </section>
+
+      </div><!-- /tab-calculator -->
+
+      <!-- ── Ductulator tab ───────────────────────────────────────── -->
+      <div id="tab-ductulator" class="tab-panel is-active">
+
+        <section class="panel grid-panel">
+          <div class="panel-heading">
+            <h2>Ductulator</h2>
+            <p>Generate a sizing table for a given airflow. Set a target to highlight the best fit with a heat map.</p>
+          </div>
+
+          <div id="revit-bridge-panel" class="revit-bridge-panel" hidden>
+            <div class="revit-bridge-panel__header">
+              <div>
+                <div class="revit-bridge-panel__label">Revit duct</div>
+                <div id="revit-duct-summary" class="revit-bridge-panel__summary">No Revit duct loaded.</div>
+              </div>
+              <button type="button" id="revit-apply-button" class="button button-primary" disabled>Apply to Revit</button>
+            </div>
+            <div id="revit-selection-summary" class="revit-bridge-panel__selection">
+              Select a generated same-shape size to apply it to the Revit duct.
+            </div>
+            <div id="revit-status-banner" class="status-banner">
+              Waiting for Revit duct data.
+            </div>
+          </div>
+
+          <form id="grid-form" novalidate>
+            <div class="grid-controls">
+              <fieldset class="duct-type">
+                <legend>Duct shape</legend>
+                <label class="type-option">
+                  <input type="radio" name="gridDuctType" value="round" />
+                  <span>Round</span>
+                </label>
+                <label class="type-option">
+                  <input type="radio" name="gridDuctType" value="rectangular" checked />
+                  <span>Rectangular</span>
+                </label>
+              </fieldset>
+
+              <fieldset class="duct-type">
+                <legend>Primary metric</legend>
+                <label class="type-option">
+                  <input type="radio" name="gridMetric" value="velocity" />
+                  <span>Velocity</span>
+                </label>
+                <label class="type-option">
+                  <input type="radio" name="gridMetric" value="pressure_drop" checked />
+                  <span>Pressure drop</span>
+                </label>
+              </fieldset>
+            </div>
+
+            <div class="form-grid">
+              <div class="input-group">
+                <label for="gridFlowRate">Flow rate</label>
+                <div class="field">
+                  <input id="gridFlowRate" name="gridFlowRate" type="number" min="0" step="0.01" />
+                  <span>CFM</span>
+                </div>
+              </div>
+
+              <div class="input-group">
+                <label for="gridMaxDuctSize">Max duct size</label>
+                <div class="field">
+                  <input id="gridMaxDuctSize" name="gridMaxDuctSize" type="number" min="0" step="1" value="500" />
+                  <span>in</span>
+                </div>
+              </div>
+
+              <div class="input-group">
+                <label for="gridMinValue" id="gridMinLabel">Min velocity</label>
+                <div class="field">
+                  <input id="gridMinValue" name="gridMinValue" type="number" min="0" step="0.01" />
+                  <span id="gridMinUnit">fpm</span>
+                </div>
+              </div>
+
+              <div class="input-group">
+                <label for="gridMaxValue" id="gridMaxLabel">Max velocity</label>
+                <div class="field">
+                  <input id="gridMaxValue" name="gridMaxValue" type="number" min="0" step="0.01" />
+                  <span id="gridMaxUnit">fpm</span>
+                </div>
+              </div>
+
+              <div class="input-group">
+                <label for="gridTargetValue" id="gridTargetLabel">Target velocity</label>
+                <div class="field">
+                  <input id="gridTargetValue" name="gridTargetValue" type="number" min="0" step="0.01" />
+                  <span id="gridTargetUnit">fpm</span>
+                </div>
+              </div>
+
+              <div class="input-group" id="gridAspectRatioGroup" style="display:none">
+                <label for="gridMaxAspectRatio">Max aspect ratio</label>
+                <div class="field">
+                  <input id="gridMaxAspectRatio" name="gridMaxAspectRatio" type="number" min="1" step="0.1" value="4.0" />
+                  <span>: 1</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="actions">
+              <button type="button" id="grid-generate-button" class="button button-primary">Generate Grid</button>
+              <button type="button" id="grid-clear-button"    class="button button-ghost">Clear</button>
+            </div>
+          </form>
+
+          <div id="grid-status-banner" class="status-banner" style="margin-top:0.7rem">
+            Enter a flow rate and bounds above, then click Generate Grid.
+          </div>
+
+          <div id="grid-result-container" class="grid-result-container"></div>
+
+          <div id="grid-export-bar" class="grid-export-bar" style="display:none">
+            <button type="button" id="export-csv-button"   class="button button-ghost">↓ Export CSV</button>
+            <button type="button" id="export-image-button" class="button button-ghost">↓ Export Image</button>
+          </div>
+        </section>
+
+      </div><!-- /tab-ductulator -->
+
+      <!-- <footer class="liability-footer">
+        <p>
+          <strong>Disclaimer:</strong> These calculators are for informational and reference purposes only and are
+          not a substitute for professional engineering judgment. All outputs must be independently verified by a
+          qualified licensed engineer before use in any design, specification, procurement, or construction activity.
+          No warranty of accuracy or fitness for a particular purpose is made or implied. By using this site you
+          agree that the site owner accepts no liability for any direct, indirect, incidental, or consequential
+          damages arising from use of or reliance on any calculation result. &mdash;
+          <a href="/about.html">Full Terms &amp; Conditions</a>
+        </p>
+      </footer> -->
+
+    </div><!-- /page-shell -->
+
+    <script>
+      // Tab switching
+      document.querySelectorAll(".tab-btn").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          document.querySelectorAll(".tab-btn").forEach(function (b) {
+            b.classList.remove("is-active");
+            b.setAttribute("aria-selected", "false");
+          });
+          document.querySelectorAll(".tab-panel").forEach(function (p) {
+            p.classList.remove("is-active");
+          });
+          btn.classList.add("is-active");
+          btn.setAttribute("aria-selected", "true");
+          document.getElementById("tab-" + btn.dataset.tab).classList.add("is-active");
+        });
+      });
+    </script>
+  </body>
+</html>
