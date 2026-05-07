@@ -32,8 +32,8 @@ clr.AddReference("PresentationFramework")
 clr.AddReference("WindowsBase")
 
 from System import Uri
-from System.Windows import ResizeMode, Window, WindowStartupLocation
-from System.Windows.Controls import Grid
+from System.Windows import ResizeMode, Thickness, Visibility, Window, WindowStartupLocation
+from System.Windows.Controls import Grid, TextBlock
 
 
 # ____________________________________________________________________ IMPORTS (AUTODESK)
@@ -113,8 +113,8 @@ def get_revit_install_dir():
     return os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "Autodesk", "Revit {0}".format(version))
 
 
-def load_webview2_control():
-    """Load Revit's bundled WebView2 assemblies and return the WPF control type."""
+def load_webview2_types():
+    """Load Revit's bundled WebView2 assemblies and return the WPF control types."""
     revit_dir = get_revit_install_dir()
     dll_paths = [
         os.path.join(revit_dir, "Microsoft.Web.WebView2.Core.dll"),
@@ -133,8 +133,8 @@ def load_webview2_control():
     if revit_dir not in path_parts:
         os.environ["PATH"] = revit_dir + os.pathsep + os.environ.get("PATH", "")
 
-    from Microsoft.Web.WebView2.Wpf import WebView2
-    return WebView2
+    from Microsoft.Web.WebView2.Wpf import CoreWebView2CreationProperties, WebView2
+    return WebView2, CoreWebView2CreationProperties
 
 
 def json_dumps(value):
@@ -142,7 +142,19 @@ def json_dumps(value):
 
 
 def make_file_uri(path):
-    return Uri(os.path.abspath(path))
+    absolute_path = os.path.abspath(path).replace("\\", "/")
+    return Uri("file:///" + absolute_path.replace(" ", "%20"))
+
+
+def get_webview_user_data_folder():
+    base_folder = os.environ.get("LOCALAPPDATA")
+    if not base_folder:
+        base_folder = os.path.join(os.path.expanduser("~"), "AppData", "Local")
+
+    user_data_folder = os.path.join(base_folder, "FFE-pyRevit", "DuctulatorWebView2")
+    if not os.path.exists(user_data_folder):
+        os.makedirs(user_data_folder)
+    return user_data_folder
 
 
 # ____________________________________________________________________ REVIT DATA HELPERS
@@ -506,13 +518,14 @@ class DuctResizeHandler(IExternalEventHandler):
 
 # ____________________________________________________________________ WEBVIEW WINDOW
 class DuctulatorWindow(Window):
-    def __init__(self, webview_type, duct_data, resize_handler, resize_event):
+    def __init__(self, webview_type, creation_properties_type, duct_data, resize_handler, resize_event):
         Window.__init__(self)
 
         self.duct_data = duct_data
         self.resize_handler = resize_handler
         self.resize_event = resize_event
         self.has_sent_initial_data = False
+        self.index_uri = make_file_uri(PATH_INDEX)
 
         self.Title = "Ductulator - {0}".format(duct_data.get("displayName") or duct_data.get("elementId"))
         self.Width = 1320
@@ -523,32 +536,63 @@ class DuctulatorWindow(Window):
         self.ResizeMode = ResizeMode.CanResize
 
         self.browser = webview_type()
+        self.status_text = TextBlock()
+        self.status_text.Margin = Thickness(18)
+        self.status_text.Text = "Initializing Ductulator WebView2..."
+
+        try:
+            creation_properties = creation_properties_type()
+            creation_properties.UserDataFolder = get_webview_user_data_folder()
+            self.browser.CreationProperties = creation_properties
+        except Exception as exc:
+            self.status_text.Text = "Could not configure WebView2 user data folder:\n{0}".format(exc)
 
         content_grid = Grid()
         content_grid.Children.Add(self.browser)
+        content_grid.Children.Add(self.status_text)
         self.Content = content_grid
 
+        self.Loaded += self.on_loaded
         self.Closed += self.on_closed
         self.browser.CoreWebView2InitializationCompleted += self.on_core_webview2_initialized
         self.browser.NavigationCompleted += self.on_navigation_completed
 
+    def on_loaded(self, sender, args):
+        self.status_text.Visibility = Visibility.Visible
+        self.status_text.Text = "Loading Ductulator from:\n{0}".format(self.index_uri.AbsoluteUri)
         try:
-            self.browser.Source = make_file_uri(PATH_INDEX)
+            self.browser.EnsureCoreWebView2Async()
         except Exception as exc:
-            forms.alert(
-                "Could not load the Ductulator web app:\n{0}".format(exc),
-                title="Ductulator",
-                exitscript=True
-            )
+            self.status_text.Text = "Could not initialize WebView2:\n{0}".format(exc)
 
     def on_core_webview2_initialized(self, sender, args):
         try:
             if args.IsSuccess:
                 self.browser.CoreWebView2.WebMessageReceived += self.on_web_message_received
+                self.browser.CoreWebView2.Navigate(self.index_uri.AbsoluteUri)
+            else:
+                message = "WebView2 initialization failed."
+                try:
+                    message = "{0}\n{1}".format(message, args.InitializationException.Message)
+                except:
+                    pass
+                self.status_text.Text = message
+        except:
+            self.status_text.Text = "WebView2 initialized but navigation failed:\n{0}".format(traceback.format_exc())
+
+    def on_navigation_completed(self, sender, args):
+        try:
+            if not args.IsSuccess:
+                self.status_text.Visibility = Visibility.Visible
+                self.status_text.Text = "Ductulator navigation failed.\nURI: {0}\nWeb error: {1}".format(
+                    self.index_uri.AbsoluteUri,
+                    safe_str(args.WebErrorStatus)
+                )
+                return
         except:
             pass
 
-    def on_navigation_completed(self, sender, args):
+        self.status_text.Visibility = Visibility.Collapsed
         self.send_initial_data()
 
     def on_closed(self, sender, args):
@@ -648,7 +692,7 @@ except Exception as data_error:
     forms.alert(safe_str(data_error), title="Ductulator", exitscript=True)
 
 try:
-    WebView2 = load_webview2_control()
+    WebView2, CoreWebView2CreationProperties = load_webview2_types()
 except Exception as webview_error:
     forms.alert(
         "Could not load WebView2 from the Revit installation.\n\n{0}".format(webview_error),
@@ -658,7 +702,7 @@ except Exception as webview_error:
 
 resize_handler = DuctResizeHandler(duct)
 resize_event = ExternalEvent.Create(resize_handler)
-window = DuctulatorWindow(WebView2, initial_duct_data, resize_handler, resize_event)
+window = DuctulatorWindow(WebView2, CoreWebView2CreationProperties, initial_duct_data, resize_handler, resize_event)
 resize_handler.window = window
 WINDOW_REFS.append(window)
 window.Show()

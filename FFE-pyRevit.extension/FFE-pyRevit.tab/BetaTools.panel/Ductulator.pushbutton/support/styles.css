@@ -1243,6 +1243,10 @@ body.has-chart-modal {
   background: rgba(59, 130, 246, 0.16);
 }
 
+.solution-cell.is-revit-original {
+  box-shadow: inset 0 0 0 2px var(--ink);
+}
+
 .solution-cell.is-revit-selected {
   box-shadow: inset 0 0 0 2px var(--accent-dark);
 }

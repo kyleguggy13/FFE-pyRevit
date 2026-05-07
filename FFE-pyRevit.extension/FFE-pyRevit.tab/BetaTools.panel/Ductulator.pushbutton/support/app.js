@@ -175,6 +175,60 @@
     updateRevitApplyUi();
   }
 
+  function isSameDuctSize(candidate, duct) {
+    if (!candidate || !duct || candidate.shape !== duct.shape) {
+      return false;
+    }
+
+    if (candidate.shape === "round") {
+      return Math.abs(Number(candidate.diameterIn) - Number(duct.diameterIn)) <= 0.01;
+    }
+
+    return (
+      Math.abs(Number(candidate.widthIn) - Number(duct.widthIn)) <= 0.01 &&
+      Math.abs(Number(candidate.heightIn) - Number(duct.heightIn)) <= 0.01
+    );
+  }
+
+  function readSizeFromOptionElement(element) {
+    if (!element || !element.dataset || !element.dataset.shape) {
+      return null;
+    }
+
+    if (element.dataset.shape === "round") {
+      return {
+        shape: "round",
+        diameterIn: Number(element.dataset.diameterIn)
+      };
+    }
+
+    return {
+      shape: "rectangular",
+      widthIn: Number(element.dataset.widthIn),
+      heightIn: Number(element.dataset.heightIn)
+    };
+  }
+
+  function highlightOriginalRevitSize() {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    document.querySelectorAll(".is-revit-original").forEach(function (element) {
+      element.classList.remove("is-revit-original");
+    });
+
+    if (!revitBridge.duct) {
+      return;
+    }
+
+    document.querySelectorAll("[data-revit-size-option='true']").forEach(function (element) {
+      if (isSameDuctSize(readSizeFromOptionElement(element), revitBridge.duct)) {
+        element.classList.add("is-revit-original");
+      }
+    });
+  }
+
   function selectRevitSize(size, element) {
     if (!revitBridge.duct) {
       setRevitStatus("warning", "This size is selected, but no Revit duct is loaded.");
@@ -320,6 +374,7 @@
     loadDuctIntoCalculator(duct);
     loadDuctIntoGrid(duct);
     clearRevitSelection();
+    highlightOriginalRevitSize();
     activateTab("ductulator");
     setRevitStatus("ready", "Loaded Revit duct: " + describeRevitDuct(duct));
   }
@@ -931,7 +986,16 @@
       ["diameterIn", "areaSqFt", "velocity", "pressureDrop", "reynolds", "frictionFactor"].forEach(function (key, i) {
         var td = document.createElement("td");
         td.className = "num";
-        if (i === 0) { td.textContent = row.diameterIn; }
+        if (i === 0) {
+          td.textContent = row.diameterIn;
+          td.className = "num solution-cell";
+          td.dataset.revitSizeOption = "true";
+          td.dataset.shape = "round";
+          td.dataset.diameterIn = row.diameterIn;
+          if (isSameDuctSize({ shape: "round", diameterIn: row.diameterIn }, revitBridge.duct)) {
+            td.classList.add("is-revit-original");
+          }
+        }
         else if (i === 1) { td.textContent = formatArea(row.areaSqFt); }
         else if (i === 2) {
           td.textContent = formatVelocity(row.velocity);
@@ -1015,6 +1079,13 @@
             td.style.fontWeight = "700";
           }
           td.className = "num solution-cell";
+          td.dataset.revitSizeOption = "true";
+          td.dataset.shape = "rectangular";
+          td.dataset.widthIn = w;
+          td.dataset.heightIn = h;
+          if (isSameDuctSize({ shape: "rectangular", widthIn: w, heightIn: h }, revitBridge.duct)) {
+            td.classList.add("is-revit-original");
+          }
           td.tabIndex = 0;
           td.setAttribute("role", "button");
           td.setAttribute("aria-label", "Select " + w + " by " + h + " inch rectangular duct");
