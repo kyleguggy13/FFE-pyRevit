@@ -15,6 +15,7 @@ ______________________________________________________________
 Last update:
 - [07.08.2025] - v0.1 BETA RELEASE
 - [05.07.2026] - v0.2 WEBVIEW2 REVIT MVP
+- [05.11.2026] - v0.3 ENABLED OPENING WITHOUT SELECTION, BETTER ERROR HANDLING, LOGGING, AND CODE REFACTORING
 
 ______________________________________________________________
 Author: Kyle Guggenheim"""
