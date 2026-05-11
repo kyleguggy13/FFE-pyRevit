@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 __title__     = "Ductulator"
-__version__   = "Version = v0.2"
+__version__   = "Version = v1.0"
 __persistentengine__ = True
-__doc__       = """Version = v0.2
-Date    = 05.07.2026
+__doc__       = """Version = v1.0
+Date    = 05.11.2026
 ______________________________________________________________
 Description:
 -> Opens the local ductulator web app inside Revit, prefilled from
@@ -16,7 +16,7 @@ Last update:
 - [07.08.2025] - v0.1 BETA RELEASE
 - [05.07.2026] - v0.2 WEBVIEW2 REVIT MVP
 - [05.11.2026] - v0.3 ENABLED OPENING WITHOUT SELECTION, BETTER ERROR HANDLING, LOGGING, AND CODE REFACTORING
-
+- [05.11.2026] - v1.0 FINALIZED MVP RELEASE
 ______________________________________________________________
 Author: Kyle Guggenheim"""
 
