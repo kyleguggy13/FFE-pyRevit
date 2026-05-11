@@ -16,7 +16,9 @@
     available: false,
     duct: null,
     selectedSize: null,
-    pendingDuct: null
+    pendingDuct: null,
+    hasPendingDuct: false,
+    selectionPending: false
   };
 
   function isFiniteNumber(value) {
@@ -148,6 +150,7 @@
 
     var selectionSummary = document.querySelector("#revit-selection-summary");
     var applyButton = document.querySelector("#revit-apply-button");
+    var selectButton = document.querySelector("#revit-select-button");
     var selectedSize = revitBridge.selectedSize;
     var duct = revitBridge.duct;
     var hasSameShapeSelection = Boolean(
@@ -162,6 +165,10 @@
 
     if (applyButton) {
       applyButton.disabled = !hasSameShapeSelection;
+    }
+
+    if (selectButton) {
+      selectButton.disabled = revitBridge.selectionPending;
     }
   }
 
@@ -279,6 +286,19 @@
     });
   }
 
+  function requestRevitDuctSelection() {
+    showRevitPanel();
+    revitBridge.available = true;
+    revitBridge.selectionPending = true;
+    updateRevitApplyUi();
+    setRevitStatus("warning", "Select one rigid duct in Revit...");
+
+    if (!postRevitMessage({ type: "selectDuct" })) {
+      revitBridge.selectionPending = false;
+      updateRevitApplyUi();
+    }
+  }
+
   function writeFieldValue(form, selector, value, digits) {
     var field = form ? form.querySelector(selector) : null;
     if (!field) {
@@ -361,27 +381,39 @@
 
   function loadRevitDuct(duct) {
     revitBridge.available = true;
-    revitBridge.duct = duct;
+    revitBridge.selectionPending = false;
+    revitBridge.duct = duct || null;
     revitBridge.selectedSize = null;
 
     if (typeof document === "undefined" || document.readyState === "loading") {
-      revitBridge.pendingDuct = duct;
+      revitBridge.pendingDuct = duct || null;
+      revitBridge.hasPendingDuct = true;
       return;
     }
 
     showRevitPanel();
     renderRevitDuctSummary();
-    loadDuctIntoCalculator(duct);
-    loadDuctIntoGrid(duct);
+    if (duct) {
+      loadDuctIntoCalculator(duct);
+      loadDuctIntoGrid(duct);
+    }
     clearRevitSelection();
     highlightOriginalRevitSize();
     activateTab("ductulator");
-    setRevitStatus("ready", "Loaded Revit duct: " + describeRevitDuct(duct));
+    if (duct) {
+      setRevitStatus("ready", "Loaded Revit duct: " + describeRevitDuct(duct));
+    } else {
+      setRevitStatus("idle", "No Revit duct loaded. Click Select Duct to choose one.");
+    }
   }
 
   function handleResizeResult(result) {
+    revitBridge.selectionPending = false;
+
     if (result && result.duct) {
       loadRevitDuct(result.duct);
+    } else {
+      updateRevitApplyUi();
     }
 
     if (result) {
@@ -390,9 +422,10 @@
   }
 
   function flushPendingRevitDuct() {
-    if (revitBridge.pendingDuct) {
+    if (revitBridge.hasPendingDuct) {
       var pendingDuct = revitBridge.pendingDuct;
       revitBridge.pendingDuct = null;
+      revitBridge.hasPendingDuct = false;
       loadRevitDuct(pendingDuct);
     }
   }
@@ -1545,6 +1578,11 @@
       revitApplyButton.addEventListener("click", applySelectedRevitSize);
     }
 
+    var revitSelectButton = document.querySelector("#revit-select-button");
+    if (revitSelectButton) {
+      revitSelectButton.addEventListener("click", requestRevitDuctSelection);
+    }
+
     updateLabels();
     updateRevitApplyUi();
   }
@@ -1568,6 +1606,7 @@
     globalScope.ffeRevit = {
       loadDuct: loadRevitDuct,
       setStatus: setRevitStatus,
+      handleBridgeResult: handleResizeResult,
       handleResizeResult
     };
   }

@@ -202,7 +202,10 @@
                 <div class="revit-bridge-panel__label">Revit duct</div>
                 <div id="revit-duct-summary" class="revit-bridge-panel__summary">No Revit duct loaded.</div>
               </div>
-              <button type="button" id="revit-apply-button" class="button button-primary" disabled>Apply to Revit</button>
+              <div class="revit-bridge-panel__actions">
+                <button type="button" id="revit-select-button" class="button button-ghost">Select Duct</button>
+                <button type="button" id="revit-apply-button" class="button button-primary" disabled>Apply to Revit</button>
+              </div>
             </div>
             <div id="revit-selection-summary" class="revit-bridge-panel__selection">
               Select a generated same-shape size to apply it to the Revit duct.

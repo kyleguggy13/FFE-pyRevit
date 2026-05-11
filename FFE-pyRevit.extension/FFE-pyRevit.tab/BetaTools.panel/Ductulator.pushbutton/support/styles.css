@@ -639,6 +639,14 @@ code { font-family: "SFMono-Regular", "Consolas", monospace; font-size: 0.95em; 
   gap: 0.8rem;
 }
 
+.revit-bridge-panel__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
 .revit-bridge-panel__label {
   color: var(--accent-dark);
   font-size: 0.72rem;
@@ -1988,6 +1996,11 @@ body.has-chart-modal {
   .revit-bridge-panel__header {
     align-items: stretch;
     flex-direction: column;
+  }
+  .revit-bridge-panel__actions {
+    align-items: stretch;
+    flex-direction: column;
+    width: 100%;
   }
   .revit-bridge-panel__header .button {
     width: 100%;

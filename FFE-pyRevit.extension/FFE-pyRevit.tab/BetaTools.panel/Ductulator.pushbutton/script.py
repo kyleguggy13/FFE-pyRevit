@@ -369,25 +369,35 @@ class DuctSelectionFilter(ISelectionFilter):
 
 
 def pick_duct():
-    try:
-        picked_ref = selection.PickObject(
-            ObjectType.Element,
-            DuctSelectionFilter(),
-            "Select one rigid duct to size."
-        )
-    except OperationCanceledException:
-        script.exit()
-    except:
-        script.exit()
-
+    picked_ref = selection.PickObject(
+        ObjectType.Element,
+        DuctSelectionFilter(),
+        "Select one rigid duct to size."
+    )
     element = doc.GetElement(picked_ref.ElementId)
     if not is_duct_curve_element(element):
-        forms.alert(
-            "Select a rigid duct. Flex ducts, fittings, accessories, and equipment are not supported yet.",
-            title="Ductulator",
-            exitscript=True
-        )
+        raise Exception("Select a rigid duct. Flex ducts, fittings, accessories, and equipment are not supported yet.")
     return element
+
+
+def get_preselected_duct():
+    try:
+        selected_ids = list(selection.GetElementIds())
+    except:
+        return None
+
+    if len(selected_ids) != 1:
+        return None
+
+    try:
+        element = doc.GetElement(selected_ids[0])
+    except:
+        return None
+
+    if is_duct_curve_element(element):
+        return element
+
+    return None
 
 
 def ensure_writable_parameter(element, built_in_parameter, label):
@@ -478,39 +488,87 @@ class DuctResizeHandler(IExternalEventHandler):
     def __init__(self, duct):
         self.duct = duct
         self.window = None
+        self.pending_action = None
         self.pending_payload = None
 
     def GetName(self):
-        return "FFE Ductulator Resize"
+        return "FFE Ductulator Revit Bridge"
+
+    def queue_select(self):
+        self.pending_action = "select"
+        self.pending_payload = None
 
     def queue_resize(self, payload):
+        self.pending_action = "resize"
         self.pending_payload = payload
 
+    def clear_pending(self):
+        self.pending_action = None
+        self.pending_payload = None
+
     def Execute(self, uiapp):
+        action = self.pending_action
         payload = self.pending_payload
+        self.pending_action = None
         self.pending_payload = None
 
         result = {
             "status": "error",
-            "message": "No resize request was queued.",
+            "message": "No Revit action was queued.",
         }
 
-        try:
-            message = apply_duct_size(self.duct, payload)
-            result = {
-                "status": "ready",
-                "message": message,
-                "duct": read_duct_data(self.duct),
-            }
-        except Exception as exc:
-            result = {
-                "status": "error",
-                "message": safe_str(exc) or "Revit could not apply the selected duct size.",
-            }
+        if action == "select":
             try:
-                LOGGER.debug(traceback.format_exc())
-            except:
-                pass
+                duct = pick_duct()
+                duct_data = read_duct_data(duct)
+                self.duct = duct
+                result = {
+                    "status": "ready",
+                    "message": "Loaded Revit duct: {0}".format(duct_data.get("displayName") or duct_data.get("elementId")),
+                    "duct": duct_data,
+                }
+            except OperationCanceledException:
+                result = {
+                    "status": "warning",
+                    "message": "Duct selection canceled.",
+                }
+            except Exception as exc:
+                result = {
+                    "status": "error",
+                    "message": safe_str(exc) or "Revit could not load the selected duct.",
+                }
+                try:
+                    LOGGER.debug(traceback.format_exc())
+                except:
+                    pass
+
+        elif action == "resize":
+            try:
+                if self.duct is None:
+                    raise Exception("No Revit duct is loaded. Click Select Duct first.")
+
+                message = apply_duct_size(self.duct, payload)
+                duct_data = read_duct_data(self.duct)
+                result = {
+                    "status": "ready",
+                    "message": message,
+                    "duct": duct_data,
+                }
+            except Exception as exc:
+                result = {
+                    "status": "error",
+                    "message": safe_str(exc) or "Revit could not apply the selected duct size.",
+                }
+                try:
+                    LOGGER.debug(traceback.format_exc())
+                except:
+                    pass
+
+        try:
+            if self.window is not None and result.get("duct"):
+                self.window.set_duct_data(result.get("duct"))
+        except:
+            pass
 
         if self.window is not None:
             self.window.send_resize_result(result)
@@ -518,16 +576,17 @@ class DuctResizeHandler(IExternalEventHandler):
 
 # ____________________________________________________________________ WEBVIEW WINDOW
 class DuctulatorWindow(Window):
-    def __init__(self, webview_type, creation_properties_type, duct_data, resize_handler, resize_event):
+    def __init__(self, webview_type, creation_properties_type, duct_data, initial_status, resize_handler, resize_event):
         Window.__init__(self)
 
         self.duct_data = duct_data
+        self.initial_status = initial_status
         self.resize_handler = resize_handler
         self.resize_event = resize_event
         self.has_sent_initial_data = False
         self.index_uri = make_file_uri(PATH_INDEX)
 
-        self.Title = "Ductulator - {0}".format(duct_data.get("displayName") or duct_data.get("elementId"))
+        self.Title = self.get_window_title(duct_data)
         self.Width = 1320
         self.Height = 860
         self.MinWidth = 980
@@ -625,11 +684,24 @@ class DuctulatorWindow(Window):
         )
         self.execute_script(script_text)
 
+    def get_window_title(self, duct_data):
+        if duct_data:
+            label = duct_data.get("displayName") or duct_data.get("elementId")
+            if label:
+                return "Ductulator - {0}".format(label)
+        return "Ductulator"
+
+    def set_duct_data(self, duct_data):
+        self.duct_data = duct_data
+        self.Title = self.get_window_title(duct_data)
+
     def send_initial_data(self):
         if self.has_sent_initial_data:
             return
         self.has_sent_initial_data = True
         self.call_revit_api("loadDuct", self.duct_data)
+        if self.initial_status:
+            self.call_revit_api("setStatus", self.initial_status)
 
     def send_resize_result(self, result):
         self.call_revit_api("handleResizeResult", result)
@@ -663,6 +735,20 @@ class DuctulatorWindow(Window):
             self.send_initial_data()
             return
 
+        if message_type == "selectDuct":
+            self.resize_handler.queue_select()
+            self.send_status("warning", "Select one rigid duct in Revit...")
+
+            try:
+                self.resize_event.Raise()
+            except Exception as exc:
+                self.resize_handler.clear_pending()
+                self.send_resize_result({
+                    "status": "error",
+                    "message": "Could not raise the Revit selection event: {0}".format(exc),
+                })
+            return
+
         if message_type != "applyDuctSize":
             return
 
@@ -673,7 +759,11 @@ class DuctulatorWindow(Window):
         try:
             self.resize_event.Raise()
         except Exception as exc:
-            self.send_status("error", "Could not raise the Revit resize event: {0}".format(exc))
+            self.resize_handler.clear_pending()
+            self.send_resize_result({
+                "status": "error",
+                "message": "Could not raise the Revit resize event: {0}".format(exc),
+            })
 
 
 # ____________________________________________________________________ MAIN
@@ -684,12 +774,19 @@ if not os.path.exists(PATH_INDEX):
         exitscript=True
     )
 
-duct = pick_duct()
+duct = get_preselected_duct()
+initial_duct_data = None
+initial_status = None
 
-try:
-    initial_duct_data = read_duct_data(duct)
-except Exception as data_error:
-    forms.alert(safe_str(data_error), title="Ductulator", exitscript=True)
+if duct is not None:
+    try:
+        initial_duct_data = read_duct_data(duct)
+    except Exception as data_error:
+        duct = None
+        initial_status = {
+            "status": "warning",
+            "message": safe_str(data_error) or "The selected duct could not be loaded.",
+        }
 
 try:
     WebView2, CoreWebView2CreationProperties = load_webview2_types()
@@ -702,7 +799,14 @@ except Exception as webview_error:
 
 resize_handler = DuctResizeHandler(duct)
 resize_event = ExternalEvent.Create(resize_handler)
-window = DuctulatorWindow(WebView2, CoreWebView2CreationProperties, initial_duct_data, resize_handler, resize_event)
+window = DuctulatorWindow(
+    WebView2,
+    CoreWebView2CreationProperties,
+    initial_duct_data,
+    initial_status,
+    resize_handler,
+    resize_event
+)
 resize_handler.window = window
 WINDOW_REFS.append(window)
 window.Show()
