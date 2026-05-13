@@ -307,7 +307,7 @@ if __name__ == '__main__':
 
 log_status = "Success"
 #______________________________________________________ LOG ACTION
-# action = "Project Info Comparison"
+# action = "Transfer View Templates"
 def log_action(action, log_status):
     """Log action to user JSON log file."""
     import os, json, time
