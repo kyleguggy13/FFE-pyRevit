@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FFE-pyRevit About</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="site.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="titlebar">
+        <a class="brand-link" href="https://acc.autodesk.com/home">
+          <img class="brand-mark" src="../icon.png" alt="" />
+          <span>FFE-pyRevit</span>
+        </a>
+        <button id="close-window" class="close-button" type="button">Close</button>
+      </header>
+
+      <main class="content-grid">
+        <section class="intro-panel">
+          <div class="product-lockup">
+            <img class="product-icon" src="../icon.png" alt="" />
+            <div>
+              <p class="eyebrow">FFE Inc.</p>
+              <h1>FFE-pyRevit</h1>
+              <p class="version-line">Version <span data-about-version>v1.13.1</span></p>
+            </div>
+          </div>
+
+          <div class="message-block">
+            <h2>Congratulations!</h2>
+            <p>
+              You've just installed FFE's own extension with pyRevit.
+              <strong>You are a pyRevit Pro User now.</strong>
+            </p>
+            <p>
+              This tool kit has plenty of valuable resources, functions, and other things
+              that should model your design. Check them out!
+            </p>
+            <p>
+              Let me know if you have any ideas or suggestions for the next set of tools
+              in FFE-pyRevit.
+            </p>
+          </div>
+
+          <div class="action-row">
+            <a class="primary-link" href="mailto:kyle.guggenheim@ffeinc.us?subject=FFE-pyRevit%20Feedback">
+              Send feedback
+            </a>
+            <a class="secondary-link" href="https://ffeinc.sharepoint.com/sites/RevitUsers/SitePages/FFE-pyRevit.aspx">
+              FFE-pyRevit resources
+            </a>
+          </div>
+          <p class="feedback-note">Your feedback is important!</p>
+
+          <div class="credit-strip">
+            <a class="company-link" href="https://www.ffeinc.us/">FFE Inc.</a>
+            <span>Made by Kyle Guggenheim</span>
+            <strong>Happy Modeling!</strong>
+          </div>
+        </section>
+
+        <section class="changelog-panel" aria-labelledby="changelog-title">
+          <div class="panel-heading">
+            <h2 id="changelog-title">Changelog</h2>
+            <span data-about-version>v1.13.1</span>
+          </div>
+          <pre id="changelog-text" class="changelog-text">Loading changelog...</pre>
+        </section>
+      </main>
+
+      <footer class="footer-line">
+        FFE-pyRevit Version: <span data-about-version>v1.13.1</span> | &copy; FFE Inc. 2026
+      </footer>
+    </div>
+  </body>
+</html>
