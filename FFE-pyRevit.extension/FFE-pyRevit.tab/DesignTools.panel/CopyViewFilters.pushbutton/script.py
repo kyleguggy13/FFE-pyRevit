@@ -18,6 +18,7 @@ Last update:
 - [03.06.2025] - v1.0 RELEASE
 - [10.03.2025] - v1.1 Compatible with Revit 2026
 - [10.31.2025] - v1.2 Updated logging to include status of action
+- [05.15.2026] - v1.3 Fixed User cancelling view selection causing error
 ________________________________________________________________
 Author: Kyle Guggenheim"""
 

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-__title__   = "FFE-pyRevit \nv1.13.0"
-__doc__ = """Version = v1.13.0
-Date    = 05.11.2026
+__title__   = "FFE-pyRevit \nv1.13.1"
+__doc__ = """Version = v1.13.1
+Date    = 05.15.2026
 __________________________________________________________________
 Description:
 pyRevit About Form
@@ -28,6 +28,7 @@ Last update:
 - [02.11.2026] - v1.11.0 Added Sheets_Counter tool.
 - [02.17.2026] - v1.12.0 Added transferred-project-standards hook.
 - [05.11.2026] - v1.13.0 Added Ductulator web app integration to MEPTools.
+- [05.15.2026] - v1.13.1 CopyViewFilters v1.3: Fixed User cancelling view selection causing error
 __________________________________________________________________
 Author: Kyle Guggenheim from FFE Inc."""
 # ↑ This module docstring doubles as the default changelog text.
