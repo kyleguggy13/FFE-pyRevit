@@ -27,7 +27,7 @@ Author: Kyle Guggenheim"""
 from math import e, log
 from Autodesk.Revit.DB import *
 
-
+from pyrevit import script
 from pyrevit.script import output
 
 #____________________________________________________________________ VARIABLES
@@ -56,8 +56,12 @@ for v in all_views_and_vt:
     dict_views[key] = v
 
 # View From
+# If not selected then exit script, otherwise get view object
 views_from      = sorted(dict_views.keys())
 sel_view_from   = forms.SelectFromList.show(views_from, multiselect=False, button_name='Select View with Filters')
+if not sel_view_from:
+    log_status = "Cancelled by user"
+    script.exit()
 view_from       = dict_views[sel_view_from]
 
 # View To
