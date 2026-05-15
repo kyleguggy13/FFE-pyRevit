@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FFE PDF2Revit</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="site.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-lockup">
+          <img class="brand-mark" src="../icon.png" alt="" />
+          <div class="brand-copy">
+            <p class="eyebrow">FFE-pyRevit</p>
+            <h1>PDF2Revit</h1>
+            <p class="file-line">
+              <span id="pdf-name">Loading PDF</span>
+              <span class="dot-separator" aria-hidden="true"></span>
+              <span id="page-label">Page -</span>
+            </p>
+          </div>
+        </div>
+        <div class="window-actions">
+          <button id="close-window" class="secondary-button" type="button">Close</button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="viewer-panel" aria-label="PDF preview">
+          <div class="viewer-toolbar">
+            <div class="status-pill" id="status-pill">Waiting for calibration</div>
+            <div class="viewer-actions">
+              <button id="clear-calibration" class="ghost-button" type="button">Clear Points</button>
+            </div>
+          </div>
+          <div class="viewer-scroll">
+            <div id="page-stage" class="page-stage">
+              <img id="pdf-preview" alt="" />
+              <canvas id="overlay"></canvas>
+            </div>
+          </div>
+        </section>
+
+        <aside class="control-panel">
+          <section class="panel-section">
+            <h2>Calibration</h2>
+            <div class="point-grid">
+              <div>
+                <span>Point A</span>
+                <strong id="point-a">Not set</strong>
+              </div>
+              <div>
+                <span>Point B</span>
+                <strong id="point-b">Not set</strong>
+              </div>
+            </div>
+            <div class="field-row">
+              <label for="known-distance">Known distance</label>
+              <div class="compound-input">
+                <input id="known-distance" type="number" min="0" step="0.01" value="10" />
+                <select id="distance-unit">
+                  <option value="ft" selected>ft</option>
+                  <option value="in">in</option>
+                  <option value="m">m</option>
+                  <option value="mm">mm</option>
+                </select>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel-section">
+            <h2>Revit Targets</h2>
+            <label for="level-select">Level</label>
+            <select id="level-select"></select>
+
+            <label for="wall-type-select">Wall Type</label>
+            <select id="wall-type-select"></select>
+
+            <label for="floor-type-select">Floor Type</label>
+            <select id="floor-type-select"></select>
+
+            <label for="door-type-select">Door Type</label>
+            <select id="door-type-select"></select>
+
+            <label for="window-type-select">Window Type</label>
+            <select id="window-type-select"></select>
+          </section>
+
+          <section class="panel-section">
+            <h2>Analysis</h2>
+            <div class="metric-grid">
+              <div><span>Walls</span><strong id="metric-walls">0</strong></div>
+              <div><span>Floors</span><strong id="metric-floors">0</strong></div>
+              <div><span>Doors</span><strong id="metric-doors">0</strong></div>
+              <div><span>Windows</span><strong id="metric-windows">0</strong></div>
+            </div>
+            <button id="analyze-pdf" class="primary-button wide-button" type="button">Analyze PDF</button>
+            <button id="create-elements" class="primary-button wide-button" type="button" disabled>Create Revit Elements</button>
+          </section>
+
+          <section class="panel-section element-section">
+            <div class="section-heading">
+              <h2>Elements</h2>
+              <button id="toggle-all" class="ghost-button" type="button">Select All</button>
+            </div>
+            <div id="element-list" class="element-list">
+              <p class="empty-state">No analysis results yet.</p>
+            </div>
+          </section>
+
+          <section id="message-panel" class="message-panel" hidden>
+            <strong id="message-title">Status</strong>
+            <div id="message-body"></div>
+          </section>
+        </aside>
+      </main>
+    </div>
+  </body>
+</html>
