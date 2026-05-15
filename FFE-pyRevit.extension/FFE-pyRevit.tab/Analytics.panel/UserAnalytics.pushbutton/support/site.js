@@ -5,6 +5,7 @@
     payload: null,
     entries: [],
     filteredEntries: [],
+    selectedContributionYear: null,
     resizeTimer: null
   };
 
@@ -116,6 +117,14 @@
     return date.getFullYear() + "-" + pad2(date.getMonth() + 1) + "-" + pad2(date.getDate());
   }
 
+  function localDayNumber(date) {
+    return Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86400000);
+  }
+
+  function calendarDayDiff(startDate, endDate) {
+    return localDayNumber(endDate) - localDayNumber(startDate);
+  }
+
   function monthKey(date) {
     if (!date) {
       return "";
@@ -126,6 +135,11 @@
   function monthLabel(date) {
     var names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     return names[date.getMonth()] + " " + date.getFullYear();
+  }
+
+  function shortMonthLabel(date) {
+    var names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return names[date.getMonth()];
   }
 
   function formatDateTime(date, fallback) {
@@ -140,6 +154,22 @@
         day: "2-digit",
         hour: "numeric",
         minute: "2-digit"
+      });
+    } catch (ignore) {
+      return dateKey(date);
+    }
+  }
+
+  function formatShortDate(date) {
+    if (!date) {
+      return "-";
+    }
+
+    try {
+      return date.toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "2-digit"
       });
     } catch (ignore) {
       return dateKey(date);
@@ -666,6 +696,270 @@
     renderBarChart("origins-chart", originRows, 9, "No family load origins in current filter");
   }
 
+  function getContributionYears(entries) {
+    var years = {};
+    var result = [];
+
+    entries.forEach(function (entry) {
+      if (entry.date) {
+        years[entry.date.getFullYear()] = true;
+      }
+    });
+
+    Object.keys(years).forEach(function (year) {
+      result.push(Number(year));
+    });
+
+    result.sort(function (a, b) {
+      return b - a;
+    });
+
+    return result;
+  }
+
+  function getDefaultContributionYear(years) {
+    var generatedDate = state.payload ? parseLocalDate(state.payload.generatedAt) : null;
+    var generatedYear = generatedDate ? generatedDate.getFullYear() : null;
+
+    if (!years.length) {
+      return null;
+    }
+
+    if (state.selectedContributionYear && years.indexOf(state.selectedContributionYear) !== -1) {
+      return state.selectedContributionYear;
+    }
+
+    if (generatedYear && years.indexOf(generatedYear) !== -1) {
+      return generatedYear;
+    }
+
+    return years[0];
+  }
+
+  function contributionText(count) {
+    return formatNumber(count) + " contribution" + (count === 1 ? "" : "s");
+  }
+
+  function getContributionLevel(count, maxCount) {
+    var ratio;
+
+    if (!count) {
+      return 0;
+    }
+
+    if (maxCount <= 4) {
+      return Math.min(4, count);
+    }
+
+    ratio = count / maxCount;
+    if (ratio <= 0.25) {
+      return 1;
+    }
+    if (ratio <= 0.5) {
+      return 2;
+    }
+    if (ratio <= 0.75) {
+      return 3;
+    }
+    return 4;
+  }
+
+  function getContributionDateWindow(year) {
+    var start = new Date(year, 0, 1);
+    var end = new Date(year, 11, 31);
+
+    start.setDate(start.getDate() - start.getDay());
+    end.setDate(end.getDate() + (6 - end.getDay()));
+
+    return {
+      start: start,
+      end: end,
+      weeks: Math.floor(calendarDayDiff(start, end) / 7) + 1
+    };
+  }
+
+  function buildContributionData(entries, year) {
+    var counts = {};
+    var total = 0;
+    var maxCount = 0;
+    var firstActivity = null;
+    var lastActivity = null;
+
+    entries.forEach(function (entry) {
+      var key;
+
+      if (!entry.date || entry.date.getFullYear() !== year) {
+        return;
+      }
+
+      key = dateKey(entry.date);
+      counts[key] = (counts[key] || 0) + 1;
+      total += 1;
+      maxCount = Math.max(maxCount, counts[key]);
+
+      if (!firstActivity || entry.time < firstActivity.getTime()) {
+        firstActivity = entry.date;
+      }
+      if (!lastActivity || entry.time > lastActivity.getTime()) {
+        lastActivity = entry.date;
+      }
+    });
+
+    return {
+      counts: counts,
+      total: total,
+      maxCount: maxCount,
+      firstActivity: firstActivity,
+      lastActivity: lastActivity
+    };
+  }
+
+  function renderContributionYears(years, selectedYear) {
+    var container = byId("contribution-years");
+
+    if (!container) {
+      return;
+    }
+
+    clearElement(container);
+
+    if (!years.length) {
+      var empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "No years";
+      container.appendChild(empty);
+      return;
+    }
+
+    years.forEach(function (year) {
+      var button = document.createElement("button");
+      button.type = "button";
+      button.className = "contribution-year-button";
+      if (year === selectedYear) {
+        button.className += " is-active";
+      }
+      button.textContent = year;
+      button.addEventListener("click", function () {
+        state.selectedContributionYear = year;
+        renderContributionGraph();
+      });
+      container.appendChild(button);
+    });
+  }
+
+  function renderContributionMonthLabels(grid, year, dateWindow) {
+    var months = document.createElement("div");
+    var monthIndex;
+
+    months.className = "contribution-months";
+    months.style.gridTemplateColumns = "repeat(" + dateWindow.weeks + ", 12px)";
+
+    for (monthIndex = 0; monthIndex < 12; monthIndex += 1) {
+      var monthStart = new Date(year, monthIndex, 1);
+      var nextMonthStart = monthIndex === 11 ? new Date(year + 1, 0, 1) : new Date(year, monthIndex + 1, 1);
+      var startWeek = Math.floor(calendarDayDiff(dateWindow.start, monthStart) / 7) + 1;
+      var endWeek = Math.floor(calendarDayDiff(dateWindow.start, nextMonthStart) / 7) + 1;
+      var span = Math.max(1, Math.min(dateWindow.weeks + 1, endWeek) - startWeek);
+      var label = document.createElement("span");
+
+      label.className = "contribution-month-label";
+      label.style.gridColumn = startWeek + " / span " + span;
+      label.textContent = shortMonthLabel(monthStart);
+      months.appendChild(label);
+    }
+
+    grid.appendChild(months);
+  }
+
+  function renderContributionCells(grid, year, dateWindow, contributionData) {
+    var body = document.createElement("div");
+    var weekdays = document.createElement("div");
+    var cells = document.createElement("div");
+    var weekdayLabels = ["", "Mon", "", "Wed", "", "Fri", ""];
+    var cursor = new Date(dateWindow.start.getFullYear(), dateWindow.start.getMonth(), dateWindow.start.getDate());
+
+    body.className = "contribution-body";
+    weekdays.className = "contribution-weekdays";
+    cells.className = "contribution-cells";
+    cells.style.gridTemplateColumns = "repeat(" + dateWindow.weeks + ", 12px)";
+
+    weekdayLabels.forEach(function (labelText) {
+      var label = document.createElement("span");
+      label.textContent = labelText;
+      weekdays.appendChild(label);
+    });
+
+    while (cursor <= dateWindow.end) {
+      var key = dateKey(cursor);
+      var count = contributionData.counts[key] || 0;
+      var week = Math.floor(calendarDayDiff(dateWindow.start, cursor) / 7) + 1;
+      var day = cursor.getDay() + 1;
+      var square = document.createElement("span");
+      var inSelectedYear = cursor.getFullYear() === year;
+      var level = inSelectedYear ? getContributionLevel(count, contributionData.maxCount) : 0;
+
+      square.className = "contribution-square";
+      square.setAttribute("data-level", level);
+      square.style.gridColumn = week;
+      square.style.gridRow = day;
+      square.title = inSelectedYear
+        ? contributionText(count) + " on " + formatShortDate(cursor)
+        : "";
+      square.setAttribute("aria-label", square.title || "Outside selected year");
+      cells.appendChild(square);
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    body.appendChild(weekdays);
+    body.appendChild(cells);
+    grid.appendChild(body);
+  }
+
+  function renderContributionGraph() {
+    var grid = byId("contribution-grid");
+    var years = getContributionYears(state.entries);
+    var selectedYear = getDefaultContributionYear(years);
+    var contributionData;
+    var dateWindow;
+    var rangeText;
+
+    state.selectedContributionYear = selectedYear;
+    renderContributionYears(years, selectedYear);
+
+    if (!grid) {
+      return;
+    }
+
+    clearElement(grid);
+
+    if (!selectedYear) {
+      setText("contribution-summary", "0 contributions");
+      setText("contribution-range", "No activity yet");
+      grid.appendChild(makeEmptyState("No contribution data"));
+      return;
+    }
+
+    contributionData = buildContributionData(state.entries, selectedYear);
+    dateWindow = getContributionDateWindow(selectedYear);
+
+    setText(
+      "contribution-summary",
+      contributionText(contributionData.total) + " in " + selectedYear
+    );
+
+    if (contributionData.firstActivity && contributionData.lastActivity) {
+      rangeText = formatShortDate(contributionData.firstActivity) +
+        " - " +
+        formatShortDate(contributionData.lastActivity);
+    } else {
+      rangeText = "No contributions in " + selectedYear;
+    }
+    setText("contribution-range", rangeText);
+
+    renderContributionMonthLabels(grid, selectedYear, dateWindow);
+    renderContributionCells(grid, selectedYear, dateWindow, contributionData);
+  }
+
   function statusTone(status) {
     var value = text(status).toLowerCase();
     if (!value) {
@@ -804,6 +1098,7 @@
     }
 
     populateActionFilter();
+    renderContributionGraph();
     renderAll();
   }
 
