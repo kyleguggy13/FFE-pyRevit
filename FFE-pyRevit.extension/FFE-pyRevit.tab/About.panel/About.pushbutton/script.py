@@ -47,7 +47,7 @@ clr.AddReference("PresentationFramework")
 clr.AddReference("WindowsBase")
 
 from System import Uri
-from System.Diagnostics.Process import Start
+from System.Diagnostics import Process, ProcessStartInfo
 from System.Windows import ResizeMode, Thickness, Visibility, Window, WindowStartupLocation
 from System.Windows.Controls import Grid, TextBlock
 
@@ -191,7 +191,10 @@ def open_external_url(url):
         return
 
     try:
-        Start(url)
+        start_info = ProcessStartInfo()
+        start_info.FileName = safe_str(url)
+        start_info.UseShellExecute = True
+        Process.Start(start_info)
     except Exception as exc:
         forms.alert(
             "Could not open link:\n{0}\n\n{1}".format(url, exc),

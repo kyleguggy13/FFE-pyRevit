@@ -57,6 +57,128 @@
     });
   }
 
+  function clearElement(element) {
+    while (element.firstChild) {
+      element.removeChild(element.firstChild);
+    }
+  }
+
+  function appendInlineMarkdown(parent, text) {
+    var source = String(text || "");
+    var pattern = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\))/g;
+    var lastIndex = 0;
+    var match;
+
+    function appendText(value) {
+      if (value) {
+        parent.appendChild(document.createTextNode(value));
+      }
+    }
+
+    while ((match = pattern.exec(source)) !== null) {
+      appendText(source.slice(lastIndex, match.index));
+
+      var token = match[0];
+      var node = null;
+
+      if (token.indexOf("**") === 0) {
+        node = document.createElement("strong");
+        node.textContent = token.slice(2, -2);
+      } else if (token.indexOf("`") === 0) {
+        node = document.createElement("code");
+        node.textContent = token.slice(1, -1);
+      } else {
+        var linkMatch = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+        if (linkMatch) {
+          node = document.createElement("a");
+          node.textContent = linkMatch[1];
+          node.href = linkMatch[2];
+          if (isExternalUrl(linkMatch[2])) {
+            node.addEventListener("click", function (event) {
+              event.preventDefault();
+              openExternal(this.href);
+            });
+          }
+        }
+      }
+
+      if (node) {
+        parent.appendChild(node);
+      } else {
+        appendText(token);
+      }
+
+      lastIndex = pattern.lastIndex;
+    }
+
+    appendText(source.slice(lastIndex));
+  }
+
+  function renderMarkdown(target, markdownText) {
+    var markdown = String(markdownText || "No changelog available.").replace(/<!--[\s\S]*?-->/g, "");
+    var lines = markdown.split(/\r?\n/);
+    var currentList = null;
+    var currentParagraph = null;
+
+    clearElement(target);
+
+    function closeList() {
+      currentList = null;
+    }
+
+    function closeParagraph() {
+      currentParagraph = null;
+    }
+
+    lines.forEach(function (line) {
+      var trimmed = line.replace(/\s+$/, "");
+      var content = trimmed.trim();
+      var headingMatch;
+      var listMatch;
+      var paragraphLine;
+
+      if (!content) {
+        closeList();
+        closeParagraph();
+        return;
+      }
+
+      headingMatch = content.match(/^(#{1,6})\s+(.+)$/);
+      if (headingMatch) {
+        closeList();
+        closeParagraph();
+        var level = Math.min(headingMatch[1].length, 4);
+        var heading = document.createElement("h" + level);
+        appendInlineMarkdown(heading, headingMatch[2]);
+        target.appendChild(heading);
+        return;
+      }
+
+      listMatch = content.match(/^[-*]\s+(.+)$/);
+      if (listMatch) {
+        closeParagraph();
+        if (!currentList) {
+          currentList = document.createElement("ul");
+          target.appendChild(currentList);
+        }
+        var item = document.createElement("li");
+        appendInlineMarkdown(item, listMatch[1]);
+        currentList.appendChild(item);
+        return;
+      }
+
+      closeList();
+      paragraphLine = content;
+      if (!currentParagraph) {
+        currentParagraph = document.createElement("p");
+        target.appendChild(currentParagraph);
+      } else {
+        currentParagraph.appendChild(document.createTextNode(" "));
+      }
+      appendInlineMarkdown(currentParagraph, paragraphLine);
+    });
+  }
+
   function loadData(data) {
     data = data || {};
 
@@ -64,9 +186,9 @@
       setText("[data-about-version]", data.version);
     }
 
-    var changelog = document.querySelector("#changelog-text");
+    var changelog = document.querySelector("#changelog-content");
     if (changelog) {
-      changelog.textContent = data.changelog || "No changelog available.";
+      renderMarkdown(changelog, data.changelog);
     }
   }
 

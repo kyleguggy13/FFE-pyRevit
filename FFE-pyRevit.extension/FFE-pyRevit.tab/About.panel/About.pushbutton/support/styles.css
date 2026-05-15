@@ -271,16 +271,60 @@ h2 {
   font-weight: 800;
 }
 
-.changelog-text {
+.changelog-content {
   min-width: 0;
   margin: 0;
   padding: 16px;
   overflow: auto;
   color: #dbe4f0;
-  font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
-  font-size: 0.86rem;
+  font-size: 0.92rem;
   line-height: 1.45;
-  white-space: pre-wrap;
+}
+
+.changelog-content h1,
+.changelog-content h2,
+.changelog-content h3,
+.changelog-content h4 {
+  margin: 18px 0 8px;
+  color: var(--gold);
+  font-family: "Avenir Next", "Segoe UI", Arial, sans-serif;
+  font-size: 1rem;
+  line-height: 1.25;
+}
+
+.changelog-content h1:first-child,
+.changelog-content h2:first-child,
+.changelog-content h3:first-child,
+.changelog-content h4:first-child {
+  margin-top: 0;
+}
+
+.changelog-content ul {
+  margin: 0 0 14px 0;
+  padding-left: 20px;
+}
+
+.changelog-content li {
+  margin: 4px 0;
+  color: #dbe4f0;
+}
+
+.changelog-content p {
+  margin: 0 0 12px;
+}
+
+.changelog-content code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: #101116;
+  color: #ffffff;
+  font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+}
+
+.changelog-content a {
+  color: #8ea1ff;
+  font-weight: 800;
+  text-decoration: none;
 }
 
 .footer-line {
