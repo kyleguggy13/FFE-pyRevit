@@ -5,7 +5,7 @@ This file is intentionally independent from Revit and pyRevit. The pyRevit
 button calls it through a local CPython venv with PyMuPDF installed.
 """
 
-from __future__ import absolute_import
+# from __future__ import absolute_import
 
 import json
 import math

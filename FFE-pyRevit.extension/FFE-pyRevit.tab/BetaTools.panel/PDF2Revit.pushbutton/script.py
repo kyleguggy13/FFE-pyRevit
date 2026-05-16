@@ -2,7 +2,7 @@
 __title__ = "PDF2\nRevit"
 __version__ = "Version = v0.1"
 __persistentengine__ = True
-__min_revit_ver__ = 2024
+__min_revit_ver__ = 2026
 __doc__ = """Version = v0.1
 Date    = 05.15.2026
 __________________________________________________________________
