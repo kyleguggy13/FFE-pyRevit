@@ -10,7 +10,7 @@
 - Every Python file must start with a standard header describing:
     - Purpose
     - Key behaviors
-    - Revit API notes (2025/2026 constraints)
+    - Revit API notes (2026 constraints)
     - Design decisions (trade-offs)
 - Organize code with clear sections (use #region when it improves navigation):
     - Construction / Setup
