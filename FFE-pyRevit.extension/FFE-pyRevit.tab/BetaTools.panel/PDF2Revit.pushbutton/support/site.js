@@ -161,6 +161,7 @@
   function drawFloor(ctx, floor) {
     var loop = floor && floor.pdf_loop;
     var point;
+    var index;
 
     if (!loop || loop.length < 3) {
       return;
@@ -571,14 +572,16 @@
   function loadAnalysis(result) {
     var elements = (result && result.elements) || {};
     var warnings = (result && result.warnings) || [];
+    var hasElements;
 
     state.analysis = result || null;
     setMetrics(elements);
     renderElementList();
     state.allSelected = true;
     setText("toggle-all", "Clear All");
+    hasElements = Boolean(allElements().length);
+    byId("create-elements").disabled = !hasElements;
     drawOverlay();
-    byId("create-elements").disabled = !allElements().length;
     setStatus("Analysis complete");
 
     if (warnings.length) {

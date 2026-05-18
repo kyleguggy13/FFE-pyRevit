@@ -37,7 +37,7 @@ clr.AddReference("PresentationCore")
 clr.AddReference("PresentationFramework")
 clr.AddReference("WindowsBase")
 
-from System import Uri
+from System import Int64, Uri
 from System.Collections.Generic import List
 from System.Windows import ResizeMode, Thickness, Visibility, Window, WindowStartupLocation
 from System.Windows.Controls import Grid, TextBlock
@@ -60,6 +60,7 @@ from Autodesk.Revit.DB import (
     XYZ,
 )
 from Autodesk.Revit.DB.Structure import StructuralType
+from Autodesk.Revit.UI import ExternalEvent, IExternalEventHandler
 
 from pyrevit import forms, revit
 
@@ -119,10 +120,17 @@ def element_id_value(element_id):
 
 
 def make_element_id(value):
-    try:
-        return ElementId(int(value))
-    except:
+    value_text = safe_str(value).strip()
+    if not value_text:
         return ElementId.InvalidElementId
+
+    try:
+        return ElementId(Int64.Parse(value_text))
+    except:
+        try:
+            return ElementId(int(value_text))
+        except:
+            return ElementId.InvalidElementId
 
 
 def get_element_name(element):
@@ -315,30 +323,34 @@ def run_helper(payload):
 
 
 # ____________________________________________________________________ REVIT OPTIONS
-def collect_levels():
-    levels = list(FilteredElementCollector(doc).OfClass(Level).ToElements())
+def collect_levels(target_doc=None):
+    revit_doc = target_doc or doc
+    levels = list(FilteredElementCollector(revit_doc).OfClass(Level).ToElements())
     levels.sort(key=lambda level: level.Elevation)
     return levels
 
 
-def collect_wall_types():
+def collect_wall_types(target_doc=None):
+    revit_doc = target_doc or doc
     return sorted(
-        list(FilteredElementCollector(doc).OfClass(WallType).ToElements()),
+        list(FilteredElementCollector(revit_doc).OfClass(WallType).ToElements()),
         key=lambda item: get_element_name(item).lower()
     )
 
 
-def collect_floor_types():
+def collect_floor_types(target_doc=None):
+    revit_doc = target_doc or doc
     return sorted(
-        list(FilteredElementCollector(doc).OfClass(FloorType).ToElements()),
+        list(FilteredElementCollector(revit_doc).OfClass(FloorType).ToElements()),
         key=lambda item: get_element_name(item).lower()
     )
 
 
-def collect_family_symbols(category):
+def collect_family_symbols(category, target_doc=None):
+    revit_doc = target_doc or doc
     return sorted(
         list(
-            FilteredElementCollector(doc)
+            FilteredElementCollector(revit_doc)
             .OfCategory(category)
             .WhereElementIsElementType()
             .ToElements()
@@ -373,10 +385,10 @@ def get_active_level():
     return None
 
 
-def find_next_level(level):
+def find_next_level(level, target_doc=None):
     if not level:
         return None
-    levels = collect_levels()
+    levels = collect_levels(target_doc)
     for candidate in levels:
         if candidate.Elevation > level.Elevation + 0.01:
             return candidate
@@ -494,14 +506,21 @@ def is_accepted(accepted_ids, category, element_id):
     return element_id in category_ids
 
 
-def get_setting_element(settings, key):
+def get_setting_element(target_doc, settings, key):
     value = settings.get(key)
     if value is None:
         return None
+    element_id = make_element_id(value)
     try:
-        return doc.GetElement(make_element_id(value))
-    except:
-        return None
+        return target_doc.GetElement(element_id)
+    except Exception as exc:
+        raise Exception(
+            "Could not read selected Revit target '{0}' with id '{1}'.\n\n{2}".format(
+                key,
+                value,
+                exc
+            )
+        )
 
 
 def point_from_xy(point, elevation):
@@ -515,7 +534,7 @@ def curve_length(line):
         return 0.0
 
 
-def create_floor_from_loop(floor_item, floor_type, level):
+def create_floor_from_loop(target_doc, floor_item, floor_type, level):
     loop_points = floor_item.get("loop") or []
     if len(loop_points) < 3:
         return None
@@ -532,7 +551,7 @@ def create_floor_from_loop(floor_item, floor_type, level):
 
     curve_loops = List[CurveLoop]()
     curve_loops.Add(curve_loop)
-    return Floor.Create(doc, curve_loops, floor_type.Id, level.Id)
+    return Floor.Create(target_doc, curve_loops, floor_type.Id, level.Id)
 
 
 def activate_symbol(symbol):
@@ -542,31 +561,40 @@ def activate_symbol(symbol):
     return False
 
 
-def create_revit_elements(analysis_result, accepted, settings):
+def create_revit_elements(target_doc, analysis_result, accepted, settings):
+    if not target_doc:
+        raise Exception("The Revit model used to start PDF2Revit is no longer available.")
+
+    try:
+        if hasattr(target_doc, "IsValidObject") and not target_doc.IsValidObject:
+            raise Exception("The Revit model used to start PDF2Revit has been closed.")
+    except Exception as doc_error:
+        raise Exception(safe_str(doc_error))
+
     accepted_ids = get_selected_ids(accepted)
-    level = get_setting_element(settings, "levelId")
-    wall_type = get_setting_element(settings, "wallTypeId")
-    floor_type = get_setting_element(settings, "floorTypeId")
-    door_type = get_setting_element(settings, "doorTypeId")
-    window_type = get_setting_element(settings, "windowTypeId")
+    level = get_setting_element(target_doc, settings, "levelId")
+    wall_type = get_setting_element(target_doc, settings, "wallTypeId")
+    floor_type = get_setting_element(target_doc, settings, "floorTypeId")
+    door_type = get_setting_element(target_doc, settings, "doorTypeId")
+    window_type = get_setting_element(target_doc, settings, "windowTypeId")
 
     if not level:
-        raise Exception("Selected Level was not found in the active model.")
+        raise Exception("Selected Level was not found in the model used to start PDF2Revit.")
     if not isinstance(wall_type, WallType):
-        raise Exception("Selected Wall Type was not found in the active model.")
+        raise Exception("Selected Wall Type was not found in the model used to start PDF2Revit.")
     if not isinstance(floor_type, FloorType):
-        raise Exception("Selected Floor Type was not found in the active model.")
+        raise Exception("Selected Floor Type was not found in the model used to start PDF2Revit.")
     if not isinstance(door_type, FamilySymbol):
-        raise Exception("Selected Door Type was not found in the active model.")
+        raise Exception("Selected Door Type was not found in the model used to start PDF2Revit.")
     if not isinstance(window_type, FamilySymbol):
-        raise Exception("Selected Window Type was not found in the active model.")
+        raise Exception("Selected Window Type was not found in the model used to start PDF2Revit.")
 
     elements = analysis_result.get("elements") or {}
     walls = elements.get("walls") or []
     floors = elements.get("floors") or []
     doors = elements.get("doors") or []
     windows = elements.get("windows") or []
-    next_level = find_next_level(level)
+    next_level = find_next_level(level, target_doc)
 
     created = {
         "walls": 0,
@@ -577,7 +605,7 @@ def create_revit_elements(analysis_result, accepted, settings):
     warnings = []
     wall_map = {}
 
-    transaction = Transaction(doc, "PDF2Revit - Create Floor Plan")
+    transaction = Transaction(target_doc, "PDF2Revit - Create Floor Plan")
     transaction.Start()
     try:
         symbols_activated = False
@@ -586,7 +614,7 @@ def create_revit_elements(analysis_result, accepted, settings):
         if any(is_accepted(accepted_ids, "windows", item.get("id")) for item in windows):
             symbols_activated = activate_symbol(window_type) or symbols_activated
         if symbols_activated:
-            doc.Regenerate()
+            target_doc.Regenerate()
 
         for wall_item in walls:
             wall_id = wall_item.get("id")
@@ -606,7 +634,7 @@ def create_revit_elements(analysis_result, accepted, settings):
                 continue
 
             wall = Wall.Create(
-                doc,
+                target_doc,
                 curve,
                 wall_type.Id,
                 level.Id,
@@ -626,7 +654,7 @@ def create_revit_elements(analysis_result, accepted, settings):
             created["walls"] += 1
 
         if wall_map:
-            doc.Regenerate()
+            target_doc.Regenerate()
 
         for floor_item in floors:
             floor_id = floor_item.get("id")
@@ -634,7 +662,7 @@ def create_revit_elements(analysis_result, accepted, settings):
                 continue
 
             try:
-                create_floor_from_loop(floor_item, floor_type, level)
+                create_floor_from_loop(target_doc, floor_item, floor_type, level)
                 created["floors"] += 1
             except Exception as floor_error:
                 warnings.append("Skipped floor {0}: {1}".format(floor_id, floor_error))
@@ -651,7 +679,7 @@ def create_revit_elements(analysis_result, accepted, settings):
 
             try:
                 point = point_from_xy(door_item.get("point"), level.Elevation)
-                doc.Create.NewFamilyInstance(point, door_type, host_wall, level, StructuralType.NonStructural)
+                target_doc.Create.NewFamilyInstance(point, door_type, host_wall, level, StructuralType.NonStructural)
                 created["doors"] += 1
             except Exception as door_error:
                 warnings.append("Skipped door {0}: {1}".format(door_id, door_error))
@@ -668,7 +696,7 @@ def create_revit_elements(analysis_result, accepted, settings):
 
             try:
                 point = point_from_xy(window_item.get("point"), level.Elevation)
-                doc.Create.NewFamilyInstance(point, window_type, host_wall, level, StructuralType.NonStructural)
+                target_doc.Create.NewFamilyInstance(point, window_type, host_wall, level, StructuralType.NonStructural)
                 created["windows"] += 1
             except Exception as window_error:
                 warnings.append("Skipped window {0}: {1}".format(window_id, window_error))
@@ -733,14 +761,52 @@ def get_webview_user_data_folder():
     return ensure_dir(os.path.join(get_local_app_dir(), "WebView2"))
 
 
+class CreateElementsExternalEventHandler(IExternalEventHandler):
+    def __init__(self):
+        self.window = None
+        self.message = None
+
+    def request_create(self, window, message):
+        self.window = window
+        self.message = message
+
+    def Execute(self, ui_app):
+        window = self.window
+        message = self.message or {}
+        self.message = None
+
+        if not window:
+            return
+        if not window.analysis_result:
+            window.send_error("Analyze the PDF before creating Revit elements.")
+            return
+
+        try:
+            result = create_revit_elements(
+                window.document,
+                window.analysis_result,
+                message.get("accepted") or {},
+                message.get("settings") or {}
+            )
+            window.send_create_result(result)
+        except Exception as exc:
+            window.send_error(exc)
+
+    def GetName(self):
+        return "PDF2Revit Create Revit Elements"
+
+
 class PDF2RevitWindow(Window):
     def __init__(self, webview_type, creation_properties_type, payload):
         Window.__init__(self)
 
         self.payload = payload
+        self.document = doc
         self.has_sent_payload = False
         self.analysis_result = None
         self.index_uri = make_file_uri(PATH_INDEX)
+        self.create_handler = CreateElementsExternalEventHandler()
+        self.create_event = ExternalEvent.Create(self.create_handler)
 
         self.Title = "{0} - {1}".format(APP_NAME, os.path.basename(payload.get("pdfPath") or "PDF"))
         self.Width = 1420
@@ -811,6 +877,10 @@ class PDF2RevitWindow(Window):
         self.send_payload()
 
     def on_closed(self, sender, args):
+        try:
+            self.create_event.Dispose()
+        except:
+            pass
         try:
             self.browser.Dispose()
         except:
@@ -918,12 +988,8 @@ class PDF2RevitWindow(Window):
             return
 
         try:
-            result = create_revit_elements(
-                self.analysis_result,
-                message.get("accepted") or {},
-                message.get("settings") or {}
-            )
-            self.send_create_result(result)
+            self.create_handler.request_create(self, message)
+            self.create_event.Raise()
         except Exception as exc:
             self.send_error(exc)
 
