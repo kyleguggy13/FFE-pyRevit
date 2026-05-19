@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>FFE-pyRevit User Analytics</title>
+    <title>FFE Keynote Manager</title>
     <link rel="stylesheet" href="styles.css" />
     <script src="site.js" defer></script>
   </head>
@@ -14,172 +14,120 @@
           <img class="brand-mark" src="../icon.png" alt="" />
           <div class="brand-copy">
             <p class="eyebrow">FFE-pyRevit</p>
-            <h1>User Analytics</h1>
-            <p class="user-line">
-              <span data-username>Loading user</span>
+            <h1>Keynote Manager</h1>
+            <p class="meta-line">
+              <span id="doc-title">Waiting for Revit document</span>
               <span class="dot-separator" aria-hidden="true"></span>
-              <span data-generated-at>Waiting for log data</span>
+              <span id="dirty-state">No changes</span>
             </p>
           </div>
         </div>
 
         <div class="window-actions">
           <button id="refresh-data" class="secondary-button" type="button">Refresh</button>
-          <button id="close-window" class="primary-button" type="button">Close</button>
+          <button id="save-data" class="primary-button" type="button" disabled>Save</button>
+          <button id="close-window" class="secondary-button" type="button">Close</button>
         </div>
       </header>
 
-      <main class="dashboard">
-        <section id="state-banner" class="state-banner" hidden>
-          <strong id="state-title">Log Status</strong>
-          <span id="state-message"></span>
-        </section>
+      <section id="state-banner" class="state-banner" data-tone="idle">
+        <strong id="state-title">Loading</strong>
+        <span id="state-message">Waiting for keynote data from Revit.</span>
+      </section>
 
-        <section class="metric-grid" aria-label="Usage summary">
-          <article class="metric-card">
-            <span>Total Actions</span>
-            <strong id="metric-total">0</strong>
-          </article>
-          <article class="metric-card">
-            <span>Syncs</span>
-            <strong id="metric-syncs">0</strong>
-          </article>
-          <article class="metric-card">
-            <span>Unique Documents</span>
-            <strong id="metric-documents">0</strong>
-          </article>
-          <article class="metric-card">
-            <span>Active Days</span>
-            <strong id="metric-active-days">0</strong>
-          </article>
-          <article class="metric-card metric-card--wide">
-            <span>First Log Entry</span>
-            <strong id="metric-first">-</strong>
-          </article>
-          <article class="metric-card metric-card--wide">
-            <span>Latest Log Entry</span>
-            <strong id="metric-last">-</strong>
-          </article>
-        </section>
+      <section class="file-strip" aria-label="Keynote file details">
+        <div class="file-field file-field--wide">
+          <span>Keynote File</span>
+          <strong id="keynote-path">No keynote file loaded</strong>
+        </div>
+        <div class="file-field">
+          <span>Encoding</span>
+          <strong id="encoding-label">-</strong>
+        </div>
+        <div class="file-field">
+          <span>Entries</span>
+          <strong id="entry-count">0</strong>
+        </div>
+      </section>
 
-        <section class="contribution-panel" aria-labelledby="contribution-title">
-          <div class="contribution-main">
-            <div class="contribution-heading">
-              <h2 id="contribution-title">Contribution Graph</h2>
-              <span id="contribution-summary">0 contributions</span>
+      <main class="workspace">
+        <section class="manager-panel" aria-labelledby="keynote-list-title">
+          <div class="toolbar">
+            <div>
+              <h2 id="keynote-list-title">Keynotes</h2>
+              <p id="filter-summary">0 visible rows</p>
             </div>
-
-            <div class="contribution-scroll">
-              <div id="contribution-grid" class="contribution-grid" aria-label="Daily contributions"></div>
-            </div>
-
-            <div class="contribution-footer">
-              <span id="contribution-range">No activity yet</span>
-              <div class="contribution-legend" aria-label="Contribution intensity">
-                <span>Less</span>
-                <span class="contribution-square" data-level="0"></span>
-                <span class="contribution-square" data-level="1"></span>
-                <span class="contribution-square" data-level="2"></span>
-                <span class="contribution-square" data-level="3"></span>
-                <span class="contribution-square" data-level="4"></span>
-                <span>More</span>
-              </div>
-            </div>
+            <label class="search-field" for="search-input">
+              <span>Search</span>
+              <input id="search-input" type="search" placeholder="Key, text, or parent" />
+            </label>
           </div>
 
-          <div id="contribution-years" class="contribution-years" aria-label="Contribution years"></div>
-        </section>
-
-        <section class="filter-bar" aria-label="Dashboard filters">
-          <label class="field-group" for="range-filter">
-            <span>Date Range</span>
-            <select id="range-filter">
-              <option value="all" selected>All history</option>
-              <option value="currentYear">Current year</option>
-              <option value="365">Last 365 days</option>
-              <option value="180">Last 180 days</option>
-              <option value="90">Last 90 days</option>
-              <option value="30">Last 30 days</option>
-              <option value="7">Last 7 days</option>
-            </select>
-          </label>
-
-          <label class="field-group" for="action-filter">
-            <span>Action</span>
-            <select id="action-filter">
-              <option value="all">All actions</option>
-            </select>
-          </label>
-
-          <label class="field-group field-group--search" for="document-search">
-            <span>Document Search</span>
-            <input id="document-search" type="search" placeholder="Filter by document name or path" />
-          </label>
-        </section>
-
-        <section class="chart-grid" aria-label="Usage charts">
-          <article class="chart-card chart-card--activity">
-            <div class="card-heading">
-              <h2>Activity Over Time</h2>
-              <span id="activity-subtitle">0 entries</span>
-            </div>
-            <canvas id="activity-chart" class="activity-chart" width="900" height="260"></canvas>
-          </article>
-
-          <article class="chart-card">
-            <div class="card-heading">
-              <h2>Top Actions</h2>
-              <span id="actions-subtitle">0 types</span>
-            </div>
-            <div id="actions-chart" class="bar-chart"></div>
-          </article>
-
-          <article class="chart-card">
-            <div class="card-heading">
-              <h2>Top Documents</h2>
-              <span id="docs-subtitle">0 documents</span>
-            </div>
-            <div id="docs-chart" class="bar-chart"></div>
-          </article>
-
-          <article class="chart-card">
-            <div class="card-heading">
-              <h2>Family Load Origins</h2>
-              <span id="origins-subtitle">0 loads</span>
-            </div>
-            <div id="origins-chart" class="bar-chart"></div>
-          </article>
-        </section>
-
-        <section class="table-panel" aria-labelledby="recent-title">
-          <div class="card-heading">
-            <h2 id="recent-title">Recent Activity</h2>
-            <span id="recent-subtitle">0 entries</span>
+          <div class="row-actions" aria-label="Keynote row actions">
+            <button id="add-root" class="secondary-button" type="button">Add Root</button>
+            <button id="add-child" class="secondary-button" type="button" disabled>Add Child</button>
+            <button id="duplicate-row" class="secondary-button" type="button" disabled>Duplicate</button>
+            <button id="delete-row" class="danger-button" type="button" disabled>Delete</button>
           </div>
+
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Date</th>
-                  <th>Action</th>
-                  <th>Document</th>
-                  <th>Status</th>
-                  <th>Detail</th>
+                  <th>Key</th>
+                  <th>Text</th>
+                  <th>Parent</th>
+                  <th>Line</th>
                 </tr>
               </thead>
-              <tbody id="recent-table-body">
+              <tbody id="keynote-table-body">
                 <tr>
-                  <td colspan="5" class="empty-cell">Loading usage data...</td>
+                  <td colspan="4" class="empty-cell">Waiting for keynote data...</td>
                 </tr>
               </tbody>
             </table>
           </div>
         </section>
-      </main>
 
-      <footer class="footer-line">
-        <span id="log-path">Log path unavailable</span>
-      </footer>
+        <aside class="editor-panel" aria-labelledby="editor-title">
+          <div class="panel-heading">
+            <div>
+              <h2 id="editor-title">Editor</h2>
+              <p id="selected-summary">Select a keynote row.</p>
+            </div>
+          </div>
+
+          <form id="editor-form" novalidate>
+            <label class="field-group" for="key-input">
+              <span>Key</span>
+              <input id="key-input" type="text" autocomplete="off" disabled />
+            </label>
+
+            <label class="field-group" for="text-input">
+              <span>Text</span>
+              <textarea id="text-input" rows="8" disabled></textarea>
+            </label>
+
+            <label class="field-group" for="parent-input">
+              <span>Parent</span>
+              <input id="parent-input" type="text" list="parent-options" autocomplete="off" disabled />
+              <datalist id="parent-options"></datalist>
+            </label>
+          </form>
+
+          <section class="validation-panel" aria-labelledby="validation-title">
+            <div class="panel-heading panel-heading--compact">
+              <div>
+                <h2 id="validation-title">Validation</h2>
+                <p id="validation-summary">No data loaded.</p>
+              </div>
+            </div>
+            <div id="validation-list" class="validation-list">
+              <div class="empty-state">No validation messages.</div>
+            </div>
+          </section>
+        </aside>
+      </main>
     </div>
   </body>
 </html>
