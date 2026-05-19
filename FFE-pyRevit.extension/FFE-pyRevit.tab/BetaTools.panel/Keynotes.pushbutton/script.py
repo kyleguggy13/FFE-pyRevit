@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 __title__ = "Keynotes"
-__version__ = "Version = v1.0"
+__version__ = "Version = v0.1"
 __persistentengine__ = True
 __min_revit_ver__ = 2025
-__doc__ = """Version = v1.0
+__doc__ = """Version = v0.1
 Date    = 05.19.2026
 __________________________________________________________________
 Description:
@@ -35,7 +35,7 @@ How-To:
 - Click Save to overwrite the keynote file and reload Revit keynotes.
 __________________________________________________________________
 Last update:
-- [05.19.2026] - v1.0 WebView2 keynote manager
+- [05.19.2026] - v0.1 WebView2 keynote manager
 __________________________________________________________________
 Author: Kyle Guggenheim"""
 
@@ -86,7 +86,7 @@ PATH_SUPPORT = os.path.join(PATH_SCRIPT, "support")
 PATH_INDEX = os.path.join(PATH_SUPPORT, "index.html")
 
 APP_NAME = "FFE Keynote Manager"
-APP_VERSION = "v1.0"
+APP_VERSION = "v0.1"
 LOCAL_APP_NAME = "KeynoteManager"
 
 LOGGER = script.get_logger()

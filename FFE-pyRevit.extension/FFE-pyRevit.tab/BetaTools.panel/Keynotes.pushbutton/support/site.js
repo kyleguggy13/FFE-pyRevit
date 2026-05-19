@@ -1,15 +1,18 @@
 (function attachKeynoteManager(globalScope) {
   "use strict";
 
+  var UNGROUPED_ID = "__ungrouped__";
+
   var state = {
     payload: null,
     entries: [],
     sourceIssues: [],
+    selectedDivisionId: null,
+    selectedNoteId: null,
     selectedId: null,
     dirty: false,
     saving: false,
-    nextLocalId: 1,
-    collapsedSections: {}
+    nextLocalId: 1
   };
 
   var STATUS_TITLES = {
@@ -19,7 +22,7 @@
     unsupported: "Unsupported Keynote Reference",
     error: "Error",
     warning: "Working",
-    idle: "Idle"
+    idle: "<Messages>"
   };
 
   function hasWebViewBridge() {
@@ -83,94 +86,6 @@
     }
   }
 
-  function shortPath(path) {
-    var value = text(path);
-    var parts;
-    if (!value) {
-      return "";
-    }
-    parts = value.split(/[\\/]/);
-    return parts[parts.length - 1] || value;
-  }
-
-  function collapsedStorageKey() {
-    return "ffe-keynote-manager-collapsed-sections";
-  }
-
-  function readCollapsedSections() {
-    try {
-      return JSON.parse(globalScope.localStorage.getItem(collapsedStorageKey())) || {};
-    } catch (ignore) {
-      return {};
-    }
-  }
-
-  function writeCollapsedSections() {
-    try {
-      globalScope.localStorage.setItem(
-        collapsedStorageKey(),
-        JSON.stringify(state.collapsedSections || {})
-      );
-    } catch (ignore) {
-      // Collapse state is only a convenience preference.
-    }
-  }
-
-  function getCollapsibleSection(sectionId) {
-    return document.querySelector('[data-section-id="' + sectionId + '"]');
-  }
-
-  function getCollapseToggle(sectionId) {
-    return document.querySelector('[data-collapse-section="' + sectionId + '"]');
-  }
-
-  function sectionTitle(section) {
-    var heading = section ? section.querySelector("h2") : null;
-    return heading ? trim(heading.textContent) : "Section";
-  }
-
-  function setSectionCollapsed(sectionId, isCollapsed, shouldSave) {
-    var section = getCollapsibleSection(sectionId);
-    var button = getCollapseToggle(sectionId);
-    var title = sectionTitle(section);
-
-    state.collapsedSections[sectionId] = Boolean(isCollapsed);
-
-    if (section) {
-      section.classList.toggle("is-collapsed", Boolean(isCollapsed));
-    }
-
-    if (button) {
-      button.textContent = isCollapsed ? ">" : "v";
-      button.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
-      button.setAttribute("title", (isCollapsed ? "Expand " : "Collapse ") + title);
-      button.setAttribute("aria-label", (isCollapsed ? "Expand " : "Collapse ") + title);
-    }
-
-    if (shouldSave) {
-      writeCollapsedSections();
-    }
-  }
-
-  function initCollapsibleSections() {
-    state.collapsedSections = readCollapsedSections();
-
-    Array.prototype.forEach.call(
-      document.querySelectorAll("[data-collapse-section]"),
-      function (button) {
-        var sectionId = button.getAttribute("data-collapse-section");
-        setSectionCollapsed(sectionId, Boolean(state.collapsedSections[sectionId]), false);
-        button.addEventListener("click", function () {
-          setSectionCollapsed(
-            sectionId,
-            !Boolean(state.collapsedSections[sectionId]),
-            true
-          );
-        });
-      }
-    );
-  }
-
   function makeLocalId() {
     var id = "local-" + state.nextLocalId;
     state.nextLocalId += 1;
@@ -213,14 +128,29 @@
     };
   }
 
-  function selectedEntry() {
+  function findEntryById(id) {
     var index;
     for (index = 0; index < state.entries.length; index += 1) {
-      if (state.entries[index].id === state.selectedId) {
+      if (state.entries[index].id === id) {
         return state.entries[index];
       }
     }
     return null;
+  }
+
+  function selectedDivisionEntry() {
+    if (state.selectedDivisionId === UNGROUPED_ID) {
+      return null;
+    }
+    return findEntryById(state.selectedDivisionId);
+  }
+
+  function selectedNoteEntry() {
+    return findEntryById(state.selectedNoteId);
+  }
+
+  function selectedEntry() {
+    return selectedNoteEntry() || selectedDivisionEntry();
   }
 
   function entriesByKey() {
@@ -241,6 +171,217 @@
       }
     });
     return count;
+  }
+
+  function rootEntries() {
+    return state.entries.filter(function (entry) {
+      return !trim(entry.parentKey);
+    });
+  }
+
+  function buildChildrenMap() {
+    var children = {};
+    var byKey = entriesByKey();
+
+    state.entries.forEach(function (entry) {
+      var parentKey = entry.parentKey && byKey[entry.parentKey] ? entry.parentKey : "";
+      if (!children[parentKey]) {
+        children[parentKey] = [];
+      }
+      children[parentKey].push(entry);
+    });
+
+    return children;
+  }
+
+  function appendDescendants(children, parentKey, depth, rows, visited) {
+    (children[parentKey] || []).forEach(function (entry) {
+      if (visited[entry.id]) {
+        return;
+      }
+      visited[entry.id] = true;
+      rows.push({ entry: entry, depth: depth });
+      appendDescendants(children, entry.key, depth + 1, rows, visited);
+    });
+  }
+
+  function buildRowsForDivision(entry) {
+    var rows = [];
+    var children = buildChildrenMap();
+    appendDescendants(children, entry.key, 0, rows, {});
+    return rows;
+  }
+
+  function buildUngroupedRows() {
+    var rows = [];
+    var byKey = entriesByKey();
+    var children = buildChildrenMap();
+    var roots = rootEntries();
+    var visited = {};
+
+    state.entries.forEach(function (entry) {
+      var shouldStart = false;
+
+      if (!roots.length) {
+        shouldStart = !entry.parentKey || !byKey[entry.parentKey];
+      } else {
+        shouldStart = Boolean(entry.parentKey && !byKey[entry.parentKey]);
+      }
+
+      if (shouldStart && !visited[entry.id]) {
+        visited[entry.id] = true;
+        rows.push({ entry: entry, depth: 0 });
+        appendDescendants(children, entry.key, 1, rows, visited);
+      }
+    });
+
+    if (!roots.length) {
+      state.entries.forEach(function (entry) {
+        if (!visited[entry.id]) {
+          visited[entry.id] = true;
+          rows.push({ entry: entry, depth: 0 });
+        }
+      });
+    }
+
+    return rows;
+  }
+
+  function divisionCode(key) {
+    var value = trim(key);
+    var match = value.match(/^\d+$/);
+    if (match && value.length === 1) {
+      return "0" + value;
+    }
+    return value || "--";
+  }
+
+  function divisionTitle(entry) {
+    if (!entry) {
+      return "UNGROUPED";
+    }
+    // return "DIVISION " + divisionCode(entry.key);
+    return divisionCode(entry.key);
+  }
+
+  function getDivisionModels() {
+    var models = rootEntries().map(function (entry) {
+      return {
+        id: entry.id,
+        entry: entry,
+        title: divisionTitle(entry),
+        text: entry.text || "Untitled division",
+        rows: buildRowsForDivision(entry)
+      };
+    });
+    var ungroupedRows = buildUngroupedRows();
+
+    if (!models.length || ungroupedRows.length) {
+      models.push({
+        id: UNGROUPED_ID,
+        entry: null,
+        title: "UNGROUPED",
+        text: "Keynotes without a root division",
+        rows: ungroupedRows
+      });
+    }
+
+    return models;
+  }
+
+  function selectedDivisionModel() {
+    var models = getDivisionModels();
+    var index;
+
+    for (index = 0; index < models.length; index += 1) {
+      if (models[index].id === state.selectedDivisionId) {
+        return models[index];
+      }
+    }
+    return models[0] || null;
+  }
+
+  function rootAncestorFor(entry) {
+    var byKey = entriesByKey();
+    var seen = {};
+    var cursor = entry;
+    var parent;
+
+    while (cursor && cursor.parentKey && byKey[cursor.parentKey]) {
+      if (seen[cursor.id]) {
+        return null;
+      }
+      seen[cursor.id] = true;
+      parent = byKey[cursor.parentKey];
+      if (!parent.parentKey) {
+        return parent;
+      }
+      cursor = parent;
+    }
+
+    return cursor && !cursor.parentKey ? cursor : null;
+  }
+
+  function setSelectionForEntry(entry) {
+    var root = entry ? rootAncestorFor(entry) : null;
+
+    if (!entry) {
+      state.selectedDivisionId = null;
+      state.selectedNoteId = null;
+      state.selectedId = null;
+      return;
+    }
+
+    if (root && root.id === entry.id) {
+      state.selectedDivisionId = root.id;
+      state.selectedNoteId = null;
+      state.selectedId = root.id;
+      return;
+    }
+
+    state.selectedDivisionId = root ? root.id : UNGROUPED_ID;
+    state.selectedNoteId = entry.id;
+    state.selectedId = entry.id;
+  }
+
+  function ensureSelection() {
+    var models = getDivisionModels();
+    var selectedModel = null;
+    var selectedNote = selectedNoteEntry();
+    var noteIsVisible = false;
+    var index;
+
+    if (!models.length) {
+      state.selectedDivisionId = null;
+      state.selectedNoteId = null;
+      state.selectedId = null;
+      return null;
+    }
+
+    for (index = 0; index < models.length; index += 1) {
+      if (models[index].id === state.selectedDivisionId) {
+        selectedModel = models[index];
+        break;
+      }
+    }
+
+    if (!selectedModel) {
+      selectedModel = models[0];
+      state.selectedDivisionId = selectedModel.id;
+      state.selectedNoteId = null;
+    }
+
+    if (selectedNote) {
+      noteIsVisible = selectedModel.rows.some(function (row) {
+        return row.entry.id === selectedNote.id;
+      });
+      if (!noteIsVisible) {
+        state.selectedNoteId = null;
+      }
+    }
+
+    state.selectedId = state.selectedNoteId || (selectedModel.entry ? selectedModel.entry.id : null);
+    return selectedModel;
   }
 
   function validateAll() {
@@ -334,6 +475,37 @@
     });
   }
 
+  function rowMatchesQuery(row, query) {
+    var entry = row.entry;
+    var haystack = (entry.key + " " + entry.text + " " + entry.parentKey).toLowerCase();
+    return !query || haystack.indexOf(query) !== -1;
+  }
+
+  function divisionMatchesQuery(model, query) {
+    var haystack = (model.title + " " + model.text).toLowerCase();
+
+    if (!query || haystack.indexOf(query) !== -1) {
+      return true;
+    }
+
+    return model.rows.some(function (row) {
+      return rowMatchesQuery(row, query);
+    });
+  }
+
+  function selectedRows() {
+    var model = ensureSelection();
+    var query = trim(byId("search-input") ? byId("search-input").value : "").toLowerCase();
+
+    if (!model) {
+      return [];
+    }
+
+    return model.rows.filter(function (row) {
+      return rowMatchesQuery(row, query);
+    });
+  }
+
   function setStatus(statusOrState, message) {
     var statusState = typeof statusOrState === "object"
       ? statusOrState
@@ -351,7 +523,7 @@
 
   function setDirty(isDirty) {
     state.dirty = Boolean(isDirty);
-    setText("dirty-state", state.dirty ? "Unsaved changes" : "No changes");
+    setText("dirty-state", state.dirty ? "UNSAVED CHANGES" : "NO CHANGES");
     renderSaveState();
   }
 
@@ -359,178 +531,175 @@
     setDirty(true);
   }
 
-  function buildTreeRows() {
-    var rows = [];
-    var children = {};
-    var byKey = entriesByKey();
-    var visited = {};
-
-    state.entries.forEach(function (entry) {
-      var parentKey = entry.parentKey && byKey[entry.parentKey] ? entry.parentKey : "";
-      if (!children[parentKey]) {
-        children[parentKey] = [];
-      }
-      children[parentKey].push(entry);
-    });
-
-    function appendChildren(parentKey, depth) {
-      (children[parentKey] || []).forEach(function (entry) {
-        if (visited[entry.id]) {
-          return;
-        }
-        visited[entry.id] = true;
-        rows.push({ entry: entry, depth: depth });
-        appendChildren(entry.key, depth + 1);
-      });
-    }
-
-    appendChildren("", 0);
-
-    state.entries.forEach(function (entry) {
-      if (!visited[entry.id]) {
-        visited[entry.id] = true;
-        rows.push({ entry: entry, depth: 0 });
-      }
-    });
-
-    return rows;
+  function renderMeta() {
+    var payload = state.payload || {};
+    setText("doc-title", payload.docTitle || "No Revit document");
+    setText("keynote-path", payload.displayPath || payload.keynotePath || "No keynote file loaded");
+    setText("encoding-label", payload.encoding || "-");
+    setText("entry-count", formatNumber(state.entries.length));
   }
 
-  function rowMatchesQuery(row, query) {
-    var entry = row.entry;
-    var haystack = (entry.key + " " + entry.text + " " + entry.parentKey).toLowerCase();
-    return !query || haystack.indexOf(query) !== -1;
-  }
-
-  function renderTable() {
-    var list = byId("keynote-table-body");
+  function renderDivisions() {
+    var list = byId("division-list");
     var query = trim(byId("search-input") ? byId("search-input").value : "").toLowerCase();
-    var rows = buildTreeRows().filter(function (row) {
-      return rowMatchesQuery(row, query);
+    var models = getDivisionModels().filter(function (model) {
+      return divisionMatchesQuery(model, query);
     });
+    var selectedModel = selectedDivisionModel();
 
     if (!list) {
       return;
     }
 
     clearElement(list);
-    setText("filter-summary", formatNumber(rows.length) + " visible rows");
+    setText("filter-summary", formatNumber(models.length) + " divisions");
 
-    if (!rows.length) {
-      var emptyState = document.createElement("div");
-      emptyState.className = "empty-cell";
-      emptyState.textContent = state.entries.length ? "No keynotes match the search." : "No keynote rows loaded.";
-      list.appendChild(emptyState);
+    if (!models.length) {
+      var empty = document.createElement("div");
+      empty.className = "empty-cell";
+      empty.textContent = state.entries.length ? "No divisions match the search." : "No divisions loaded.";
+      list.appendChild(empty);
       return;
     }
 
-    rows.forEach(function (row) {
-      var entry = row.entry;
+    models.forEach(function (model) {
       var item = document.createElement("button");
-      var main = document.createElement("span");
-      var keyText = document.createElement("span");
-      var childBadge = document.createElement("span");
-      var preview = document.createElement("span");
+      var title = document.createElement("strong");
+      var subtitle = document.createElement("span");
       var meta = document.createElement("span");
-      var children = childCount(entry.key);
-      var metaText = [];
 
       item.type = "button";
-      item.className = entry.id === state.selectedId ? "sidebar-keynote is-selected" : "sidebar-keynote";
-      item.style.setProperty("--depth", row.depth);
+      item.className = "division-row" + (selectedModel && model.id === selectedModel.id ? " is-selected" : "");
       item.setAttribute("role", "option");
-      item.setAttribute("aria-selected", entry.id === state.selectedId ? "true" : "false");
-      item.setAttribute("aria-label", "Select keynote " + (entry.key || "without key"));
-      item.setAttribute("title", (entry.key || "(No key)") + " - " + (entry.text || ""));
+      item.setAttribute("aria-selected", selectedModel && model.id === selectedModel.id ? "true" : "false");
+      item.setAttribute("data-entry-id", model.id);
+      item.setAttribute("title", model.title + " - " + model.text);
+      item.tabIndex = -1;
 
-      main.className = "sidebar-keynote__main";
-      keyText.className = "sidebar-keynote__key";
-      keyText.textContent = entry.key || "(No key)";
-      if (children) {
-        childBadge.className = "child-badge";
-        childBadge.textContent = formatNumber(children);
-      }
+      title.textContent = model.title;
+      subtitle.textContent = model.text || "Untitled division";
+      meta.textContent = formatNumber(model.rows.length) + (model.rows.length === 1 ? " note" : " notes");
 
-      preview.className = "sidebar-keynote__text";
-      preview.textContent = entry.text || "-";
-
-      if (entry.parentKey) {
-        metaText.push("Parent " + entry.parentKey);
-      }
-      metaText.push(entry.lineNumber ? "Line " + entry.lineNumber : "New row");
-      meta.className = "sidebar-keynote__meta";
-      meta.textContent = metaText.join(" | ");
-
-      main.appendChild(keyText);
-      if (children) {
-        main.appendChild(childBadge);
-      }
-      item.appendChild(main);
-      item.appendChild(preview);
+      item.appendChild(title);
+      item.appendChild(subtitle);
       item.appendChild(meta);
-
       item.addEventListener("click", function () {
-        selectEntry(entry.id);
+        selectDivision(model.id);
       });
 
       list.appendChild(item);
     });
   }
 
-  function renderParentOptions() {
-    var options = byId("parent-options");
-    var selected = selectedEntry();
+  function renderDivisionSelect() {
+    var select = byId("division-select");
+    var models = getDivisionModels();
+    var selectedModel = selectedDivisionModel();
 
-    if (!options) {
+    if (!select) {
       return;
     }
 
-    clearElement(options);
-    state.entries.forEach(function (entry) {
-      var option;
-      if (selected && entry.id === selected.id) {
-        return;
-      }
-      if (!entry.key) {
-        return;
-      }
-      option = document.createElement("option");
-      option.value = entry.key;
-      options.appendChild(option);
+    clearElement(select);
+    models.forEach(function (model) {
+      var option = document.createElement("option");
+      option.value = model.id;
+      option.textContent = model.title + " - " + model.text;
+      select.appendChild(option);
     });
+    select.value = selectedModel ? selectedModel.id : "";
   }
 
-  function renderEditor() {
-    var entry = selectedEntry();
-    var keyInput = byId("key-input");
-    var textInput = byId("text-input");
-    var parentInput = byId("parent-input");
-    var hasSelection = Boolean(entry);
+  function renderDivisionHeader() {
+    var model = selectedDivisionModel();
+    var keyInput = byId("division-key-input");
+    var textInput = byId("division-text-input");
+    var hasEntry = Boolean(model && model.entry);
 
     if (keyInput) {
-      keyInput.disabled = !hasSelection;
-      keyInput.value = entry ? entry.key : "";
+      keyInput.disabled = !hasEntry;
+      keyInput.value = hasEntry ? model.entry.key : "UNGROUPED";
     }
     if (textInput) {
-      textInput.disabled = !hasSelection;
-      textInput.value = entry ? entry.text : "";
+      textInput.disabled = !hasEntry;
+      textInput.value = hasEntry ? model.entry.text : "Keynotes without a root division";
     }
-    if (parentInput) {
-      parentInput.disabled = !hasSelection;
-      parentInput.value = entry ? entry.parentKey : "";
+  }
+
+  function renderNotes() {
+    var body = byId("keynote-table-body");
+    var rows = selectedRows();
+
+    if (!body) {
+      return;
     }
 
-    if (entry) {
-      setText(
-        "selected-summary",
-        entry.key ? entry.key + " | " + shortPath(state.payload ? state.payload.keynotePath : "") : "New keynote row"
-      );
-    } else {
-      setText("selected-summary", "Select a keynote row.");
+    clearElement(body);
+
+    if (!rows.length) {
+      var empty = document.createElement("div");
+      empty.className = "empty-cell";
+      empty.textContent = state.entries.length ? "No notes in this division." : "No keynote notes loaded.";
+      body.appendChild(empty);
+      return;
     }
 
-    renderParentOptions();
-    renderRowActions();
+    rows.forEach(function (row) {
+      var entry = row.entry;
+      var item = document.createElement("div");
+      var keyCell = document.createElement("div");
+      var textCell = document.createElement("div");
+      var keyInput = document.createElement("input");
+      var textInput = document.createElement("textarea");
+
+      item.className = "note-row" + (entry.id === state.selectedNoteId ? " is-selected" : "");
+      item.setAttribute("role", "row");
+      item.setAttribute("data-entry-id", entry.id);
+      item.tabIndex = -1;
+      item.style.setProperty("--depth", row.depth);
+
+      keyCell.className = "note-cell note-key-cell";
+      textCell.className = "note-cell note-text-cell";
+
+      keyInput.type = "text";
+      keyInput.className = "note-input note-key-input";
+      keyInput.value = entry.key;
+      keyInput.setAttribute("aria-label", "Key for " + (entry.key || "new keynote"));
+
+      textInput.className = "note-input note-text-input";
+      textInput.rows = 2;
+      textInput.value = entry.text;
+      textInput.setAttribute("aria-label", "Description for " + (entry.key || "new keynote"));
+
+      [keyInput, textInput].forEach(function (input) {
+        input.addEventListener("focus", function () {
+          selectNote(entry.id, false);
+        });
+        input.addEventListener("blur", function () {
+          deferRenderAllWhenEditingSettles();
+        });
+      });
+
+      keyInput.addEventListener("input", function () {
+        updateEntryField(entry.id, "key", keyInput.value, false);
+      });
+
+      textInput.addEventListener("input", function () {
+        updateEntryField(entry.id, "text", textInput.value, false);
+      });
+
+      item.addEventListener("click", function (event) {
+        if (event.target.tagName !== "INPUT" && event.target.tagName !== "TEXTAREA") {
+          selectNote(entry.id, true);
+        }
+      });
+
+      keyCell.appendChild(keyInput);
+      textCell.appendChild(textInput);
+      item.appendChild(keyCell);
+      item.appendChild(textCell);
+      body.appendChild(item);
+    });
   }
 
   function renderValidation() {
@@ -542,15 +711,9 @@
     var warnings = issues.filter(function (issue) {
       return text(issue.severity).toLowerCase() !== "error";
     });
+    var total = errors.length + warnings.length;
 
-    setText(
-      "validation-summary",
-      errors.length
-        ? formatNumber(errors.length) + " errors"
-        : warnings.length
-          ? formatNumber(warnings.length) + " warnings"
-          : "Ready to save"
-    );
+    setText("validation-summary", formatNumber(total));
 
     if (!container) {
       return;
@@ -588,12 +751,7 @@
 
       if (issue.key) {
         item.addEventListener("click", function () {
-          var match = state.entries.filter(function (entry) {
-            return entry.key === issue.key;
-          })[0];
-          if (match) {
-            selectEntry(match.id);
-          }
+          selectEntryByKey(issue.key, true);
         });
       }
 
@@ -602,20 +760,20 @@
   }
 
   function renderRowActions() {
-    var entry = selectedEntry();
-    var hasSelection = Boolean(entry);
+    var target = selectedNoteEntry() || selectedDivisionEntry();
+    var division = selectedDivisionEntry();
     var deleteButton = byId("delete-row");
     var addChildButton = byId("add-child");
     var duplicateButton = byId("duplicate-row");
 
     if (addChildButton) {
-      addChildButton.disabled = !hasSelection;
+      addChildButton.disabled = !division;
     }
     if (duplicateButton) {
-      duplicateButton.disabled = !hasSelection;
+      duplicateButton.disabled = !target;
     }
     if (deleteButton) {
-      deleteButton.disabled = !hasSelection;
+      deleteButton.disabled = !target;
     }
   }
 
@@ -636,25 +794,93 @@
     }
   }
 
-  function renderMeta() {
-    var payload = state.payload || {};
-    setText("doc-title", payload.docTitle || "No Revit document");
-    setText("keynote-path", payload.displayPath || payload.keynotePath || "No keynote file loaded");
-    setText("encoding-label", payload.encoding || "-");
-    setText("entry-count", formatNumber(state.entries.length));
-  }
-
   function renderAll() {
+    ensureSelection();
     renderMeta();
-    renderTable();
-    renderEditor();
+    renderDivisions();
+    renderDivisionSelect();
+    renderDivisionHeader();
+    renderNotes();
     renderValidation();
     renderSaveState();
+    renderRowActions();
   }
 
-  function selectEntry(id) {
-    state.selectedId = id;
+  function deferRenderAllWhenEditingSettles() {
+    globalScope.setTimeout(function () {
+      var active = document.activeElement;
+      if (
+        active &&
+        active.closest &&
+        active.closest(".note-table-body, .selected-division-card")
+      ) {
+        return;
+      }
+      renderAll();
+    }, 0);
+  }
+
+  function syncSelectionClasses() {
+    Array.prototype.forEach.call(document.querySelectorAll(".division-row"), function (row) {
+      var isSelected = row.getAttribute("data-entry-id") === state.selectedDivisionId;
+      row.classList.toggle("is-selected", isSelected);
+      row.setAttribute("aria-selected", isSelected ? "true" : "false");
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll(".note-row"), function (row) {
+      row.classList.toggle("is-selected", row.getAttribute("data-entry-id") === state.selectedNoteId);
+    });
+
+    state.selectedId = state.selectedNoteId || (selectedDivisionEntry() ? selectedDivisionEntry().id : null);
+    renderRowActions();
+  }
+
+  function selectDivision(id) {
+    state.selectedDivisionId = id;
+    state.selectedNoteId = null;
+    state.selectedId = selectedDivisionEntry() ? selectedDivisionEntry().id : null;
     renderAll();
+  }
+
+  function selectNote(id, shouldRender) {
+    var entry = findEntryById(id);
+    if (!entry) {
+      return;
+    }
+    setSelectionForEntry(entry);
+    if (shouldRender) {
+      renderAll();
+    } else {
+      syncSelectionClasses();
+    }
+  }
+
+  function selectEntryByKey(key, shouldScroll) {
+    var match = state.entries.filter(function (entry) {
+      return entry.key === key;
+    })[0];
+
+    if (!match) {
+      return;
+    }
+
+    setSelectionForEntry(match);
+    renderAll();
+
+    if (shouldScroll) {
+      globalScope.setTimeout(function () {
+        var selector = match.parentKey
+          ? '.note-row[data-entry-id="' + match.id + '"]'
+          : '.division-row[data-entry-id="' + match.id + '"]';
+        var element = document.querySelector(selector);
+        if (element && typeof element.scrollIntoView === "function") {
+          element.scrollIntoView({ block: "nearest" });
+        }
+        if (element && typeof element.focus === "function") {
+          element.focus();
+        }
+      }, 0);
+    }
   }
 
   function setStatusFromPayload(payload) {
@@ -669,30 +895,35 @@
   function loadData(payload) {
     var previousSelection = selectedEntry();
     var previousKey = previousSelection ? previousSelection.key : "";
+    var selected = null;
 
     state.payload = payload || {};
     state.entries = (state.payload.entries || []).map(normalizeEntry);
     state.sourceIssues = (state.payload.issues || []).filter(sourceIssueBlocksSave);
     state.saving = false;
 
-    var selected = null;
     if (previousKey) {
       selected = state.entries.filter(function (entry) {
         return entry.key === previousKey;
       })[0] || null;
     }
-    if (!selected && state.entries.length) {
-      selected = state.entries[0];
+
+    if (selected) {
+      setSelectionForEntry(selected);
+    } else {
+      state.selectedDivisionId = null;
+      state.selectedNoteId = null;
+      state.selectedId = null;
+      ensureSelection();
     }
-    state.selectedId = selected ? selected.id : null;
 
     setDirty(false);
     setStatusFromPayload(state.payload);
     renderAll();
   }
 
-  function updateSelectedField(fieldName, value) {
-    var entry = selectedEntry();
+  function updateEntryField(entryId, fieldName, value, shouldRender) {
+    var entry = findEntryById(entryId);
     var oldKey;
 
     if (!entry) {
@@ -717,14 +948,16 @@
     }
 
     markDirty();
-    renderTable();
-    renderParentOptions();
+
+    if (shouldRender) {
+      renderAll();
+      return;
+    }
+
+    renderMeta();
     renderValidation();
     renderSaveState();
-    setText(
-      "selected-summary",
-      entry.key ? entry.key + " | " + shortPath(state.payload ? state.payload.keynotePath : "") : "New keynote row"
-    );
+    syncSelectionClasses();
   }
 
   function makeUniqueKey(baseKey) {
@@ -745,45 +978,91 @@
     return candidate;
   }
 
+  function makeRootKey() {
+    var max = 0;
+    rootEntries().forEach(function (entry) {
+      var match = trim(entry.key).match(/^\d+$/);
+      var number;
+      if (match) {
+        number = Number(entry.key);
+        if (number > max) {
+          max = number;
+        }
+      }
+    });
+    return makeUniqueKey(("0" + (max + 1)).slice(-2));
+  }
+
+  function makeChildKey(parentKey) {
+    var prefix = trim(parentKey) ? trim(parentKey) + "." : "NEW.";
+    var existing = {};
+    var index;
+    var candidate;
+
+    state.entries.forEach(function (entry) {
+      existing[entry.key] = true;
+    });
+
+    for (index = 1; index < 1000; index += 1) {
+      candidate = prefix + ("0" + index).slice(-2);
+      if (!existing[candidate]) {
+        return candidate;
+      }
+    }
+
+    return makeUniqueKey(prefix + "NEW");
+  }
+
   function addRoot() {
     var entry = {
       id: makeLocalId(),
-      key: makeUniqueKey("NEW"),
-      text: "New keynote",
+      key: makeRootKey(),
+      text: "New division",
       parentKey: "",
       lineNumber: null,
       originalIndex: state.entries.length
     };
     state.entries.push(entry);
+    state.selectedDivisionId = entry.id;
+    state.selectedNoteId = null;
     state.selectedId = entry.id;
     markDirty();
     renderAll();
   }
 
   function addChild() {
-    var parent = selectedEntry();
+    var parent = selectedDivisionEntry();
     var entry;
 
     if (!parent) {
+      setStatus({
+        status: "error",
+        message: "Add a parent division before adding a keynote note."
+      });
       return;
     }
 
     entry = {
       id: makeLocalId(),
-      key: makeUniqueKey(parent.key + ".A"),
+      key: makeChildKey(parent.key),
       text: "New keynote",
       parentKey: parent.key,
       lineNumber: null,
       originalIndex: state.entries.length
     };
     state.entries.push(entry);
+    state.selectedNoteId = entry.id;
     state.selectedId = entry.id;
     markDirty();
     renderAll();
   }
 
+  function actionTargetEntry() {
+    return selectedNoteEntry() || selectedDivisionEntry();
+  }
+
   function duplicateSelected() {
-    var entry = selectedEntry();
+    var entry = actionTargetEntry();
     var copy;
 
     if (!entry) {
@@ -799,14 +1078,13 @@
       originalIndex: state.entries.length
     };
     state.entries.push(copy);
-    state.selectedId = copy.id;
+    setSelectionForEntry(copy);
     markDirty();
     renderAll();
   }
 
   function deleteSelected() {
-    var entry = selectedEntry();
-    var nextSelection = null;
+    var entry = actionTargetEntry();
 
     if (!entry) {
       return;
@@ -824,10 +1102,14 @@
       return candidate.id !== entry.id;
     });
 
-    if (state.entries.length) {
-      nextSelection = state.entries[Math.min(entry.originalIndex || 0, state.entries.length - 1)];
+    if (state.selectedNoteId === entry.id) {
+      state.selectedNoteId = null;
     }
-    state.selectedId = nextSelection ? nextSelection.id : null;
+    if (state.selectedDivisionId === entry.id) {
+      state.selectedDivisionId = null;
+    }
+    state.selectedId = null;
+    ensureSelection();
     markDirty();
     renderAll();
   }
@@ -932,39 +1214,56 @@
     }
   }
 
-  function bindInput(id, fieldName) {
+  function bindDivisionInput(id, fieldName) {
     var input = byId(id);
     if (!input) {
       return;
     }
 
     input.addEventListener("input", function () {
-      updateSelectedField(fieldName, input.value);
+      var entry = selectedDivisionEntry();
+      if (entry) {
+        updateEntryField(entry.id, fieldName, input.value, false);
+      }
     });
+    input.addEventListener("blur", function () {
+      deferRenderAllWhenEditingSettles();
+    });
+  }
+
+  function bindClick(id, handler) {
+    var button = byId(id);
+    if (button) {
+      button.addEventListener("click", handler);
+    }
   }
 
   function init() {
     var searchInput = byId("search-input");
-
-    initCollapsibleSections();
+    var divisionSelect = byId("division-select");
 
     if (searchInput) {
       searchInput.addEventListener("input", function () {
-        renderTable();
+        renderAll();
       });
     }
 
-    bindInput("key-input", "key");
-    bindInput("text-input", "text");
-    bindInput("parent-input", "parentKey");
+    if (divisionSelect) {
+      divisionSelect.addEventListener("change", function () {
+        selectDivision(divisionSelect.value);
+      });
+    }
 
-    byId("add-root").addEventListener("click", addRoot);
-    byId("add-child").addEventListener("click", addChild);
-    byId("duplicate-row").addEventListener("click", duplicateSelected);
-    byId("delete-row").addEventListener("click", deleteSelected);
-    byId("refresh-data").addEventListener("click", refreshData);
-    byId("save-data").addEventListener("click", saveData);
-    byId("close-window").addEventListener("click", closeWindow);
+    bindDivisionInput("division-key-input", "key");
+    bindDivisionInput("division-text-input", "text");
+
+    bindClick("add-root", addRoot);
+    bindClick("add-child", addChild);
+    bindClick("duplicate-row", duplicateSelected);
+    bindClick("delete-row", deleteSelected);
+    bindClick("refresh-data", refreshData);
+    bindClick("save-data", saveData);
+    bindClick("close-window", closeWindow);
 
     renderAll();
     postWebViewMessage({ type: "appReady" });
@@ -979,4 +1278,4 @@
   if (typeof document !== "undefined") {
     document.addEventListener("DOMContentLoaded", init);
   }
-}(typeof window !== "undefined" ? window : globalThis));
+}(typeof window !== "undefined" ? window : this));

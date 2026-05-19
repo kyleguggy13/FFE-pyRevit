@@ -9,145 +9,105 @@
   </head>
   <body>
     <div class="app-shell">
-      <header class="topbar">
-        <div class="brand-lockup">
-          <img class="brand-mark" src="../icon.png" alt="" />
-          <div class="brand-copy">
-            <p class="eyebrow">FFE-pyRevit</p>
-            <h1>Keynote Manager</h1>
-            <p class="meta-line">
-              <span id="doc-title">Waiting for Revit document</span>
-              <span class="dot-separator" aria-hidden="true"></span>
-              <span id="dirty-state">No changes</span>
-            </p>
-          </div>
+      <header class="title-card">
+        <div class="brand-copy">
+          <p class="eyebrow">FFE-PYREVIT</p>
+          <h1>KEYNOTE MANAGER</h1>
+          <p class="meta-line">
+            <span id="doc-title">Waiting for Revit document</span>
+            <span id="dirty-state">NO CHANGES</span>
+          </p>
         </div>
 
-        <div class="window-actions">
-          <button id="refresh-data" class="secondary-button" type="button">Refresh</button>
-          <button id="save-data" class="primary-button" type="button" disabled>Save</button>
-          <button id="close-window" class="secondary-button" type="button">Close</button>
+        <div class="window-actions" aria-label="Window actions">
+          <button id="refresh-data" class="utility-button" type="button">Refresh</button>
+          <button id="save-data" class="save-button" type="button" disabled>Save</button>
+          <button id="close-window" class="utility-button" type="button">Close</button>
         </div>
       </header>
 
-      <section id="state-banner" class="state-banner" data-tone="idle">
-        <strong id="state-title">Loading</strong>
-        <span id="state-message">Waiting for keynote data from Revit.</span>
+      <section id="state-banner" class="message-strip" data-tone="idle">
+        <div class="message-copy">
+          <strong id="state-title">&lt;Messages&gt;</strong>
+          <span id="state-message">Waiting for keynote data from Revit.</span>
+        </div>
+        <div class="warning-pill" aria-label="Warnings">
+          <span>Warnings</span>
+          <span id="validation-summary" class="warning-count">0</span>
+        </div>
       </section>
 
       <section class="file-strip" aria-label="Keynote file details">
-        <div class="file-field file-field--wide">
-          <span>Keynote File</span>
-          <strong id="keynote-path">No keynote file loaded</strong>
-        </div>
-        <div class="file-field">
-          <span>Encoding</span>
-          <strong id="encoding-label">-</strong>
-        </div>
-        <div class="file-field">
-          <span>Entries</span>
-          <strong id="entry-count">0</strong>
-        </div>
+        <span id="keynote-path">No keynote file loaded</span>
+        <span id="encoding-label">-</span>
+        <span><strong id="entry-count">0</strong> entries</span>
       </section>
 
+      <div class="action-row" aria-label="Keynote row actions">
+        <button id="add-root" class="action-button" type="button">Add Parent</button>
+        <button id="add-child" class="action-button" type="button" disabled>Add Note</button>
+        <button id="duplicate-row" class="action-button action-button--blue" type="button" disabled>Duplicate</button>
+        <button id="delete-row" class="action-button action-button--red" type="button" disabled>Delete</button>
+      </div>
+
       <main class="workspace">
-        <section class="manager-panel collapsible-section" data-section-id="keynotes" aria-labelledby="keynote-list-title">
-          <div class="toolbar">
-            <div class="heading-lockup">
-              <button
-                class="collapse-toggle"
-                type="button"
-                data-collapse-section="keynotes"
-                aria-expanded="true"
-                aria-controls="keynotes-section-body"
-                title="Collapse Keynotes"
-              >v</button>
-              <div>
-                <h2 id="keynote-list-title">Keynotes</h2>
-                <p id="filter-summary">0 visible rows</p>
-              </div>
+        <aside class="division-panel" aria-labelledby="division-list-title">
+          <div class="division-heading">
+            <div>
+              <h2 id="division-list-title">DIVISIONS</h2>
+              <p id="filter-summary">0 divisions</p>
             </div>
-            <label class="search-field" for="search-input">
-              <span>Search</span>
-              <input id="search-input" type="search" placeholder="Key, text, or parent" />
-            </label>
           </div>
 
-          <div id="keynotes-section-body" class="collapsible-body">
-            <div class="row-actions" aria-label="Keynote row actions">
-              <button id="add-root" class="secondary-button" type="button">Add Root</button>
-              <button id="add-child" class="secondary-button" type="button" disabled>Add Child</button>
-              <button id="duplicate-row" class="secondary-button" type="button" disabled>Duplicate</button>
-              <button id="delete-row" class="danger-button" type="button" disabled>Delete</button>
-            </div>
+          <div id="keynotes-section-body">
+            <label class="search-field" for="search-input">
+              <span>Search</span>
+              <input id="search-input" type="search" placeholder="Key, description, or parent" />
+            </label>
 
-            <div class="sidebar-list-wrap">
-              <div id="keynote-table-body" class="keynote-sidebar-list" role="listbox" aria-label="Keynote list">
+            <div class="division-list-wrap">
+              <div id="division-list" class="division-list" role="listbox" aria-label="Division list">
                 <div class="empty-cell">Waiting for keynote data...</div>
               </div>
             </div>
           </div>
-        </section>
+        </aside>
 
-        <aside class="editor-panel collapsible-section" data-section-id="editor" aria-labelledby="editor-title">
-          <div class="panel-heading">
-            <div class="heading-lockup">
-              <button
-                class="collapse-toggle"
-                type="button"
-                data-collapse-section="editor"
-                aria-expanded="true"
-                aria-controls="editor-form"
-                title="Collapse Editor"
-              >v</button>
-              <div>
-                <h2 id="editor-title">Editor</h2>
-                <p id="selected-summary">Select a keynote row.</p>
-              </div>
-            </div>
+        <section class="notes-panel" aria-labelledby="notes-title">
+          <div class="selected-division-card">
+            <label class="division-key-field" for="division-key-input">
+              <span class="sr-only">Division key</span>
+              <input id="division-key-input" type="text" autocomplete="off" disabled />
+            </label>
+            <label class="division-text-field" for="division-text-input">
+              <span class="sr-only">Division description</span>
+              <input id="division-text-input" type="text" autocomplete="off" disabled />
+            </label>
+            <select id="division-select" class="division-select" aria-label="Select division"></select>
           </div>
 
-          <form id="editor-form" class="collapsible-body" novalidate>
-            <label class="field-group" for="key-input">
+          <div id="notes-section-body" class="note-table-shell">
+            <div id="notes-title" class="note-table-header" role="row">
               <span>Key</span>
-              <input id="key-input" type="text" autocomplete="off" disabled />
-            </label>
-
-            <label class="field-group" for="text-input">
-              <span>Text</span>
-              <textarea id="text-input" rows="8" disabled></textarea>
-            </label>
-
-            <label class="field-group" for="parent-input">
-              <span>Parent</span>
-              <input id="parent-input" type="text" list="parent-options" autocomplete="off" disabled />
-              <datalist id="parent-options"></datalist>
-            </label>
-          </form>
-
-          <section class="validation-panel collapsible-section" data-section-id="validation" aria-labelledby="validation-title">
-            <div class="panel-heading panel-heading--compact">
-              <div class="heading-lockup">
-                <button
-                  class="collapse-toggle"
-                  type="button"
-                  data-collapse-section="validation"
-                  aria-expanded="true"
-                  aria-controls="validation-list"
-                  title="Collapse Validation"
-                >v</button>
-                <div>
-                  <h2 id="validation-title">Validation</h2>
-                  <p id="validation-summary">No data loaded.</p>
-                </div>
-              </div>
+              <span>Description</span>
             </div>
-            <div id="validation-list" class="validation-list collapsible-body">
-              <div class="empty-state">No validation messages.</div>
+            <div id="keynote-table-body" class="note-table-body" role="grid" aria-label="Keynote notes">
+              <div class="empty-cell">Waiting for keynote data...</div>
             </div>
-          </section>
-        </aside>
+          </div>
+        </section>
       </main>
+
+      <section
+        id="validation-panel"
+        class="validation-panel"
+        aria-labelledby="validation-heading"
+      >
+        <h2 id="validation-heading">Warnings</h2>
+        <div id="validation-list" class="validation-list">
+          <div class="empty-state">No validation messages.</div>
+        </div>
+      </section>
     </div>
   </body>
 </html>
