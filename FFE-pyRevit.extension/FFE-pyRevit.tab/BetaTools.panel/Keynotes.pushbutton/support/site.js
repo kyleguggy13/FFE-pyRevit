@@ -8,7 +8,8 @@
     selectedId: null,
     dirty: false,
     saving: false,
-    nextLocalId: 1
+    nextLocalId: 1,
+    collapsedSections: {}
   };
 
   var STATUS_TITLES = {
@@ -90,6 +91,84 @@
     }
     parts = value.split(/[\\/]/);
     return parts[parts.length - 1] || value;
+  }
+
+  function collapsedStorageKey() {
+    return "ffe-keynote-manager-collapsed-sections";
+  }
+
+  function readCollapsedSections() {
+    try {
+      return JSON.parse(globalScope.localStorage.getItem(collapsedStorageKey())) || {};
+    } catch (ignore) {
+      return {};
+    }
+  }
+
+  function writeCollapsedSections() {
+    try {
+      globalScope.localStorage.setItem(
+        collapsedStorageKey(),
+        JSON.stringify(state.collapsedSections || {})
+      );
+    } catch (ignore) {
+      // Collapse state is only a convenience preference.
+    }
+  }
+
+  function getCollapsibleSection(sectionId) {
+    return document.querySelector('[data-section-id="' + sectionId + '"]');
+  }
+
+  function getCollapseToggle(sectionId) {
+    return document.querySelector('[data-collapse-section="' + sectionId + '"]');
+  }
+
+  function sectionTitle(section) {
+    var heading = section ? section.querySelector("h2") : null;
+    return heading ? trim(heading.textContent) : "Section";
+  }
+
+  function setSectionCollapsed(sectionId, isCollapsed, shouldSave) {
+    var section = getCollapsibleSection(sectionId);
+    var button = getCollapseToggle(sectionId);
+    var title = sectionTitle(section);
+
+    state.collapsedSections[sectionId] = Boolean(isCollapsed);
+
+    if (section) {
+      section.classList.toggle("is-collapsed", Boolean(isCollapsed));
+    }
+
+    if (button) {
+      button.textContent = isCollapsed ? ">" : "v";
+      button.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
+      button.setAttribute("title", (isCollapsed ? "Expand " : "Collapse ") + title);
+      button.setAttribute("aria-label", (isCollapsed ? "Expand " : "Collapse ") + title);
+    }
+
+    if (shouldSave) {
+      writeCollapsedSections();
+    }
+  }
+
+  function initCollapsibleSections() {
+    state.collapsedSections = readCollapsedSections();
+
+    Array.prototype.forEach.call(
+      document.querySelectorAll("[data-collapse-section]"),
+      function (button) {
+        var sectionId = button.getAttribute("data-collapse-section");
+        setSectionCollapsed(sectionId, Boolean(state.collapsedSections[sectionId]), false);
+        button.addEventListener("click", function () {
+          setSectionCollapsed(
+            sectionId,
+            !Boolean(state.collapsedSections[sectionId]),
+            true
+          );
+        });
+      }
+    );
   }
 
   function makeLocalId() {
@@ -324,79 +403,77 @@
   }
 
   function renderTable() {
-    var body = byId("keynote-table-body");
+    var list = byId("keynote-table-body");
     var query = trim(byId("search-input") ? byId("search-input").value : "").toLowerCase();
     var rows = buildTreeRows().filter(function (row) {
       return rowMatchesQuery(row, query);
     });
 
-    if (!body) {
+    if (!list) {
       return;
     }
 
-    clearElement(body);
+    clearElement(list);
     setText("filter-summary", formatNumber(rows.length) + " visible rows");
 
     if (!rows.length) {
-      var emptyRow = document.createElement("tr");
-      var emptyCell = document.createElement("td");
-      emptyCell.colSpan = 4;
-      emptyCell.className = "empty-cell";
-      emptyCell.textContent = state.entries.length ? "No keynotes match the search." : "No keynote rows loaded.";
-      emptyRow.appendChild(emptyCell);
-      body.appendChild(emptyRow);
+      var emptyState = document.createElement("div");
+      emptyState.className = "empty-cell";
+      emptyState.textContent = state.entries.length ? "No keynotes match the search." : "No keynote rows loaded.";
+      list.appendChild(emptyState);
       return;
     }
 
     rows.forEach(function (row) {
       var entry = row.entry;
-      var tr = document.createElement("tr");
-      var keyCell = document.createElement("td");
-      var textCell = document.createElement("td");
-      var parentCell = document.createElement("td");
-      var lineCell = document.createElement("td");
-      var keyWrap = document.createElement("div");
+      var item = document.createElement("button");
+      var main = document.createElement("span");
+      var keyText = document.createElement("span");
       var childBadge = document.createElement("span");
+      var preview = document.createElement("span");
+      var meta = document.createElement("span");
       var children = childCount(entry.key);
+      var metaText = [];
 
-      tr.className = entry.id === state.selectedId ? "is-selected" : "";
-      tr.tabIndex = 0;
-      tr.setAttribute("role", "button");
-      tr.setAttribute("aria-label", "Select keynote " + entry.key);
+      item.type = "button";
+      item.className = entry.id === state.selectedId ? "sidebar-keynote is-selected" : "sidebar-keynote";
+      item.style.setProperty("--depth", row.depth);
+      item.setAttribute("role", "option");
+      item.setAttribute("aria-selected", entry.id === state.selectedId ? "true" : "false");
+      item.setAttribute("aria-label", "Select keynote " + (entry.key || "without key"));
+      item.setAttribute("title", (entry.key || "(No key)") + " - " + (entry.text || ""));
 
-      keyCell.className = "key-cell";
-      keyWrap.className = "key-wrap";
-      keyWrap.style.paddingLeft = String(row.depth * 18) + "px";
-      keyWrap.textContent = entry.key || "(No key)";
+      main.className = "sidebar-keynote__main";
+      keyText.className = "sidebar-keynote__key";
+      keyText.textContent = entry.key || "(No key)";
       if (children) {
         childBadge.className = "child-badge";
         childBadge.textContent = formatNumber(children);
-        keyWrap.appendChild(childBadge);
       }
 
-      textCell.className = "text-cell";
-      textCell.textContent = entry.text || "-";
-      parentCell.textContent = entry.parentKey || "-";
-      lineCell.className = "line-cell";
-      lineCell.textContent = entry.lineNumber || "New";
+      preview.className = "sidebar-keynote__text";
+      preview.textContent = entry.text || "-";
 
-      keyCell.appendChild(keyWrap);
-      tr.appendChild(keyCell);
-      tr.appendChild(textCell);
-      tr.appendChild(parentCell);
-      tr.appendChild(lineCell);
+      if (entry.parentKey) {
+        metaText.push("Parent " + entry.parentKey);
+      }
+      metaText.push(entry.lineNumber ? "Line " + entry.lineNumber : "New row");
+      meta.className = "sidebar-keynote__meta";
+      meta.textContent = metaText.join(" | ");
 
-      tr.addEventListener("click", function () {
+      main.appendChild(keyText);
+      if (children) {
+        main.appendChild(childBadge);
+      }
+      item.appendChild(main);
+      item.appendChild(preview);
+      item.appendChild(meta);
+
+      item.addEventListener("click", function () {
         selectEntry(entry.id);
       });
-      tr.addEventListener("keydown", function (event) {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          selectEntry(entry.id);
-        }
-      });
 
-      body.appendChild(tr);
+      list.appendChild(item);
     });
   }
 
@@ -868,6 +945,8 @@
 
   function init() {
     var searchInput = byId("search-input");
+
+    initCollapsibleSections();
 
     if (searchInput) {
       searchInput.addEventListener("input", function () {

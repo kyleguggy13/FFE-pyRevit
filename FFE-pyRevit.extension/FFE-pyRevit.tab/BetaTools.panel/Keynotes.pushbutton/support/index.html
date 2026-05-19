@@ -51,11 +51,21 @@
       </section>
 
       <main class="workspace">
-        <section class="manager-panel" aria-labelledby="keynote-list-title">
+        <section class="manager-panel collapsible-section" data-section-id="keynotes" aria-labelledby="keynote-list-title">
           <div class="toolbar">
-            <div>
-              <h2 id="keynote-list-title">Keynotes</h2>
-              <p id="filter-summary">0 visible rows</p>
+            <div class="heading-lockup">
+              <button
+                class="collapse-toggle"
+                type="button"
+                data-collapse-section="keynotes"
+                aria-expanded="true"
+                aria-controls="keynotes-section-body"
+                title="Collapse Keynotes"
+              >v</button>
+              <div>
+                <h2 id="keynote-list-title">Keynotes</h2>
+                <p id="filter-summary">0 visible rows</p>
+              </div>
             </div>
             <label class="search-field" for="search-input">
               <span>Search</span>
@@ -63,41 +73,41 @@
             </label>
           </div>
 
-          <div class="row-actions" aria-label="Keynote row actions">
-            <button id="add-root" class="secondary-button" type="button">Add Root</button>
-            <button id="add-child" class="secondary-button" type="button" disabled>Add Child</button>
-            <button id="duplicate-row" class="secondary-button" type="button" disabled>Duplicate</button>
-            <button id="delete-row" class="danger-button" type="button" disabled>Delete</button>
-          </div>
+          <div id="keynotes-section-body" class="collapsible-body">
+            <div class="row-actions" aria-label="Keynote row actions">
+              <button id="add-root" class="secondary-button" type="button">Add Root</button>
+              <button id="add-child" class="secondary-button" type="button" disabled>Add Child</button>
+              <button id="duplicate-row" class="secondary-button" type="button" disabled>Duplicate</button>
+              <button id="delete-row" class="danger-button" type="button" disabled>Delete</button>
+            </div>
 
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Key</th>
-                  <th>Text</th>
-                  <th>Parent</th>
-                  <th>Line</th>
-                </tr>
-              </thead>
-              <tbody id="keynote-table-body">
-                <tr>
-                  <td colspan="4" class="empty-cell">Waiting for keynote data...</td>
-                </tr>
-              </tbody>
-            </table>
+            <div class="sidebar-list-wrap">
+              <div id="keynote-table-body" class="keynote-sidebar-list" role="listbox" aria-label="Keynote list">
+                <div class="empty-cell">Waiting for keynote data...</div>
+              </div>
+            </div>
           </div>
         </section>
 
-        <aside class="editor-panel" aria-labelledby="editor-title">
+        <aside class="editor-panel collapsible-section" data-section-id="editor" aria-labelledby="editor-title">
           <div class="panel-heading">
-            <div>
-              <h2 id="editor-title">Editor</h2>
-              <p id="selected-summary">Select a keynote row.</p>
+            <div class="heading-lockup">
+              <button
+                class="collapse-toggle"
+                type="button"
+                data-collapse-section="editor"
+                aria-expanded="true"
+                aria-controls="editor-form"
+                title="Collapse Editor"
+              >v</button>
+              <div>
+                <h2 id="editor-title">Editor</h2>
+                <p id="selected-summary">Select a keynote row.</p>
+              </div>
             </div>
           </div>
 
-          <form id="editor-form" novalidate>
+          <form id="editor-form" class="collapsible-body" novalidate>
             <label class="field-group" for="key-input">
               <span>Key</span>
               <input id="key-input" type="text" autocomplete="off" disabled />
@@ -115,14 +125,24 @@
             </label>
           </form>
 
-          <section class="validation-panel" aria-labelledby="validation-title">
+          <section class="validation-panel collapsible-section" data-section-id="validation" aria-labelledby="validation-title">
             <div class="panel-heading panel-heading--compact">
-              <div>
-                <h2 id="validation-title">Validation</h2>
-                <p id="validation-summary">No data loaded.</p>
+              <div class="heading-lockup">
+                <button
+                  class="collapse-toggle"
+                  type="button"
+                  data-collapse-section="validation"
+                  aria-expanded="true"
+                  aria-controls="validation-list"
+                  title="Collapse Validation"
+                >v</button>
+                <div>
+                  <h2 id="validation-title">Validation</h2>
+                  <p id="validation-summary">No data loaded.</p>
+                </div>
               </div>
             </div>
-            <div id="validation-list" class="validation-list">
+            <div id="validation-list" class="validation-list collapsible-body">
               <div class="empty-state">No validation messages.</div>
             </div>
           </section>
