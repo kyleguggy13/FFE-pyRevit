@@ -564,25 +564,31 @@
 
     models.forEach(function (model) {
       var item = document.createElement("button");
+      var copy = document.createElement("span");
       var title = document.createElement("strong");
       var subtitle = document.createElement("span");
-      var meta = document.createElement("span");
+      var badge = document.createElement("span");
+      var isSelected = selectedModel && model.id === selectedModel.id;
 
       item.type = "button";
-      item.className = "division-row" + (selectedModel && model.id === selectedModel.id ? " is-selected" : "");
+      item.className = "list-group-item list-group-item-action division-row" + (isSelected ? " active is-selected" : "");
       item.setAttribute("role", "option");
-      item.setAttribute("aria-selected", selectedModel && model.id === selectedModel.id ? "true" : "false");
+      item.setAttribute("aria-selected", isSelected ? "true" : "false");
       item.setAttribute("data-entry-id", model.id);
       item.setAttribute("title", model.title + " - " + model.text);
       item.tabIndex = -1;
 
+      copy.className = "division-row-copy";
       title.textContent = model.title;
       subtitle.textContent = model.text || "Untitled division";
-      meta.textContent = formatNumber(model.rows.length) + (model.rows.length === 1 ? " note" : " notes");
+      badge.className = "badge rounded-pill division-note-badge";
+      badge.textContent = formatNumber(model.rows.length);
+      badge.setAttribute("aria-label", formatNumber(model.rows.length) + (model.rows.length === 1 ? " note" : " notes"));
 
-      item.appendChild(title);
-      item.appendChild(subtitle);
-      item.appendChild(meta);
+      copy.appendChild(title);
+      copy.appendChild(subtitle);
+      item.appendChild(copy);
+      item.appendChild(badge);
       item.addEventListener("click", function () {
         selectDivision(model.id);
       });
@@ -841,6 +847,7 @@
     Array.prototype.forEach.call(document.querySelectorAll(".division-row"), function (row) {
       var isSelected = row.getAttribute("data-entry-id") === state.selectedDivisionId;
       row.classList.toggle("is-selected", isSelected);
+      row.classList.toggle("active", isSelected);
       row.setAttribute("aria-selected", isSelected ? "true" : "false");
     });
 
