@@ -451,8 +451,14 @@ h2 {
   background: var(--lavender);
 }
 
-.selected-division-card::before {
+/* .selected-division-card::before {
   content: "DIVISION";
+  color: #000000;
+  font-size: 1.12rem;
+  line-height: 1;
+} */
+
+.selected-division-card {
   color: #000000;
   font-size: 1.12rem;
   line-height: 1;
