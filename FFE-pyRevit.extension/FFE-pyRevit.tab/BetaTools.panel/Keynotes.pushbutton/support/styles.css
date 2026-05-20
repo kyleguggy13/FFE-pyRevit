@@ -93,7 +93,7 @@ h2 {
 
 .app-shell {
   /* width: min(100% - 72px, 1160px); */
-  width: min(100%, 1500px);
+  width: min(100%, 1160px);
   min-height: calc(100vh - 72px);
   margin: 10px auto;
   padding: 18px;
@@ -512,7 +512,7 @@ h2 {
   align-items: center;
   justify-content: center;
   padding: 0;
-  border: 0;
+  border: 1px var(--lavender-line) solid;
   background: transparent;
   color: #000000;
   line-height: 1;
@@ -755,9 +755,23 @@ h2 {
 }
 
 @media (max-width: 900px) {
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .division-panel {
+    display: none;
+  }
+
+  .note-table-shell {
+    min-height: 650px;
+  }
+}
+
+@media (max-width: 800px) {
   .app-shell {
     width: min(100% - 48px, 720px);
-    margin: 24px auto;
+    margin: 12px auto;
     min-height: calc(100vh - 48px);
   }
 
@@ -791,18 +805,6 @@ h2 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 16px 30px;
   }
-
-  .workspace {
-    grid-template-columns: 1fr;
-  }
-
-  .division-panel {
-    display: none;
-  }
-
-  .note-table-shell {
-    min-height: 650px;
-  }
 }
 
 @media (max-width: 620px) {
@@ -812,7 +814,7 @@ h2 {
 
   .app-shell {
     width: min(100% - 24px, 720px);
-    margin: 12px auto;
+    margin: 10px auto;
     padding: 14px;
   }
 
@@ -842,7 +844,7 @@ h2 {
     grid-template-columns: minmax(78px, 96px) minmax(0, 1fr);
   }
 
-  .note-text-input {
+  /* .note-text-input {
     font-size: 0.7rem;
-  }
+  } */
 }

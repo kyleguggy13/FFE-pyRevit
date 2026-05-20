@@ -937,7 +937,7 @@ class KeynoteManagerWindow(Window):
         self.Title = self.get_window_title()
         self.Width = 1320
         self.Height = 860
-        self.MinWidth = 980
+        self.MinWidth = 620
         self.MinHeight = 620
         self.WindowStartupLocation = WindowStartupLocation.CenterScreen
         self.ResizeMode = ResizeMode.CanResize
