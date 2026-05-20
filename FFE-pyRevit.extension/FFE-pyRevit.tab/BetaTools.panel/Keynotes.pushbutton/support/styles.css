@@ -3,13 +3,16 @@
   --ink: #041a33;
   --muted: #536174;
   --gold: #b68100;
-  --header-fill: #f4dfc2;
+  /* --header-fill: #f4dfc2; */
+  --header-fill: #ffffff;
   --warning-fill: #efcfd0;
   --warning-line: #b8564d;
-  --lavender: #d9d0e4;
+  /* --lavender: #d9d0e4; */
+  --lavender: #efedf1;
   --lavender-soft: #e5dded;
   --lavender-line: #9375ad;
-  --blue: #dbe8fb;
+  /* --blue: #dbe8fb; */
+  --blue: #f5f7fa;
   --blue-soft: #edf4ff;
   --blue-line: #7798d5;
   --red-fill: #ecd0cf;
@@ -17,6 +20,8 @@
   --button-blue: #d8e4ff;
   --button-blue-line: #7899dc;
   --white: #ffffff;
+  --arial: "Avenir Next", "Segoe UI", Arial, sans-serif;
+  --arialnarrow: "Avenir Next", "Arial Narrow", Arial, sans-serif;
 }
 
 * {
@@ -35,7 +40,7 @@ html {
 body {
   margin: 0;
   color: var(--ink);
-  font-family: "Avenir Next", "Segoe UI", Arial, sans-serif;
+  font-family: var(--arial);
   background-color: var(--page);
 }
 
@@ -90,7 +95,7 @@ h2 {
   /* width: min(100% - 72px, 1160px); */
   width: min(100%, 1500px);
   min-height: calc(100vh - 72px);
-  margin: 18px auto;
+  margin: 10px auto;
   padding: 18px;
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr) auto;
@@ -104,9 +109,10 @@ h2 {
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  padding: 13px 14px 9px;
+  /* padding: 13px 14px 9px; */
+  padding: 3px 14px 9px;
   border: 2px solid var(--gold);
-  border-radius: 12px;
+  border-radius: 8px;
   background: var(--header-fill);
 }
 
@@ -173,7 +179,7 @@ h2 {
   gap: 12px;
   padding: 4px 16px 4px 10px;
   border: 2px solid var(--gold);
-  border-radius: 12px;
+  border-radius: 8px;
   background: #f5e2c8;
 }
 
@@ -229,7 +235,7 @@ h2 {
   gap: 8px;
   padding: 2px 13px;
   border: 2px solid var(--warning-line);
-  border-radius: 11px;
+  border-radius: 8px;
   background: var(--warning-fill);
   color: #000000;
   font-size: 1.12rem;
@@ -241,8 +247,8 @@ h2 {
   padding: 1px 5px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.6);
-  font-size: 0.76rem;
-  font-weight: 900;
+  font-size: 0.7rem;
+  font-weight: 700;
 }
 
 .file-strip {
@@ -257,13 +263,14 @@ h2 {
 }
 
 .action-button {
-  min-height: 58px;
+  min-height: 42px;
   padding: 0 18px;
-  border: 2px solid #000000;
-  border-radius: 11px;
+  border: 2px solid #181818;
+  border-radius: 8px;
   background: var(--white);
   color: #000000;
   font-size: 1.08rem;
+  font-weight: 900;
   line-height: 1.1;
 }
 
@@ -307,7 +314,7 @@ h2 {
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
   border: 2px solid var(--lavender-line);
-  border-radius: 11px;
+  border-radius: 8px;
   background: var(--lavender);
 }
 
@@ -440,7 +447,7 @@ h2 {
   gap: 18px;
   padding: 0 8px 0 20px;
   border: 2px solid var(--lavender-line);
-  border-radius: 21px;
+  border-radius: 8px;
   background: var(--lavender);
 }
 
@@ -506,7 +513,7 @@ h2 {
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
   border: 2px solid var(--blue-line);
-  border-radius: 11px;
+  border-radius: 8px;
   background: var(--blue);
 }
 
@@ -514,7 +521,10 @@ h2 {
 .note-row {
   min-width: 0;
   display: grid;
+  /* align-items: stretch; */
   grid-template-columns: minmax(96px, 118px) minmax(0, 1fr);
+  /* grid-template-rows: auto; */
+  font-family: var(--arialnarrow);
 }
 
 .note-table-header {
@@ -559,6 +569,7 @@ h2 {
 }
 
 .note-key-cell {
+  align-items: start;
   border-right: 2px solid var(--blue-line);
 }
 
@@ -572,16 +583,18 @@ h2 {
 }
 
 .note-key-input {
-  height: 100%;
-  padding: 0 8px 0 calc(8px + (var(--depth, 0) * 12px));
+  align-self: start;
+  height: auto;
+  /* padding: 9px 8px 0; */
   text-align: center;
+  vertical-align: top;
 }
 
 .note-text-input {
   min-height: 56px;
-  padding: 9px 8px;
-  font-size: 0.76rem;
-  font-weight: 800;
+  /* padding: 9px 8px; */
+  /* font-size: 0.76rem; */
+  /* font-weight: 800; */
   line-height: 1.18;
   resize: vertical;
 }
@@ -602,7 +615,7 @@ h2 {
   gap: 10px;
   padding: 12px;
   border: 2px solid var(--warning-line);
-  border-radius: 11px;
+  border-radius: 8px;
   background: #f7dfdb;
 }
 
