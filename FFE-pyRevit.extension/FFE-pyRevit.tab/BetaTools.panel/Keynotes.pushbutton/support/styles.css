@@ -2,6 +2,7 @@
   --page: #fbfbf8;
   --ink: #041a33;
   --muted: #536174;
+  --ffe-blue: #3a376e;
   --gold: #b68100;
   /* --header-fill: #f4dfc2; */
   --header-fill: #ffffff;
@@ -20,8 +21,8 @@
   --button-blue: #d8e4ff;
   --button-blue-line: #7899dc;
   --white: #ffffff;
-  --arial: "Avenir Next", "Segoe UI", Arial, sans-serif;
-  --arialnarrow: "Avenir Next", "Arial Narrow", Arial, sans-serif;
+  --text: "Avenir Next", "Segoe UI", Arial, sans-serif;
+  --textnarrow: "Avenir Next", "Arial Narrow", Arial, sans-serif;
 }
 
 * {
@@ -40,7 +41,7 @@ html {
 body {
   margin: 0;
   color: var(--ink);
-  font-family: var(--arial);
+  font-family: var(--text);
   background-color: var(--page);
 }
 
@@ -100,7 +101,7 @@ h2 {
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   gap: 16px;
-  background: rgba(255, 255, 255, 0.72);
+  background: rgba(235, 235, 235, 0.72);
 }
 
 .title-card {
@@ -111,7 +112,7 @@ h2 {
   gap: 18px;
   /* padding: 13px 14px 9px; */
   padding: 3px 14px 9px;
-  border: 2px solid var(--gold);
+  border: 2px solid var(--ffe-blue);
   border-radius: 8px;
   background: var(--header-fill);
 }
@@ -122,7 +123,7 @@ h2 {
 
 .eyebrow {
   margin: 0 0 7px;
-  color: var(--gold);
+  color: var(--ffe-blue);
   font-size: 0.78rem;
   /* font-weight: 900; */
   line-height: 1;
@@ -159,7 +160,7 @@ h2 {
 }
 
 .utility-button {
-  border: 1px solid var(--gold);
+  border: 1px solid var(--ffe-blue);
   background: #fff6e8;
   color: var(--ink);
 }
@@ -178,7 +179,7 @@ h2 {
   justify-content: space-between;
   gap: 12px;
   padding: 4px 16px 4px 10px;
-  border: 2px solid var(--gold);
+  border: 2px solid var(--ffe-blue);
   border-radius: 8px;
   background: #f5e2c8;
 }
@@ -265,23 +266,10 @@ h2 {
 .action-button {
   min-height: 42px;
   padding: 0 18px;
-  border: 2px solid #181818;
   border-radius: 8px;
-  background: var(--white);
-  color: #000000;
   font-size: 1.08rem;
-  /* font-weight: 900; */
+  /* font-weight: 700; */
   line-height: 1.1;
-}
-
-.action-button--blue {
-  border-color: var(--button-blue-line);
-  background: var(--button-blue);
-}
-
-.action-button--red {
-  border-color: var(--red-line);
-  background: var(--red-fill);
 }
 
 .utility-button:hover,
@@ -290,7 +278,6 @@ h2 {
 .save-button:focus-visible,
 .action-button:hover,
 .action-button:focus-visible {
-  outline: none;
   filter: brightness(0.97);
 }
 
@@ -605,7 +592,7 @@ h2 {
   /* align-items: stretch; */
   grid-template-columns: minmax(96px, 118px) minmax(0, 1fr);
   /* grid-template-rows: auto; */
-  font-family: var(--arialnarrow);
+  font-family: var(--textnarrow);
 }
 
 .note-table-header {

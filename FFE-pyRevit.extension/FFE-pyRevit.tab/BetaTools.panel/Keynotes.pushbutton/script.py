@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 __title__ = "FFE-Keynotes"
-__version__ = "Version = v0.2"
+__version__ = "Version = v0.3"
 __persistentengine__ = True
 __min_revit_ver__ = 2025
-__doc__ = """Version = v0.2
+__doc__ = """Version = v0.3
 Date    = 05.20.2026
 __________________________________________________________________
 Description:
@@ -19,7 +19,7 @@ Key behaviors:
   immediate Revit keynote table reload.
 
 Revit API notes:
-- Targets Revit 2025/2026.
+- Targets Revit 2026.
 - Modeless refresh/save requests are routed through ExternalEvent so
   document API calls run in a valid Revit API context.
 
@@ -37,6 +37,8 @@ __________________________________________________________________
 Last update:
 - [05.19.2026] - v0.1 WebView2 keynote manager
 - [05.20.2026] - v0.2 Refactor to support future features and simplify code maintenance.
+- [05.20.2026] - v0.3 Made window stay on top of Revit and show in taskbar to prevent it from getting lost behind the main UI.
+
 __________________________________________________________________
 Author: Kyle Guggenheim"""
 
@@ -59,6 +61,7 @@ clr.AddReference("WindowsBase")
 from System import Uri
 from System.Windows import ResizeMode, Thickness, Visibility, Window, WindowStartupLocation
 from System.Windows.Controls import Grid, TextBlock
+from System.Windows.Interop import WindowInteropHelper
 
 from Autodesk.Revit.DB import (
     KeyBasedTreeEntriesLoadResults,
@@ -87,7 +90,7 @@ PATH_SUPPORT = os.path.join(PATH_SCRIPT, "support")
 PATH_INDEX = os.path.join(PATH_SUPPORT, "index.html")
 
 APP_NAME = "FFE Keynote Manager"
-APP_VERSION = "v0.2"
+APP_VERSION = "v0.3"
 LOCAL_APP_NAME = "KeynoteManager"
 
 LOGGER = script.get_logger()
@@ -927,6 +930,12 @@ class KeynoteManagerEventHandler(IExternalEventHandler):
 class KeynoteManagerWindow(Window):
     def __init__(self, webview_type, creation_properties_type, keynote_payload, event_handler, external_event):
         Window.__init__(self)
+
+        try:
+            WindowInteropHelper(self).Owner = __revit__.MainWindowHandle
+            self.ShowInTaskbar = True
+        except:
+            pass
 
         self.document = doc
         self.keynote_payload = keynote_payload
