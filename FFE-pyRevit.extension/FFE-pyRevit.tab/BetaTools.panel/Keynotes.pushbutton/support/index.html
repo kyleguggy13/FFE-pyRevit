@@ -4,7 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FFE Keynote Manager</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+      integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB"
+      crossorigin="anonymous"
+    />
     <link rel="stylesheet" href="styles.css" />
+    <script
+      src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"
+      integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI"
+      crossorigin="anonymous"
+      defer
+    ></script>
     <script src="site.js" defer></script>
   </head>
   <body>
@@ -75,7 +87,23 @@
 
         <section class="notes-panel" aria-labelledby="notes-title">
           <div class="selected-division-card">
-            <select id="division-select" class="division-select" aria-label="Select division"></select>
+            <div class="dropdown division-select">
+              <button
+                id="division-select-toggle"
+                class="btn btn-lg dropdown-toggle division-select-toggle"
+                type="button"
+                data-bs-toggle="dropdown"
+                aria-expanded="false"
+                aria-label="Select division"
+              >
+                <span class="visually-hidden">Select division</span>
+              </button>
+              <ul
+                id="division-select-menu"
+                class="dropdown-menu division-select-menu"
+                aria-labelledby="division-select-toggle"
+              ></ul>
+            </div>
             <label class="division-key-field" for="division-key-input">
               <span class="sr-only">Division key</span>
               <input id="division-key-input" type="text" autocomplete="off" disabled />
@@ -84,7 +112,6 @@
               <span class="sr-only">Division description</span>
               <input id="division-text-input" type="text" autocomplete="off" disabled />
             </label>
-            <!-- <select id="division-select" class="division-select" aria-label="Select division"></select> -->
           </div>
 
           <div id="notes-section-body" class="note-table-shell">

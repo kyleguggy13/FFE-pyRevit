@@ -592,22 +592,39 @@
   }
 
   function renderDivisionSelect() {
-    var select = byId("division-select");
+    var toggle = byId("division-select-toggle");
+    var menu = byId("division-select-menu");
     var models = getDivisionModels();
     var selectedModel = selectedDivisionModel();
 
-    if (!select) {
+    if (!toggle || !menu) {
       return;
     }
 
-    clearElement(select);
+    toggle.disabled = !models.length;
+    toggle.setAttribute(
+      "aria-label",
+      selectedModel ? "Select division, current " + selectedModel.title : "Select division"
+    );
+
+    clearElement(menu);
     models.forEach(function (model) {
-      var option = document.createElement("option");
-      option.value = model.id;
-      option.textContent = model.title + " - " + model.text;
-      select.appendChild(option);
+      var item = document.createElement("li");
+      var button = document.createElement("button");
+      var isSelected = selectedModel && model.id === selectedModel.id;
+
+      button.type = "button";
+      button.className = "dropdown-item" + (isSelected ? " active" : "");
+      button.setAttribute("data-division-id", model.id);
+      button.setAttribute("title", model.title + " - " + model.text);
+      if (isSelected) {
+        button.setAttribute("aria-current", "true");
+      }
+      button.textContent = model.title + " - " + model.text;
+
+      item.appendChild(button);
+      menu.appendChild(item);
     });
-    select.value = selectedModel ? selectedModel.id : "";
   }
 
   function renderDivisionHeader() {
@@ -1240,7 +1257,7 @@
 
   function init() {
     var searchInput = byId("search-input");
-    var divisionSelect = byId("division-select");
+    var divisionSelectMenu = byId("division-select-menu");
 
     if (searchInput) {
       searchInput.addEventListener("input", function () {
@@ -1248,9 +1265,16 @@
       });
     }
 
-    if (divisionSelect) {
-      divisionSelect.addEventListener("change", function () {
-        selectDivision(divisionSelect.value);
+    if (divisionSelectMenu) {
+      divisionSelectMenu.addEventListener("click", function (event) {
+        var target = event.target.closest
+          ? event.target.closest(".dropdown-item[data-division-id]")
+          : null;
+        if (!target) {
+          return;
+        }
+        event.preventDefault();
+        selectDivision(target.getAttribute("data-division-id"));
       });
     }
 
