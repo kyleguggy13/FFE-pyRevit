@@ -320,7 +320,7 @@ h2 {
 }
 
 .action-button {
-  min-height: 42px;
+  min-height: 32px;
   padding: 0 18px;
   border-radius: var(--r-md);
   font-size: var(--t-em-md);
@@ -725,7 +725,7 @@ h2 {
 }
 
 .note-text-input {
-  min-height: 56px;
+  min-height: fit-content;
   /* padding: 9px 8px; */
   /* font-size: 0.76rem; */
   /* font-weight: 800; */
@@ -851,7 +851,7 @@ h2 {
     margin: 10px auto;
     min-height: calc(100vh - 48px);
   }
-  
+
   .workspace {
     grid-template-columns: 1fr;
   }
@@ -877,18 +877,18 @@ h2 {
     flex: 1 1 0;
   }
 
-  .message-strip {
+  /* .message-strip {
     align-items: stretch;
     flex-direction: column;
-  }
+  } */
 
-  .warning-pill {
+  /* .warning-pill {
     width: 100%;
-  }
+  } */
 
   .action-row {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 16px 30px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
   }
 }
 
@@ -909,7 +909,7 @@ h2 {
 
   .action-button {
     min-height: var(--control-h-sm);
-    padding: 0 10px;
+    padding: 0 12px;
   }
 
   .selected-division-card {

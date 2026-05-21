@@ -315,6 +315,9 @@ def get_reference_path(resource_ref):
 
 
 def get_keynote_reference(target_doc):
+    """
+    Get the keynote table and file reference for the given document, or raise an exception if it cannot be accessed.
+    """
     if target_doc is None:
         raise Exception("No active Revit document is available.")
 
@@ -337,6 +340,9 @@ def get_keynote_reference(target_doc):
 
 
 def looks_like_remote_resource(path):
+    """
+    Detect if the path looks like a remote resource that cannot be read as a local file.
+    """
     value = safe_str(path).lower()
     return (
         value.startswith("http://") or
@@ -422,6 +428,14 @@ def get_file_state(path):
 
 # ____________________________________________________________________ KEYNOTE PARSING / VALIDATION
 def make_issue(severity, message, key="", line_number=None, code=""):
+    """
+    Create a structured issue dictionary for reporting problems with keynote entries.
+     - severity: "error" or "warning"
+     - message: human-readable description of the issue
+     - key: the keynote key associated with the issue, if applicable
+     - line_number: the line number in the source text where the issue was found, if applicable
+     - code: a short identifier for the type of issue, useful for programmatic handling   
+    """
     issue = {
         "severity": severity,
         "message": message,
