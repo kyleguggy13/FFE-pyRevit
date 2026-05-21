@@ -518,7 +518,6 @@
     }
 
     setText("state-title", STATUS_TITLES[status] || "Status");
-    setText("state-message", statusState.message || "");
   }
 
   function setDirty(isDirty) {

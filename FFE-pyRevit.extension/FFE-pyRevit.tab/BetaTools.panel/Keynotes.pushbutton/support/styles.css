@@ -25,14 +25,13 @@
   --positive: #4a7a3a;
   --warning: #a36b1a;
   --negative: #8b2a2a;
-
+  --negative-soft: #efcfd0;
 
 
 
   /* Color - Fill */
   --header-fill:    #ffffff;
   --warning-fill:   #efcfd0;
-  --red-fill:       #ecd0cf;
   --blue:           #f5f7fa;
   --button-blue:    #d8e4ff;
   --lavender:       #efedf1;
@@ -163,7 +162,7 @@ h2 {
   width: min(100%, 1160px);
   min-height: calc(100vh - 72px);
   margin: 10px auto;
-  padding: 18px;
+  padding: 14px;
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   gap: 16px;
@@ -266,15 +265,6 @@ h2 {
   white-space: nowrap;
 }
 
-.message-copy span {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: var(--t-em-sm);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .message-strip[data-tone="ready"] {
   background: var(--page-2);
   border-color: var(--positive);
@@ -290,7 +280,7 @@ h2 {
 .message-strip[data-tone="missingFile"],
 .message-strip[data-tone="unsupported"] {
   background: var(--page-2);
-  border-color: var(--warning-line);
+  border-color: var(--negative);
 }
 
 .warning-pill {
@@ -301,9 +291,9 @@ h2 {
   justify-content: center;
   gap: 8px;
   padding: 2px 13px;
-  border: 2px solid var(--warning-line);
+  border: 2px solid var(--negative);
   border-radius: 8px;
-  background: var(--warning-fill);
+  background: var(--negative-soft);
   color: var(--ink-1);
   font-size: var(--t-em-md);
   line-height: 1;
@@ -704,7 +694,7 @@ h2 {
 
 .note-key-cell {
   align-items: start;
-  border-right: 2px solid var(--divider);
+  /* border-right: 2px solid var(--accent); */
 }
 
 .note-input {
@@ -781,7 +771,7 @@ h2 {
 }
 
 .validation-item[data-severity="error"] {
-  border-color: var(--warning-line);
+  border-color: var(--warning);
   color: var(--negative);
 }
 
@@ -841,7 +831,7 @@ h2 {
 @media (max-width: 800px) {
   .app-shell {
     width: min(100% - 48px, 720px);
-    margin: 12px auto;
+    margin: 10px auto;
     min-height: calc(100vh - 48px);
   }
 
@@ -863,10 +853,6 @@ h2 {
     flex-direction: column;
   }
 
-  .message-copy span {
-    white-space: normal;
-  }
-
   .warning-pill {
     width: 100%;
   }
@@ -878,9 +864,9 @@ h2 {
 }
 
 @media (max-width: 620px) {
-  html {
+  /* html {
     font-size: 15px;
-  }
+  } */
 
   .app-shell {
     width: min(100% - 24px, 720px);
