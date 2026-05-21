@@ -942,6 +942,8 @@ class KeynoteManagerWindow(Window):
         self.event_handler = event_handler
         self.external_event = external_event
         self.has_sent_payload = False
+        self.has_dirty_edits = False
+        self.close_discard_confirmed = False
         self.index_uri = make_file_uri(PATH_INDEX)
 
         self.Title = self.get_window_title()
@@ -971,6 +973,7 @@ class KeynoteManagerWindow(Window):
         self.Content = content_grid
 
         self.Loaded += self.on_loaded
+        self.Closing += self.on_closing
         self.Closed += self.on_closed
         self.browser.CoreWebView2InitializationCompleted += self.on_core_webview2_initialized
         self.browser.NavigationCompleted += self.on_navigation_completed
@@ -1051,6 +1054,32 @@ class KeynoteManagerWindow(Window):
         self.status_text.Visibility = Visibility.Collapsed
         self.send_keynote_payload()
 
+    def confirm_discard_changes(self):
+        if not self.has_dirty_edits:
+            return True
+
+        return bool(forms.alert(
+            "Close the manager and discard unsaved keynote edits?",
+            title="Discard Unsaved Changes",
+            ok=False,
+            yes=True,
+            no=True,
+            warn_icon=True
+        ))
+
+    def on_closing(self, sender, args):
+        if self.close_discard_confirmed:
+            return
+
+        if not self.confirm_discard_changes():
+            try:
+                args.Cancel = True
+            except:
+                pass
+            return
+
+        self.close_discard_confirmed = True
+
     def on_closed(self, sender, args):
         self.save_window_state()
         try:
@@ -1098,6 +1127,9 @@ class KeynoteManagerWindow(Window):
     def send_save_result(self, result):
         self.call_keynote_app("handleSaveResult", result or {})
 
+    def request_refresh_from_app(self):
+        self.call_keynote_app("requestRefresh", {})
+
     def raise_external_event(self, action_name):
         try:
             self.external_event.Raise()
@@ -1132,6 +1164,10 @@ class KeynoteManagerWindow(Window):
             self.send_keynote_payload()
             return
 
+        if message_type == "dirtyStateChanged":
+            self.has_dirty_edits = bool(message.get("dirty"))
+            return
+
         if message_type == "refreshData":
             self.event_handler.queue_refresh()
             self.send_status("warning", "Refreshing keynote file...")
@@ -1145,6 +1181,9 @@ class KeynoteManagerWindow(Window):
             return
 
         if message_type == "closeWindow":
+            self.close_discard_confirmed = True
+            if message.get("discardConfirmed"):
+                self.has_dirty_edits = False
             self.Close()
 
 
@@ -1154,8 +1193,7 @@ def focus_existing_window():
         try:
             if window.IsVisible:
                 window.Activate()
-                window.event_handler.queue_refresh()
-                window.raise_external_event("refresh")
+                window.request_refresh_from_app()
                 return True
         except:
             try:

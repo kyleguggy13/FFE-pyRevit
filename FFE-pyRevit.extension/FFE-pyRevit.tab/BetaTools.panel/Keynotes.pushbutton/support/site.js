@@ -12,6 +12,7 @@
     selectedId: null,
     dirty: false,
     saving: false,
+    allowNextLoad: false,
     nextLocalId: 1
   };
 
@@ -520,13 +521,28 @@
     setText("state-title", STATUS_TITLES[status] || "Status");
   }
 
+  function confirmDiscardChanges(message) {
+    if (!state.dirty) {
+      return true;
+    }
+    return globalScope.confirm(message || "Discard unsaved keynote edits?");
+  }
+
   function setDirty(isDirty) {
-    state.dirty = Boolean(isDirty);
+    var nextDirty = Boolean(isDirty);
+    var didChange = state.dirty !== nextDirty;
+
+    state.dirty = nextDirty;
     setText("dirty-state", state.dirty ? "UNSAVED CHANGES" : "NO CHANGES");
     renderSaveState();
+
+    if (didChange && hasWebViewBridge()) {
+      postWebViewMessage({ type: "dirtyStateChanged", dirty: state.dirty });
+    }
   }
 
   function markDirty() {
+    state.allowNextLoad = false;
     setDirty(true);
   }
 
@@ -931,7 +947,7 @@
     setStatus({ status: status, message: message });
   }
 
-  function loadData(payload) {
+  function applyData(payload) {
     var previousSelection = selectedEntry();
     var previousKey = previousSelection ? previousSelection.key : "";
     var selected = null;
@@ -959,6 +975,21 @@
     setDirty(false);
     setStatusFromPayload(state.payload);
     renderAll();
+  }
+
+  function loadData(payload) {
+    if (state.dirty) {
+      if (state.allowNextLoad) {
+        state.allowNextLoad = false;
+      } else if (!confirmDiscardChanges("Reloading keynote data will discard unsaved edits. Continue?")) {
+        setStatus({ status: "warning", message: "Reload canceled; unsaved changes were kept." });
+        return;
+      }
+    } else {
+      state.allowNextLoad = false;
+    }
+
+    applyData(payload);
   }
 
   function updateEntryField(entryId, fieldName, value, shouldRender) {
@@ -1154,17 +1185,22 @@
   }
 
   function refreshData() {
-    if (state.dirty) {
-      var shouldRefresh = globalScope.confirm(
-        "Refresh will discard unsaved keynote edits in this window. Continue?"
-      );
-      if (!shouldRefresh) {
-        return;
-      }
+    var shouldAllowLoad = state.dirty;
+
+    if (!confirmDiscardChanges("Refresh will discard unsaved keynote edits in this window. Continue?")) {
+      return;
     }
 
     setStatus({ status: "warning", message: "Refreshing keynote file..." });
-    postWebViewMessage({ type: "refreshData" });
+    if (postWebViewMessage({ type: "refreshData" })) {
+      state.allowNextLoad = shouldAllowLoad;
+    } else {
+      state.allowNextLoad = false;
+    }
+  }
+
+  function requestRefresh() {
+    refreshData();
   }
 
   function saveData() {
@@ -1216,7 +1252,11 @@
     state.saving = false;
 
     if (result.payload) {
-      loadData(result.payload);
+      if ((result.status || "") === "ready") {
+        applyData(result.payload);
+      } else {
+        loadData(result.payload);
+      }
     }
 
     setStatus({
@@ -1233,16 +1273,13 @@
   }
 
   function closeWindow() {
-    if (state.dirty) {
-      var shouldClose = globalScope.confirm(
-        "Close the manager and discard unsaved keynote edits in this window?"
-      );
-      if (!shouldClose) {
-        return;
-      }
+    var discardConfirmed = state.dirty;
+
+    if (!confirmDiscardChanges("Close the manager and discard unsaved keynote edits in this window?")) {
+      return;
     }
 
-    if (postWebViewMessage({ type: "closeWindow" })) {
+    if (postWebViewMessage({ type: "closeWindow", discardConfirmed: discardConfirmed })) {
       return;
     }
 
@@ -1318,7 +1355,8 @@
   globalScope.ffeKeynotes = {
     loadData: loadData,
     setStatus: setStatus,
-    handleSaveResult: handleSaveResult
+    handleSaveResult: handleSaveResult,
+    requestRefresh: requestRefresh
   };
 
   if (typeof document !== "undefined") {
