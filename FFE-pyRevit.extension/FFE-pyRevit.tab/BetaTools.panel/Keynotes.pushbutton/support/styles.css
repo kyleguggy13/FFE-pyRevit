@@ -556,6 +556,7 @@ h2 {
   outline: 2px solid rgba(82, 108, 165, 0.26);
   border-color: var(--accent);
   background: var(--page-3);
+  box-shadow: none;
 }
 
 .division-select {
@@ -633,68 +634,77 @@ h2 {
 .note-table-shell {
   min-width: 0;
   min-height: 540px;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  overflow: hidden;
+  overflow: auto;
   border: 2px solid var(--divider);
   border-radius: var(--r-md);
   background: var(--page-3);
 }
 
-.note-table-header,
-.note-row {
+.note-table {
+  table-layout: fixed;
+  border-color: var(--divider);
+  color: var(--ink-1);
   min-width: 0;
-  display: grid;
-  /* align-items: stretch; */
-  grid-template-columns: minmax(96px, 118px) minmax(0, 1fr);
-  /* grid-template-rows: auto; */
   font-family: var(--font-narrow);
 }
 
-.note-table-header {
-  min-height: 56px;
-  align-items: center;
-  border-bottom: 2px solid var(--divider);
+.note-key-col {
+  width: 118px;
+}
+
+.note-table > :not(caption) > * > * {
+  padding: 0;
+  border-bottom-width: 2px;
+  background-color: var(--page-3);
+  box-shadow: none;
+}
+
+.note-table-header th {
+  height: 56px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0 8px;
+  background-color: var(--page-3);
   color: var(--ink-1);
   font-size: var(--t-em-md);
+  line-height: var(--lh-tight);
+  vertical-align: middle;
   /* font-weight: 900; */
 }
 
-.note-table-header span:first-child {
+.note-table-header th:first-child {
   text-align: center;
 }
 
-.note-table-body {
-  min-width: 0;
-  min-height: 0;
-  align-content: start;
-  overflow: auto;
-}
-
 .note-row {
-  min-height: 58px;
-  border-bottom: 2px solid var(--divider);
-  background: var(--page-3);
+  background-color: var(--page-3);
 }
 
-.note-row:hover,
-.note-row.is-selected {
-  background: var(--accent-wash);
+.note-table.table-hover > tbody > .note-row:hover > *,
+.note-row.is-selected > * {
+  background-color: var(--accent-wash);
 }
 
-.note-row.is-selected {
-  box-shadow: inset 0 0 0 2px var(--accent);
+.note-row.is-selected > * {
+  box-shadow: inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent);
+}
+
+.note-row.is-selected > *:first-child {
+  box-shadow: inset 2px 0 0 var(--accent), inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent);
+}
+
+.note-row.is-selected > *:last-child {
+  box-shadow: inset -2px 0 0 var(--accent), inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent);
 }
 
 .note-cell {
   min-width: 0;
-  display: grid;
-  align-items: stretch;
+  vertical-align: top;
 }
 
 .note-key-cell {
-  align-items: start;
-  /* border-right: 2px solid var(--accent); */
+  border-right: 2px solid var(--accent);
 }
 
 .note-input {
@@ -704,10 +714,10 @@ h2 {
   border-radius: 0;
   background: transparent;
   color: var(--ink-1);
+  box-shadow: none;
 }
 
 .note-key-input {
-  align-self: start;
   height: auto;
   /* padding: 9px 8px 0; */
   text-align: center;
@@ -719,6 +729,7 @@ h2 {
   /* padding: 9px 8px; */
   /* font-size: 0.76rem; */
   /* font-weight: 800; */
+  overflow: hidden;
   line-height: var(--lh-tight);
   resize: vertical;
 }
@@ -731,6 +742,12 @@ h2 {
   color: var(--page-2);
   /* font-weight: 800; */
   text-align: center;
+}
+
+.note-table .empty-cell {
+  height: 180px;
+  display: table-cell;
+  vertical-align: middle;
 }
 
 .validation-panel {
@@ -895,9 +912,8 @@ h2 {
     font-size: var(--t-em-sm);
   }
 
-  .note-table-header,
-  .note-row {
-    grid-template-columns: minmax(78px, 96px) minmax(0, 1fr);
+  .note-key-col {
+    width: 96px;
   }
 
   /* .note-text-input {

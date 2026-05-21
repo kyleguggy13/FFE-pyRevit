@@ -118,14 +118,24 @@
             </label>
           </div>
 
-          <div id="notes-section-body" class="note-table-shell">
-            <div id="notes-title" class="note-table-header" role="row">
-              <span>Key</span>
-              <span>Description</span>
-            </div>
-            <div id="keynote-table-body" class="note-table-body" role="grid" aria-label="Keynote notes">
-              <div class="empty-cell">Waiting for keynote data...</div>
-            </div>
+          <div id="notes-section-body" class="table-responsive note-table-shell">
+            <table class="table table-sm table-hover align-middle mb-0 note-table" aria-label="Keynote notes">
+              <colgroup>
+                <col class="note-key-col" />
+                <col />
+              </colgroup>
+              <thead id="notes-title" class="note-table-header">
+                <tr>
+                  <th scope="col">Key</th>
+                  <th scope="col">Description</th>
+                </tr>
+              </thead>
+              <tbody id="keynote-table-body" class="note-table-body">
+                <tr>
+                  <td class="empty-cell" colspan="2">Waiting for keynote data...</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </section>
       </main>

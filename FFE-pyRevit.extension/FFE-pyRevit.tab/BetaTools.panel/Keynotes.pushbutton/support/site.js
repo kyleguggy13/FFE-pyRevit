@@ -648,6 +648,18 @@
     }
   }
 
+  function resizeNoteTextInput(input) {
+    var borderSize;
+
+    if (!input) {
+      return;
+    }
+
+    input.style.height = "auto";
+    borderSize = input.offsetHeight - input.clientHeight;
+    input.style.height = (input.scrollHeight + borderSize) + "px";
+  }
+
   function renderNotes() {
     var body = byId("keynote-table-body");
     var rows = selectedRows();
@@ -659,23 +671,25 @@
     clearElement(body);
 
     if (!rows.length) {
-      var empty = document.createElement("div");
+      var emptyRow = document.createElement("tr");
+      var empty = document.createElement("td");
       empty.className = "empty-cell";
+      empty.setAttribute("colspan", "2");
       empty.textContent = state.entries.length ? "No notes in this division." : "No keynote notes loaded.";
-      body.appendChild(empty);
+      emptyRow.appendChild(empty);
+      body.appendChild(emptyRow);
       return;
     }
 
     rows.forEach(function (row) {
       var entry = row.entry;
-      var item = document.createElement("div");
-      var keyCell = document.createElement("div");
-      var textCell = document.createElement("div");
+      var item = document.createElement("tr");
+      var keyCell = document.createElement("td");
+      var textCell = document.createElement("td");
       var keyInput = document.createElement("input");
       var textInput = document.createElement("textarea");
 
       item.className = "note-row" + (entry.id === state.selectedNoteId ? " is-selected" : "");
-      item.setAttribute("role", "row");
       item.setAttribute("data-entry-id", entry.id);
       item.tabIndex = -1;
       item.style.setProperty("--depth", row.depth);
@@ -684,11 +698,11 @@
       textCell.className = "note-cell note-text-cell";
 
       keyInput.type = "text";
-      keyInput.className = "note-input note-key-input";
+      keyInput.className = "form-control form-control-sm note-input note-key-input";
       keyInput.value = entry.key;
       keyInput.setAttribute("aria-label", "Key for " + (entry.key || "new keynote"));
 
-      textInput.className = "note-input note-text-input";
+      textInput.className = "form-control form-control-sm note-input note-text-input";
       textInput.rows = 2;
       textInput.value = entry.text;
       textInput.setAttribute("aria-label", "Description for " + (entry.key || "new keynote"));
@@ -708,6 +722,7 @@
 
       textInput.addEventListener("input", function () {
         updateEntryField(entry.id, "text", textInput.value, false);
+        resizeNoteTextInput(textInput);
       });
 
       item.addEventListener("click", function (event) {
@@ -721,6 +736,7 @@
       item.appendChild(keyCell);
       item.appendChild(textCell);
       body.appendChild(item);
+      resizeNoteTextInput(textInput);
     });
   }
 
