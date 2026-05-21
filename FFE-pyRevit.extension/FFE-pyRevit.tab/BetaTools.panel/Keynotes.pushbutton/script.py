@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 __title__ = "FFE-Keynotes"
-__version__ = "Version = v0.3"
+__version__ = "Version = v0.4"
 __persistentengine__ = True
 __min_revit_ver__ = 2025
-__doc__ = """Version = v0.3
-Date    = 05.20.2026
+__doc__ = """Version = v0.4
+Date    = 05.21.2026
 __________________________________________________________________
 Description:
 Persistent WebView2 keynote manager for the active Revit document's
@@ -38,6 +38,7 @@ Last update:
 - [05.19.2026] - v0.1 WebView2 keynote manager
 - [05.20.2026] - v0.2 Refactor to support future features and simplify code maintenance.
 - [05.20.2026] - v0.3 Made window stay on top of Revit and show in taskbar to prevent it from getting lost behind the main UI.
+- [05.21.2026] - v0.4 Updated UI styles and layout, and added more robust file encoding detection and handling.
 
 __________________________________________________________________
 Author: Kyle Guggenheim"""
@@ -90,7 +91,7 @@ PATH_SUPPORT = os.path.join(PATH_SCRIPT, "support")
 PATH_INDEX = os.path.join(PATH_SUPPORT, "index.html")
 
 APP_NAME = "FFE Keynote Manager"
-APP_VERSION = "v0.3"
+APP_VERSION = "v0.4"
 LOCAL_APP_NAME = "KeynoteManager"
 
 LOGGER = script.get_logger()
