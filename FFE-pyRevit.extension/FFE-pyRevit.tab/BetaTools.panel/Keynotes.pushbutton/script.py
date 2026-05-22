@@ -943,7 +943,19 @@ class KeynoteManagerEventHandler(IExternalEventHandler):
 
 # ____________________________________________________________________ WEBVIEW WINDOW
 class KeynoteManagerWindow(Window):
+    """
+    Modeless WPF window hosting a WebView2 control for managing Revit keynote files, with communication routed through an ExternalEvent handler.
+        - Initializes WebView2 and loads the local index.html file as the UI.
+    """
     def __init__(self, webview_type, creation_properties_type, keynote_payload, event_handler, external_event):
+        """
+        Initialize the keynote manager window with the given WebView2 types, initial payload, and ExternalEvent handler.
+         - webview_type: the WPF WebView2 control type
+         - creation_properties_type: the type for configuring WebView2 creation properties
+         - keynote_payload: the initial data payload to send to the web app after loading
+         - event_handler: the instance of KeynoteManagerEventHandler that will handle refresh/save requests from the web app
+         - external_event: the ExternalEvent instance associated with the event handler, used for invoking actions in Revit's API context
+        """
         Window.__init__(self)
 
         try:
@@ -964,7 +976,7 @@ class KeynoteManagerWindow(Window):
         self.Title = self.get_window_title()
         self.Width = 1320
         self.Height = 860
-        self.MinWidth = 620
+        self.MinWidth = 420
         self.MinHeight = 620
         self.WindowStartupLocation = WindowStartupLocation.CenterScreen
         self.ResizeMode = ResizeMode.CanResize
