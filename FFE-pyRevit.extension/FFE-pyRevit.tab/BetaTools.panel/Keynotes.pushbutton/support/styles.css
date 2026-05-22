@@ -158,7 +158,6 @@ h2 {
 }
 
 .app-shell {
-  /* width: min(100% - 72px, 1160px); */
   width: min(100%, 1160px);
   min-height: calc(100vh - 72px);
   margin: 10px auto;
@@ -175,7 +174,6 @@ h2 {
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  /* padding: 13px 14px 9px; */
   padding: 3px 14px 9px;
   border: 2px solid var(--accent);
   border-radius: 8px;
@@ -190,7 +188,6 @@ h2 {
   margin: 0 0 7px;
   color: var(--accent);
   font-size: var(--t-em-sm);
-  /* font-weight: 900; */
   line-height: 1;
   text-transform: uppercase;
 }
@@ -221,7 +218,6 @@ h2 {
   padding: 5px 10px;
   border-radius: var(--r-md);
   font-size: var(--t-em-sm);
-  /* font-weight: 800; */
 }
 
 .utility-button {
@@ -261,7 +257,6 @@ h2 {
   color: #000000;
   font-size: var(--t-em-lg);
   font-style: italic;
-  /* font-weight: 500; */
   white-space: nowrap;
 }
 
@@ -321,7 +316,8 @@ h2 {
 
 .action-button {
   min-height: 32px;
-  padding: 0 18px;
+  padding: 0 12px;
+  justify-content: center;
   border-radius: var(--r-md);
   font-size: var(--t-em-md);
   font-weight: var(--w-regular);
@@ -468,12 +464,10 @@ h2 {
 
 .division-row-copy strong {
   font-size: var(--t-em-sm);
-  /* font-weight: 900; */
 }
 
 .division-row-copy span {
   font-size: var(--t-em-xs);
-  /* font-weight: 700; */
 }
 
 .division-note-badge {
@@ -502,21 +496,14 @@ h2 {
   min-height: 58px;
   position: relative;
   display: grid;
-  grid-template-columns: auto minmax(54px, 112px) minmax(0, 1fr) 38px;
+  grid-template-columns: auto minmax(54px, 112px) minmax(0, 1fr) 8px;
   align-items: center;
-  gap: 18px;
-  padding: 0 8px 0 20px;
+  gap: 8px;
+  padding: 0 8px 0 8px;
   border: var(--r-sm) solid var(--divider);
   border-radius: var(--r-md);
   background: var(--page-3);
 }
-
-/* .selected-division-card::before {
-  content: "DIVISION";
-  color: #000000;
-  font-size: 1.12rem;
-  line-height: 1;
-} */
 
 .selected-division-card {
   color: var(--ink-1);
@@ -670,7 +657,6 @@ h2 {
   font-size: var(--t-em-md);
   line-height: var(--lh-tight);
   vertical-align: middle;
-  /* font-weight: 900; */
 }
 
 .note-table-header th:first-child {
@@ -719,16 +705,12 @@ h2 {
 
 .note-key-input {
   height: auto;
-  /* padding: 9px 8px 0; */
   text-align: center;
   vertical-align: top;
 }
 
 .note-text-input {
   min-height: fit-content;
-  /* padding: 9px 8px; */
-  /* font-size: 0.76rem; */
-  /* font-weight: 800; */
   overflow: hidden;
   line-height: var(--lh-tight);
   resize: vertical;
@@ -740,7 +722,6 @@ h2 {
   place-items: center;
   padding: 18px;
   color: var(--page-2);
-  /* font-weight: 800; */
   text-align: center;
 }
 
@@ -803,7 +784,6 @@ h2 {
   border-radius: 999px;
   background: var(--page-2);
   font-size: var(--t-em-xs);
-  /* font-weight: 900; */
 }
 
 .validation-item strong,
@@ -827,27 +807,13 @@ h2 {
   border: 1px dashed rgba(0, 0, 0, 0.22);
   border-radius: var(--r-md);
   color: var(--page-2);
-  /* font-weight: 800; */
   text-align: center;
 }
 
-/* @media (max-width: 900px) {
-  .workspace {
-    grid-template-columns: 1fr;
-  }
-
-  .division-panel {
-    display: none;
-  }
-
-  .note-table-shell {
-    min-height: 650px;
-  }
-} */
 
 @media (max-width: 900px) {
   .app-shell {
-    width: min(100% - 48px, 720px);
+    width: min(100%, 800px);
     margin: 10px auto;
     min-height: calc(100vh - 48px);
   }
@@ -877,59 +843,8 @@ h2 {
     flex: 1 1 0;
   }
 
-  /* .message-strip {
-    align-items: stretch;
-    flex-direction: column;
-  } */
-
-  /* .warning-pill {
-    width: 100%;
-  } */
-
   .action-row {
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 14px;
-  }
-}
-
-@media (max-width: 620px) {
-  /* html {
-    font-size: 15px;
-  } */
-
-  .app-shell {
-    width: min(100% - 24px, 720px);
-    margin: 10px auto;
-    /* padding: 14px; */
-  }
-
-  .action-row {
-    gap: 14px;
-  }
-
-  .action-button {
-    min-height: var(--control-h-sm);
-    padding: 0 12px;
-  }
-
-  .selected-division-card {
-    grid-template-columns: auto minmax(44px, 70px) minmax(0, 1fr) 32px;
     gap: 8px;
-    padding-left: 14px;
   }
-
-  .selected-division-card::before,
-  .division-key-field input,
-  .division-text-field input {
-    font-size: var(--t-em-sm);
-    min-width: 100%;
-  }
-
-  .note-key-col {
-    width: 96px;
-  }
-
-  /* .note-text-input {
-    font-size: 0.7rem;
-  } */
 }
