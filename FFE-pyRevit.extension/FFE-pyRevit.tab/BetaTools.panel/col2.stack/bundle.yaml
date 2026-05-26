@@ -1,4 +1,4 @@
 layout:
   - FileSize
-  - Journalysis
   - KeynoteToSymbol
+  - HVAC_CalculatedValues
