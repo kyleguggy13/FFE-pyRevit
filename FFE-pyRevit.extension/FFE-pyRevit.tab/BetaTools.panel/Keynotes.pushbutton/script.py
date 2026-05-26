@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 __title__ = "FFE-Keynotes"
-__version__ = "Version = v0.4"
+__version__ = "Version = v0.5"
 __persistentengine__ = True
 __min_revit_ver__ = 2025
-__doc__ = """Version = v0.4
-Date    = 05.21.2026
+__doc__ = """Version = v0.5
+Date    = 05.26.2026
 __________________________________________________________________
 Description:
 Persistent WebView2 keynote manager for the active Revit document's
@@ -13,10 +13,12 @@ external keynote text file.
 Key behaviors:
 - Opens a modeless WebView2 window and keeps it alive with pyRevit's
   persistent engine.
-- Reads the keynote file assigned to the current Revit document.
+- Reads and rewrites the keynote file assigned to the current Revit document.
 - Edits structured tab-delimited keynote rows in a WebView.
-- Saves with timestamped backups, external change detection, and an
-  immediate Revit keynote table reload.
+- Saves with row-level merge checks, timestamped backups, sidecar file locks,
+  Supabase mirror updates, and an immediate Revit keynote table reload.
+- When a keynote key is renamed, writable placed/model keynote references using
+  the old key are updated to the new key.
 
 Revit API notes:
 - Targets Revit 2026.
@@ -26,19 +28,22 @@ Revit API notes:
 Design decisions:
 - V1 only manages the keynote file already assigned to the model. It
   does not repoint the project to a different keynote file.
+- The shared text file is canonical. Supabase/Postgres is a coordination and
+  realtime mirror layer, not the source of truth.
 - Malformed source lines are shown and block save because the structured
   editor cannot safely preserve or repair arbitrary tab layouts.
 __________________________________________________________________
 How-To:
 - Click the button to open the keynote manager.
 - Edit structured Key, Text, and Parent values.
-- Click Save to overwrite the keynote file and reload Revit keynotes.
+- Click Save to merge edits into the assigned keynote file and reload Revit keynotes.
 __________________________________________________________________
 Last update:
 - [05.19.2026] - v0.1 WebView2 keynote manager
 - [05.20.2026] - v0.2 Refactor to support future features and simplify code maintenance.
 - [05.20.2026] - v0.3 Made window stay on top of Revit and show in taskbar to prevent it from getting lost behind the main UI.
 - [05.21.2026] - v0.4 Updated UI styles and layout, and added more robust file encoding detection and handling.
+- [05.26.2026] - v0.5 Added in-place shared-file concurrent editing with Supabase/Postgres mirroring.
 
 __________________________________________________________________
 Author: Kyle Guggenheim"""
@@ -52,6 +57,7 @@ import os
 import shutil
 import time
 import traceback
+import uuid
 
 import clr
 clr.AddReference("System")
@@ -65,8 +71,11 @@ from System.Windows.Controls import Grid, TextBlock
 from System.Windows.Interop import WindowInteropHelper
 
 from Autodesk.Revit.DB import (
+    BuiltInParameter,
+    FilteredElementCollector,
     KeyBasedTreeEntriesLoadResults,
     KeynoteTable,
+    Material,
     ModelPathUtils,
     Transaction,
 )
@@ -91,7 +100,7 @@ PATH_SUPPORT = os.path.join(PATH_SCRIPT, "support")
 PATH_INDEX = os.path.join(PATH_SUPPORT, "index.html")
 
 APP_NAME = "FFE Keynote Manager"
-APP_VERSION = "v0.4"
+APP_VERSION = "v0.5"
 LOCAL_APP_NAME = "KeynoteManager"
 
 LOGGER = script.get_logger()
@@ -158,6 +167,10 @@ def get_settings_path():
     return os.path.join(get_local_app_dir(), "window-state.json")
 
 
+def get_supabase_settings_path():
+    return os.path.join(get_local_app_dir(), "supabase-settings.json")
+
+
 def get_generated_at():
     return time.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -167,6 +180,23 @@ def get_document_title(target_doc):
         return safe_str(target_doc.Title)
     except:
         return "Untitled Revit Document"
+
+
+def get_client_name():
+    try:
+        username = safe_str(revit_app.Username).strip()
+        if username:
+            return username
+    except:
+        pass
+
+    username = safe_str(os.environ.get("USERNAME")).strip()
+    computer = safe_str(os.environ.get("COMPUTERNAME")).strip()
+    if username and computer:
+        return "{0}@{1}".format(username, computer)
+    if username:
+        return username
+    return "Unknown User"
 
 
 def normalize_path(path):
@@ -199,6 +229,68 @@ def write_json_file(path, payload):
             LOGGER.debug(traceback.format_exc())
         except:
             pass
+
+
+def ask_for_supabase_value(prompt, default_value=""):
+    try:
+        value = forms.ask_for_string(
+            prompt=prompt,
+            default=default_value or "",
+            title="Supabase Keynote Settings"
+        )
+        if value is None:
+            return None
+        return safe_str(value).strip()
+    except:
+        return None
+
+
+def load_supabase_settings(prompt_if_missing=True, force_prompt=False):
+    settings_path = get_supabase_settings_path()
+    settings = read_json_file(settings_path) or {}
+
+    url = safe_str(settings.get("url")).strip()
+    anon_key = safe_str(settings.get("anonKey") or settings.get("publishableKey")).strip()
+    client_id = safe_str(settings.get("clientId")).strip()
+
+    if not client_id:
+        client_id = safe_str(uuid.uuid4())
+
+    if force_prompt or (prompt_if_missing and not url):
+        next_url = ask_for_supabase_value(
+            "Enter the Supabase project URL for the FFE Keynote Manager:",
+            url
+        )
+        if next_url is not None:
+            url = next_url
+
+    if force_prompt or (prompt_if_missing and url and not anon_key):
+        next_anon_key = ask_for_supabase_value(
+            "Enter the Supabase publishable/anon key for the FFE Keynote Manager:",
+            anon_key
+        )
+        if next_anon_key is not None:
+            anon_key = next_anon_key
+
+    payload = {
+        "url": url,
+        "anonKey": anon_key,
+        "clientId": client_id,
+        "clientName": get_client_name(),
+        "settingsPath": settings_path,
+        "configured": bool(url and anon_key),
+    }
+
+    if force_prompt or url or anon_key:
+        settings.update({
+            "url": url,
+            "anonKey": anon_key,
+            "clientId": client_id,
+            "clientName": payload["clientName"],
+        })
+        write_json_file(settings_path, settings)
+
+    return payload
 
 
 # ____________________________________________________________________ WEBVIEW HELPERS
@@ -424,6 +516,27 @@ def get_file_state(path):
         "lastWriteUtc": os.path.getmtime(path),
         "size": len(raw_bytes),
     }
+
+
+def check_file_write_available(path):
+    if not os.path.exists(path):
+        return False, "The keynote file does not exist."
+
+    if not os.path.isfile(path):
+        return False, "The keynote path is not a file."
+
+    try:
+        if os.access(path, os.W_OK) is False:
+            return False, "The keynote file is not writable for the current Windows user."
+    except:
+        pass
+
+    try:
+        file_obj = open(path, "r+b")
+        file_obj.close()
+        return True, "The keynote file is writable."
+    except Exception as exc:
+        return False, "The keynote file could not be opened for writing: {0}".format(exc)
 
 
 # ____________________________________________________________________ KEYNOTE PARSING / VALIDATION
@@ -666,11 +779,15 @@ def build_base_payload(target_doc, status, message):
         "docTitle": get_document_title(target_doc),
         "keynotePath": "",
         "displayPath": "",
+        "libraryKey": "",
         "encoding": "",
         "lineEnding": "\r\n",
         "lastWriteUtc": None,
         "fileHash": "",
+        "writeAvailable": False,
+        "writeMessage": "",
         "generatedAt": get_generated_at(),
+        "supabase": load_supabase_settings(prompt_if_missing=True),
         "status": status,
         "message": message,
         "entries": [],
@@ -686,6 +803,7 @@ def build_keynote_payload(target_doc):
         keynote_table, resource_ref, keynote_path = get_keynote_reference(target_doc)
         payload["keynotePath"] = keynote_path
         payload["displayPath"] = keynote_path
+        payload["libraryKey"] = normalize_path(keynote_path)
 
         if looks_like_remote_resource(keynote_path):
             payload["status"] = "unsupported"
@@ -705,14 +823,19 @@ def build_keynote_payload(target_doc):
         entries, parse_issues = parse_keynote_text(text)
         issues = validate_entries(entries, parse_issues)
         file_state = get_file_state(keynote_path)
+        write_ok, write_message = check_file_write_available(keynote_path)
+        if not write_ok:
+            issues.append(make_issue("warning", write_message, "", None, "writeUnavailable"))
 
         payload.update({
             "status": "invalidFormat" if has_error_issues(issues) else "ready",
-            "message": "Loaded {0} keynote entries.".format(len(entries)),
+            "message": "Loaded {0} keynote entries from the shared keynote file.".format(len(entries)),
             "encoding": encoding,
             "lineEnding": line_ending,
             "lastWriteUtc": file_state.get("lastWriteUtc"),
             "fileHash": file_state.get("fileHash"),
+            "writeAvailable": write_ok,
+            "writeMessage": write_message,
             "entries": entries,
             "issues": issues,
             "entryCount": len(entries),
@@ -789,9 +912,393 @@ def reload_revit_keynotes(target_doc):
     return keynote_path
 
 
+def get_element_id_key(element):
+    try:
+        return int(element.Id.IntegerValue)
+    except:
+        return safe_str(getattr(element, "Id", ""))
+
+
+def get_parameter_text(parameter):
+    if parameter is None:
+        return ""
+
+    try:
+        value = parameter.AsString()
+        if value:
+            return safe_unicode(value).strip()
+    except:
+        pass
+
+    try:
+        value = parameter.AsValueString()
+        if value:
+            return safe_unicode(value).strip()
+    except:
+        pass
+
+    return ""
+
+
+def get_keynote_builtin_parameter_ids():
+    parameter_ids = []
+    for parameter_name in ["KEYNOTE_PARAM", "KEY_VALUE"]:
+        try:
+            parameter_id = getattr(BuiltInParameter, parameter_name)
+            if parameter_id not in parameter_ids:
+                parameter_ids.append(parameter_id)
+        except:
+            pass
+    return parameter_ids
+
+
+def get_keynote_parameters(element):
+    parameters = []
+    for parameter_id in get_keynote_builtin_parameter_ids():
+        try:
+            parameter = element.get_Parameter(parameter_id)
+            if parameter is not None and parameter not in parameters:
+                parameters.append(parameter)
+        except:
+            pass
+    return parameters
+
+
+def iter_keynote_reference_candidates(target_doc):
+    seen = set()
+
+    collectors = [
+        FilteredElementCollector(target_doc).WhereElementIsNotElementType(),
+        FilteredElementCollector(target_doc).WhereElementIsElementType(),
+        FilteredElementCollector(target_doc).OfClass(Material),
+    ]
+
+    for collector in collectors:
+        try:
+            for element in collector:
+                element_key = get_element_id_key(element)
+                if not element_key or element_key in seen:
+                    continue
+                seen.add(element_key)
+                yield element
+        except:
+            continue
+
+
+def update_model_keynote_references(target_doc, key_renames):
+    key_renames = key_renames or {}
+    summary = {
+        "renamedKeyCount": len(key_renames),
+        "updatedCount": 0,
+        "readOnlyCount": 0,
+        "failedCount": 0,
+        "unchangedCount": 0,
+        "failures": [],
+    }
+
+    if not key_renames:
+        return summary
+
+    transaction = Transaction(target_doc, "Update Renamed Keynote References")
+
+    try:
+        transaction.Start()
+        updated_element_ids = set()
+
+        for element in iter_keynote_reference_candidates(target_doc):
+            element_updated = False
+            element_key = get_element_id_key(element)
+
+            for parameter in get_keynote_parameters(element):
+                current_key = get_parameter_text(parameter)
+                next_key = key_renames.get(current_key)
+                if not next_key:
+                    continue
+
+                try:
+                    if parameter.IsReadOnly:
+                        summary["readOnlyCount"] += 1
+                        continue
+                except:
+                    pass
+
+                try:
+                    set_result = parameter.Set(next_key)
+                    if safe_str(set_result).lower() in ["false", "0"]:
+                        summary["failedCount"] += 1
+                        if len(summary["failures"]) < 10:
+                            summary["failures"].append("Element {0}: Revit rejected keynote value '{1}'.".format(element_key, next_key))
+                        continue
+                    element_updated = True
+                except Exception as exc:
+                    summary["failedCount"] += 1
+                    if len(summary["failures"]) < 10:
+                        summary["failures"].append("Element {0}: {1}".format(element_key, exc))
+
+            if element_updated and element_key not in updated_element_ids:
+                updated_element_ids.add(element_key)
+                summary["updatedCount"] += 1
+
+        transaction.Commit()
+    except:
+        try:
+            transaction.RollBack()
+        except:
+            pass
+        raise
+
+    return summary
+
+
 def restore_backup_file(backup_path, keynote_path):
     if backup_path and os.path.exists(backup_path):
         shutil.copy2(backup_path, keynote_path)
+
+
+def get_sync_sidecar_path(keynote_path):
+    return "{0}.ffe-sync.json".format(keynote_path)
+
+
+def get_sync_lock_path(keynote_path):
+    return "{0}.ffe-sync.lock".format(keynote_path)
+
+
+def write_sync_sidecar(keynote_path, payload):
+    write_json_file(get_sync_sidecar_path(keynote_path), payload)
+
+
+def acquire_sync_lock(lock_path, timeout_seconds=10, stale_seconds=120):
+    start_time = time.time()
+
+    while True:
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            try:
+                lock_payload = json_dumps({
+                    "clientName": get_client_name(),
+                    "createdAt": get_generated_at(),
+                })
+                try:
+                    os.write(fd, lock_payload)
+                except TypeError:
+                    os.write(fd, lock_payload.encode("utf-8"))
+            finally:
+                os.close(fd)
+            return lock_path
+        except OSError:
+            try:
+                if os.path.exists(lock_path):
+                    lock_age = time.time() - os.path.getmtime(lock_path)
+                    if lock_age > stale_seconds:
+                        os.remove(lock_path)
+                        continue
+            except:
+                pass
+
+            if time.time() - start_time >= timeout_seconds:
+                raise Exception("Timed out waiting for the keynote sync lock: {0}".format(lock_path))
+
+            time.sleep(0.25)
+
+
+def release_sync_lock(lock_path):
+    try:
+        if lock_path and os.path.exists(lock_path):
+            os.remove(lock_path)
+    except:
+        pass
+
+
+def normalize_merge_entry(entry):
+    entry = entry or {}
+    return {
+        "id": safe_str(entry.get("id")),
+        "key": safe_unicode(entry.get("key")).strip(),
+        "text": safe_unicode(entry.get("text")).strip(),
+        "parentKey": safe_unicode(entry.get("parentKey")).strip(),
+        "lineNumber": entry.get("lineNumber"),
+    }
+
+
+def merge_entry_fields_equal(first_entry, second_entry):
+    first_entry = normalize_merge_entry(first_entry)
+    second_entry = normalize_merge_entry(second_entry)
+    return (
+        first_entry["key"] == second_entry["key"] and
+        first_entry["text"] == second_entry["text"] and
+        first_entry["parentKey"] == second_entry["parentKey"]
+    )
+
+
+def keyed_entries(entries):
+    result = {}
+    for entry in entries or []:
+        normalized = normalize_merge_entry(entry)
+        if normalized["key"]:
+            result[normalized["key"]] = normalized
+    return result
+
+
+def indexed_entries(entries):
+    result = {}
+    for entry in entries or []:
+        normalized = normalize_merge_entry(entry)
+        if normalized["id"]:
+            result[normalized["id"]] = normalized
+    return result
+
+
+def make_save_changes(baseline_entries, desired_entries):
+    baseline_by_id = indexed_entries(baseline_entries)
+    desired_by_id = indexed_entries(desired_entries)
+    changes = []
+    seen_ids = set()
+
+    for baseline in baseline_entries or []:
+        base_entry = normalize_merge_entry(baseline)
+        if not base_entry["id"]:
+            continue
+        desired_entry = desired_by_id.get(base_entry["id"])
+        seen_ids.add(base_entry["id"])
+
+        if desired_entry is None:
+            changes.append({
+                "type": "delete",
+                "base": base_entry,
+                "next": None,
+            })
+        elif not merge_entry_fields_equal(base_entry, desired_entry):
+            changes.append({
+                "type": "update",
+                "base": base_entry,
+                "next": normalize_merge_entry(desired_entry),
+            })
+
+    for desired in desired_entries or []:
+        desired_entry = normalize_merge_entry(desired)
+        if not desired_entry["id"] or desired_entry["id"] in seen_ids:
+            continue
+        changes.append({
+            "type": "insert",
+            "base": None,
+            "next": desired_entry,
+        })
+
+    return changes
+
+
+def make_key_rename_map(baseline_entries, desired_entries):
+    desired_by_id = indexed_entries(desired_entries)
+    key_renames = {}
+
+    for baseline in baseline_entries or []:
+        base_entry = normalize_merge_entry(baseline)
+        desired_entry = desired_by_id.get(base_entry["id"])
+        if not desired_entry:
+            continue
+
+        old_key = base_entry["key"]
+        new_key = normalize_merge_entry(desired_entry)["key"]
+        if old_key and new_key and old_key != new_key:
+            key_renames[old_key] = new_key
+
+    return key_renames
+
+
+def current_entry_changed(current_entry, baseline_entry):
+    if current_entry is None:
+        return True
+    return not merge_entry_fields_equal(current_entry, baseline_entry)
+
+
+def find_entry_index(entries, key):
+    for index, entry in enumerate(entries or []):
+        if normalize_merge_entry(entry)["key"] == key:
+            return index
+    return -1
+
+
+def make_conflict_issue(message, key):
+    return make_issue("error", message, key or "", None, "rowConflict")
+
+
+def merge_keynote_entries(current_entries, baseline_entries, desired_entries):
+    """
+    Merge the desired keynote entries with the current entries, using the baseline entries to detect conflicts.
+        - current_entries: the list of entries currently in the shared keynote file
+    """
+    current_list = [normalize_merge_entry(entry) for entry in (current_entries or [])]
+    current_by_key = keyed_entries(current_list)
+    conflicts = []
+    changes = make_save_changes(baseline_entries, desired_entries)
+
+    for change in changes:
+        change_type = change.get("type")
+        base_entry = change.get("base")
+        next_entry = change.get("next")
+
+        if change_type == "insert":
+            if current_by_key.get(next_entry["key"]):
+                conflicts.append(make_conflict_issue(
+                    "A keynote with key '{0}' already exists in the shared file.".format(next_entry["key"]),
+                    next_entry["key"]
+                ))
+            continue
+
+        current_entry = current_by_key.get(base_entry["key"])
+        if current_entry_changed(current_entry, base_entry):
+            conflicts.append(make_conflict_issue(
+                "Key '{0}' changed in the shared file before your save.".format(base_entry["key"]),
+                base_entry["key"]
+            ))
+            continue
+
+        if change_type == "update" and next_entry["key"] != base_entry["key"]:
+            existing_target = current_by_key.get(next_entry["key"])
+            if existing_target and existing_target["key"] != base_entry["key"]:
+                conflicts.append(make_conflict_issue(
+                    "A keynote with key '{0}' already exists in the shared file.".format(next_entry["key"]),
+                    next_entry["key"]
+                ))
+
+    if conflicts:
+        return None, conflicts
+
+    for change in changes:
+        change_type = change.get("type")
+        base_entry = change.get("base")
+        next_entry = change.get("next")
+
+        if change_type == "insert":
+            current_list.append(next_entry)
+            current_by_key[next_entry["key"]] = next_entry
+            continue
+
+        entry_index = find_entry_index(current_list, base_entry["key"])
+        if entry_index < 0:
+            continue
+
+        if change_type == "delete":
+            removed = current_list.pop(entry_index)
+            current_by_key.pop(removed["key"], None)
+            continue
+
+        if change_type == "update":
+            old_key = base_entry["key"]
+            new_key = next_entry["key"]
+            current_list[entry_index] = next_entry
+            current_by_key.pop(old_key, None)
+            current_by_key[new_key] = next_entry
+            if old_key != new_key:
+                for entry in current_list:
+                    if entry["parentKey"] == old_key:
+                        entry["parentKey"] = new_key
+
+    validation_issues = validate_entries(current_list, [])
+    if has_error_issues(validation_issues):
+        return None, validation_issues
+
+    return current_list, []
 
 
 def save_keynote_payload(target_doc, save_payload):
@@ -823,6 +1330,7 @@ def save_keynote_payload(target_doc, save_payload):
             }
 
         entries = save_payload.get("entries") or []
+        baseline_entries = save_payload.get("baselineEntries") or []
         issues = validate_entries(entries, [])
         if has_error_issues(issues):
             return {
@@ -831,33 +1339,58 @@ def save_keynote_payload(target_doc, save_payload):
                 "issues": issues,
             }
 
-        current_state = get_file_state(current_path)
-        expected_hash = safe_str(save_payload.get("fileHash"))
-        expected_last_write = save_payload.get("lastWriteUtc")
-        current_last_write = current_state.get("lastWriteUtc")
-        write_time_changed = False
-
-        try:
-            write_time_changed = abs(float(current_last_write) - float(expected_last_write)) > 1.0
-        except:
-            write_time_changed = True
-
-        if current_state.get("fileHash") != expected_hash or write_time_changed:
-            return {
-                "status": "error",
-                "message": "The keynote file changed outside the manager. Refresh before saving so no one else's work is overwritten.",
-                "issues": [make_issue("error", "The file changed outside the manager.", "", None, "externalChange")],
-            }
-
         encoding = safe_str(save_payload.get("encoding")) or "utf-8"
         line_ending = save_payload.get("lineEnding") or "\r\n"
-        keynote_text = canonicalize_entries(entries, line_ending)
-        encoded = encode_keynote_text(keynote_text, encoding)
-        backup_path = create_backup_file(current_path)
+        key_renames = make_key_rename_map(baseline_entries, entries)
+        reference_update = {}
+        lock_path = get_sync_lock_path(current_path)
+        backup_path = ""
+
+        acquire_sync_lock(lock_path)
 
         try:
+            write_ok, write_message = check_file_write_available(current_path)
+            if not write_ok:
+                return {
+                    "status": "error",
+                    "message": write_message,
+                    "issues": [make_issue("error", write_message, "", None, "writeUnavailable")],
+                    "payload": build_keynote_payload(target_doc),
+                }
+
+            raw_bytes = read_binary_file(current_path)
+            current_text, current_encoding = decode_keynote_bytes(raw_bytes)
+            current_line_ending = detect_line_ending(current_text)
+            current_entries, current_parse_issues = parse_keynote_text(current_text)
+            current_issues = validate_entries(current_entries, current_parse_issues)
+            if has_error_issues(current_issues):
+                return {
+                    "status": "error",
+                    "message": "The shared keynote file changed into an invalid format. Refresh after fixing the text file.",
+                    "issues": current_issues,
+                    "payload": build_keynote_payload(target_doc),
+                }
+
+            merged_entries, merge_issues = merge_keynote_entries(current_entries, baseline_entries, entries)
+            if merge_issues:
+                return {
+                    "status": "conflict",
+                    "message": "Some keynote rows changed in the shared file before your save. Refresh to review the latest file.",
+                    "issues": merge_issues,
+                    "payload": build_keynote_payload(target_doc),
+                }
+
+            if current_encoding:
+                encoding = current_encoding
+            if current_line_ending:
+                line_ending = current_line_ending
+
+            keynote_text = canonicalize_entries(merged_entries, line_ending)
+            encoded = encode_keynote_text(keynote_text, encoding)
+            backup_path = create_backup_file(current_path)
             write_binary_file(current_path, encoded)
             reload_revit_keynotes(target_doc)
+            reference_update = update_model_keynote_references(target_doc, key_renames)
         except Exception as exc:
             restore_backup_file(backup_path, current_path)
             try:
@@ -866,18 +1399,68 @@ def save_keynote_payload(target_doc, save_payload):
                 pass
             return {
                 "status": "error",
-                "message": "Saved file was restored from backup because Revit could not reload it: {0}".format(exc),
+                "message": "The keynote save failed. The previous file was restored when a backup was available: {0}".format(exc),
                 "backupPath": backup_path,
                 "issues": [make_issue("error", safe_str(exc), "", None, "reloadFailed")],
                 "payload": build_keynote_payload(target_doc),
             }
+        finally:
+            release_sync_lock(lock_path)
 
         payload = build_keynote_payload(target_doc)
+        result_issues = payload.get("issues") or []
+        if reference_update.get("readOnlyCount"):
+            result_issues.append(make_issue(
+                "warning",
+                "{0} keynote reference parameter(s) matched renamed keys but were read-only.".format(reference_update.get("readOnlyCount")),
+                "",
+                None,
+                "keynoteReferenceReadOnly"
+            ))
+        if reference_update.get("failedCount"):
+            result_issues.append(make_issue(
+                "warning",
+                "{0} keynote reference parameter(s) could not be updated after key renaming.".format(reference_update.get("failedCount")),
+                "",
+                None,
+                "keynoteReferenceUpdateFailed"
+            ))
+        try:
+            file_state = get_file_state(current_path)
+            write_sync_sidecar(current_path, {
+                "libraryKey": normalize_path(current_path),
+                "encoding": payload.get("encoding") or encoding,
+                "lineEnding": payload.get("lineEnding") or line_ending,
+                "fileHash": file_state.get("fileHash"),
+                "lastWriteUtc": file_state.get("lastWriteUtc"),
+                "size": file_state.get("size"),
+                "savedAt": get_generated_at(),
+                "clientName": get_client_name(),
+                "keyRenames": key_renames,
+                "keynoteReferenceUpdate": reference_update,
+                "source": "sharedFileCanonical",
+            })
+        except Exception as exc:
+            result_issues.append(make_issue(
+                "warning",
+                "Saved the shared keynote file, but could not write sync metadata: {0}".format(exc),
+                "",
+                None,
+                "sidecarWriteFailed"
+            ))
+        message = "Merged keynote edits into the shared file and reloaded Revit keynotes."
+        if key_renames:
+            message += " Updated {0} model keynote reference(s) for renamed keys.".format(
+                reference_update.get("updatedCount", 0)
+            )
+
         return {
             "status": "ready",
-            "message": "Saved {0} keynote entries and reloaded Revit keynotes.".format(len(entries)),
+            "message": message,
             "backupPath": backup_path,
-            "issues": payload.get("issues") or [],
+            "keyRenames": key_renames,
+            "keynoteReferenceUpdate": reference_update,
+            "issues": result_issues,
             "payload": payload,
         }
 
@@ -1162,10 +1745,11 @@ class KeynoteManagerWindow(Window):
             self.external_event.Raise()
         except Exception as exc:
             self.event_handler.clear_pending()
-            self.send_save_result({
+            result = {
                 "status": "error",
                 "message": "Could not raise the Revit {0} event: {1}".format(action_name, exc),
-            })
+            }
+            self.send_save_result(result)
 
     def on_web_message_received(self, sender, args):
         raw_message = ""
@@ -1199,6 +1783,15 @@ class KeynoteManagerWindow(Window):
             self.event_handler.queue_refresh()
             self.send_status("warning", "Refreshing keynote file...")
             self.raise_external_event("refresh")
+            return
+
+        if message_type == "configureSupabase":
+            settings = load_supabase_settings(prompt_if_missing=True, force_prompt=True)
+            keynote_payload = build_keynote_payload(self.document)
+            keynote_payload["supabase"] = settings
+            self.set_payload(keynote_payload)
+            self.send_keynote_payload(force=True)
+            self.send_status(keynote_payload.get("status"), keynote_payload.get("message"))
             return
 
         if message_type == "saveKeynotes":

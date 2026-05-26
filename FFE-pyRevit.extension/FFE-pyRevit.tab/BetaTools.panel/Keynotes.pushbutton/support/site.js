@@ -12,12 +12,20 @@
     selectedId: null,
     dirty: false,
     saving: false,
+    dbReady: false,
+    dbInitializing: false,
+    dbSnapshot: null,
+    baselineEntries: [],
+    syncIssues: [],
+    remotePending: false,
     allowNextLoad: false,
     nextLocalId: 1
   };
 
   var STATUS_TITLES = {
     ready: "Ready",
+    syncing: "Syncing",
+    conflict: "Conflict",
     invalidFormat: "Validation Required",
     missingFile: "File Missing",
     unsupported: "Unsupported Keynote Reference",
@@ -94,11 +102,15 @@
   }
 
   function normalizeEntry(entry, index) {
+    var dbId = text(entry.dbId || "");
     return {
       id: text(entry.id || makeLocalId()),
+      dbId: dbId,
       key: trim(entry.key),
       text: trim(entry.text),
       parentKey: trim(entry.parentKey),
+      rowVersion: entry.rowVersion || null,
+      sortOrder: entry.sortOrder === 0 ? 0 : (entry.sortOrder || index),
       lineNumber: entry.lineNumber || null,
       originalIndex: index
     };
@@ -110,7 +122,8 @@
       code === "malformedLine" ||
       code === "unsupportedReference" ||
       code === "missingFile" ||
-      code === "loadError"
+      code === "loadError" ||
+      code === "writeUnavailable"
     );
   }
 
@@ -386,7 +399,7 @@
   }
 
   function validateAll() {
-    var issues = state.sourceIssues.slice();
+    var issues = state.sourceIssues.concat(state.syncIssues || []);
     var keyCounts = {};
     var keyMap = {};
     var parentMap = {};
@@ -476,6 +489,10 @@
     });
   }
 
+  function hasBlockingSourceIssue() {
+    return state.sourceIssues.some(sourceIssueBlocksSave);
+  }
+
   function rowMatchesQuery(row, query) {
     var entry = row.entry;
     var haystack = (entry.key + " " + entry.text + " " + entry.parentKey).toLowerCase();
@@ -519,6 +536,7 @@
     }
 
     setText("state-title", STATUS_TITLES[status] || "Status");
+    setText("state-message", statusState.message || "");
   }
 
   function confirmDiscardChanges(message) {
@@ -839,6 +857,7 @@
       state.payload.keynotePath &&
       state.dirty &&
       !state.saving &&
+      !hasBlockingSourceIssue() &&
       !hasErrorIssues(issues)
     );
 
@@ -938,6 +957,141 @@
     }
   }
 
+  function dbManager() {
+    return globalScope.ffeKeynoteDb || null;
+  }
+
+  function currentClient() {
+    var settings = (state.payload && state.payload.supabase) || {};
+    return {
+      clientId: text(settings.clientId),
+      clientName: text(settings.clientName)
+    };
+  }
+
+  function rememberBaseline() {
+    state.baselineEntries = state.entries.map(function (entry) {
+      return {
+        id: entry.id,
+        dbId: entry.dbId,
+        key: entry.key,
+        text: entry.text,
+        parentKey: entry.parentKey,
+        rowVersion: entry.rowVersion,
+        sortOrder: entry.sortOrder,
+        lineNumber: entry.lineNumber || null
+      };
+    });
+  }
+
+  function subscribeToLibrary(snapshot) {
+    var db = dbManager();
+    var client = currentClient();
+
+    if (!db || !snapshot || !snapshot.libraryId) {
+      return;
+    }
+
+    db.subscribeLibrary(snapshot.libraryId, client.clientId, {
+      onRemoteChange: function () {
+        if (state.dirty) {
+          state.remotePending = true;
+          state.syncIssues = [makeIssue(
+            "warning",
+            "Remote Supabase changes are available. Save will check row conflicts; Refresh discards local edits and loads the latest data.",
+            "",
+            "remotePending"
+          )];
+          setStatus({
+            status: "warning",
+            message: "Remote Supabase changes are available while you have unsaved edits."
+          });
+          renderValidation();
+          renderSaveState();
+          return;
+        }
+        state.allowNextLoad = false;
+        postWebViewMessage({ type: "refreshData" });
+      },
+      onStatus: function (status) {
+        if (status === "SUBSCRIBED" && !state.dirty) {
+          setStatus({ status: "ready", message: "Listening for shared keynote updates." });
+        }
+      }
+    });
+  }
+
+  function mirrorFileSnapshot(payload, reason) {
+    var db = dbManager();
+    var settings = (payload && payload.supabase) || {};
+    var client = currentClient();
+
+    if (!payload || !payload.libraryKey) {
+      state.dbReady = false;
+      return;
+    }
+
+    if (!settings.configured) {
+      state.dbReady = false;
+      state.syncIssues = [makeIssue(
+        "warning",
+        "Supabase is not configured, so realtime sync is disabled. Click Supabase to set the project URL and publishable key.",
+        "",
+        "supabaseConfigMissing"
+      )];
+      renderValidation();
+      renderSaveState();
+      return;
+    }
+
+    state.dbInitializing = true;
+
+    if (!db) {
+      state.dbInitializing = false;
+      state.syncIssues = [makeIssue("warning", "The Supabase database manager did not load.", "", "supabaseClientMissing")];
+      renderValidation();
+      renderSaveState();
+      return;
+    }
+
+    try {
+      db.configure(settings);
+    } catch (error) {
+      state.dbInitializing = false;
+      state.syncIssues = [makeIssue("warning", error.message, "", "supabaseConfigError")];
+      renderValidation();
+      renderSaveState();
+      return;
+    }
+
+    db.syncFileSnapshot({
+        libraryKey: payload.libraryKey,
+        displayPath: payload.displayPath || payload.keynotePath,
+        keynotePath: payload.keynotePath,
+        encoding: payload.encoding || "utf-8",
+        lineEnding: payload.lineEnding || "\r\n",
+        fileHash: payload.fileHash || "",
+        lastWriteUtc: payload.lastWriteUtc || null,
+        entries: payload.entries || [],
+        clientId: client.clientId,
+        clientName: client.clientName
+    }).then(function (snapshot) {
+      state.dbInitializing = false;
+      state.dbReady = true;
+      state.dbSnapshot = snapshot;
+      subscribeToLibrary(snapshot);
+      if (!state.dirty && reason === "save") {
+        setStatus({ status: "ready", message: "Saved shared keynote file and mirrored to Supabase." });
+      }
+    }).catch(function (error) {
+      state.dbInitializing = false;
+      state.dbReady = false;
+      state.syncIssues = [makeIssue("warning", error.message, "", "supabaseMirrorError")];
+      renderValidation();
+      renderSaveState();
+    });
+  }
+
   function setStatusFromPayload(payload) {
     var status = payload.status || "idle";
     var message = payload.message || "";
@@ -989,7 +1143,11 @@
       state.allowNextLoad = false;
     }
 
+    state.syncIssues = [];
+    state.remotePending = false;
     applyData(payload);
+    rememberBaseline();
+    mirrorFileSnapshot(state.payload, "load");
   }
 
   function updateEntryField(entryId, fieldName, value, shouldRender) {
@@ -1214,6 +1372,11 @@
       return;
     }
 
+    if (hasBlockingSourceIssue()) {
+      setStatus({ status: "error", message: "The shared keynote file is not available for saving. Check the warning details and refresh." });
+      return;
+    }
+
     if (!state.payload || !state.payload.keynotePath) {
       setStatus({ status: "error", message: "No keynote file is available to save." });
       return;
@@ -1226,6 +1389,15 @@
       lastWriteUtc: state.payload.lastWriteUtc,
       fileHash: state.payload.fileHash,
       sourceHasMalformed: hasSourceIssueCode("malformedLine"),
+      baselineEntries: state.baselineEntries.map(function (entry) {
+        return {
+          id: entry.id,
+          key: trim(entry.key),
+          text: trim(entry.text),
+          parentKey: trim(entry.parentKey),
+          lineNumber: entry.lineNumber || null
+        };
+      }),
       entries: state.entries.map(function (entry) {
         return {
           id: entry.id,
@@ -1238,8 +1410,9 @@
     };
 
     state.saving = true;
+    state.syncIssues = [];
     renderSaveState();
-    setStatus({ status: "warning", message: "Saving keynote file and reloading Revit..." });
+    setStatus({ status: "syncing", message: "Merging edits into the shared keynote file..." });
 
     if (!postWebViewMessage({ type: "saveKeynotes", payload: payload })) {
       state.saving = false;
@@ -1251,12 +1424,28 @@
     result = result || {};
     state.saving = false;
 
-    if (result.payload) {
-      if ((result.status || "") === "ready") {
-        applyData(result.payload);
-      } else {
-        loadData(result.payload);
-      }
+    if ((result.status || "") === "conflict") {
+      state.syncIssues = result.issues || [makeIssue(
+        "error",
+        result.message || "Some keynote rows changed in the shared file before your save.",
+        "",
+        "rowConflict"
+      )];
+      setStatus({
+        status: "conflict",
+        message: result.message || "Some keynote rows changed in the shared file before your save."
+      });
+      renderValidation();
+      renderSaveState();
+      return;
+    }
+
+    if ((result.status || "") === "ready" && result.payload) {
+      applyData(result.payload);
+      rememberBaseline();
+      mirrorFileSnapshot(result.payload, "save");
+    } else if ((result.status || "") !== "ready") {
+      state.syncIssues = result.issues || [];
     }
 
     setStatus({
@@ -1266,7 +1455,7 @@
         : (result.message || "")
     });
 
-    if (!result.payload) {
+    if ((result.status || "") !== "ready") {
       renderValidation();
       renderSaveState();
     }
@@ -1287,6 +1476,17 @@
       globalScope.close();
     } catch (ignore) {
       // Browser fallback only.
+    }
+  }
+
+  function configureSupabase() {
+    if (state.dirty && !confirmDiscardChanges("Changing Supabase settings will reload keynote data and discard unsaved edits. Continue?")) {
+      return;
+    }
+
+    setStatus({ status: "warning", message: "Opening Supabase settings..." });
+    if (postWebViewMessage({ type: "configureSupabase" })) {
+      state.allowNextLoad = state.dirty;
     }
   }
 
@@ -1344,6 +1544,7 @@
     bindClick("add-child", addChild);
     bindClick("duplicate-row", duplicateSelected);
     bindClick("delete-row", deleteSelected);
+    bindClick("configure-supabase", configureSupabase);
     bindClick("refresh-data", refreshData);
     bindClick("save-data", saveData);
     bindClick("close-window", closeWindow);

@@ -247,8 +247,8 @@ h2 {
 
 .message-copy {
   min-width: 0;
-  display: flex;
-  align-items: baseline;
+  display: grid;
+  align-items: center;
   gap: 10px;
 }
 
@@ -260,13 +260,25 @@ h2 {
   white-space: nowrap;
 }
 
+.message-copy span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: var(--t-em-sm);
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .message-strip[data-tone="ready"] {
   background: var(--page-2);
   border-color: var(--positive);
 }
 
 .message-strip[data-tone="warning"],
-.message-strip[data-tone="invalidFormat"] {
+.message-strip[data-tone="invalidFormat"],
+.message-strip[data-tone="syncing"],
+.message-strip[data-tone="conflict"] {
   background: var(--page-2);
   border-color: var(--warning);
 }
