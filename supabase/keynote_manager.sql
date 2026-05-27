@@ -415,6 +415,8 @@ declare
   v_library public.keynote_libraries%rowtype;
   v_item record;
   v_row public.keynote_entries%rowtype;
+  v_metadata jsonb := coalesce(p_changes -> 'metadata', '{}'::jsonb);
+  v_last_write_utc double precision;
   v_conflicts jsonb := '[]'::jsonb;
   v_conflict_count integer := 0;
   v_new_count integer := 0;
@@ -422,6 +424,10 @@ declare
   v_deleted_count integer := 0;
   v_errors text[];
 begin
+  if nullif(v_metadata ->> 'lastWriteUtc', '') is not null then
+    v_last_write_utc := (v_metadata ->> 'lastWriteUtc')::double precision;
+  end if;
+
   select *
   into v_library
   from public.keynote_libraries
@@ -451,14 +457,14 @@ begin
       )
     for update;
 
-    if not found then
+    if not found and coalesce(v_item."dbId", '') <> '' then
       v_conflicts := v_conflicts || jsonb_build_array(jsonb_build_object(
         'type', 'delete',
         'key', coalesce(v_item.key, ''),
         'message', 'This keynote was already deleted.'
       ));
       v_conflict_count := v_conflict_count + 1;
-    elsif v_row.row_version <> coalesce(v_item."baseVersion", -1) then
+    elsif coalesce(v_item."baseVersion", 0) > 0 and v_row.row_version <> v_item."baseVersion" then
       v_conflicts := v_conflicts || jsonb_build_array(jsonb_build_object(
         'type', 'delete',
         'key', v_row.keynote_key,
@@ -475,23 +481,27 @@ begin
     from jsonb_to_recordset(coalesce(p_changes -> 'upserts', '[]'::jsonb))
       as item("dbId" text, key text, "text" text, "parentKey" text, "sortOrder" integer, "baseVersion" bigint, "previousKey" text)
   loop
-    if coalesce(v_item."dbId", '') <> '' then
-      select *
-      into v_row
-      from public.keynote_entries
-      where library_id = v_library.id
-        and id = v_item."dbId"::uuid
-      for update;
+    select *
+    into v_row
+    from public.keynote_entries
+    where library_id = v_library.id
+      and (
+        (coalesce(v_item."dbId", '') <> '' and id = v_item."dbId"::uuid)
+        or (
+          coalesce(v_item."dbId", '') = ''
+          and coalesce(v_item."previousKey", '') <> ''
+          and keynote_key = coalesce(v_item."previousKey", '')
+        )
+        or (
+          coalesce(v_item."dbId", '') = ''
+          and coalesce(v_item."previousKey", '') = ''
+          and keynote_key = coalesce(v_item.key, '')
+        )
+      )
+    for update;
 
-      if not found then
-        v_conflicts := v_conflicts || jsonb_build_array(jsonb_build_object(
-          'type', 'update',
-          'key', coalesce(v_item.key, ''),
-          'dbId', v_item."dbId",
-          'message', 'This keynote no longer exists.'
-        ));
-        v_conflict_count := v_conflict_count + 1;
-      elsif v_row.row_version <> coalesce(v_item."baseVersion", -1) then
+    if found then
+      if coalesce(v_item."baseVersion", 0) > 0 and v_row.row_version <> v_item."baseVersion" then
         v_conflicts := v_conflicts || jsonb_build_array(jsonb_build_object(
           'type', 'update',
           'key', v_row.keynote_key,
@@ -515,18 +525,26 @@ begin
         ));
         v_conflict_count := v_conflict_count + 1;
       end if;
+    elsif coalesce(v_item."dbId", '') <> '' then
+        v_conflicts := v_conflicts || jsonb_build_array(jsonb_build_object(
+          'type', 'update',
+          'key', coalesce(v_item.key, ''),
+          'dbId', v_item."dbId",
+          'message', 'This keynote no longer exists.'
+        ));
+        v_conflict_count := v_conflict_count + 1;
     elsif exists (
       select 1
       from public.keynote_entries e
       where e.library_id = v_library.id
         and e.keynote_key = btrim(coalesce(v_item.key, ''))
     ) then
-      v_conflicts := v_conflicts || jsonb_build_array(jsonb_build_object(
-        'type', 'insert',
-        'key', coalesce(v_item.key, ''),
-        'message', 'Another keynote already uses this key.'
-      ));
-      v_conflict_count := v_conflict_count + 1;
+        v_conflicts := v_conflicts || jsonb_build_array(jsonb_build_object(
+          'type', 'insert',
+          'key', coalesce(v_item.key, ''),
+          'message', 'Another keynote already uses this key.'
+        ));
+        v_conflict_count := v_conflict_count + 1;
     end if;
   end loop;
 
@@ -550,7 +568,9 @@ begin
         (coalesce(v_item."dbId", '') <> '' and id = v_item."dbId"::uuid)
         or (coalesce(v_item."dbId", '') = '' and keynote_key = coalesce(v_item.key, ''))
       );
-    v_deleted_count := v_deleted_count + 1;
+    if found then
+      v_deleted_count := v_deleted_count + 1;
+    end if;
   end loop;
 
   for v_item in
@@ -558,17 +578,30 @@ begin
     from jsonb_to_recordset(coalesce(p_changes -> 'upserts', '[]'::jsonb))
       as item("dbId" text, key text, "text" text, "parentKey" text, "sortOrder" integer, "baseVersion" bigint, "previousKey" text)
   loop
-    if coalesce(v_item."dbId", '') <> '' then
-      update public.keynote_entries
-      set keynote_key = btrim(coalesce(v_item.key, '')),
-          keynote_text = btrim(coalesce(v_item."text", '')),
-          parent_key = btrim(coalesce(v_item."parentKey", '')),
-          sort_order = coalesce(v_item."sortOrder", sort_order),
-          row_version = row_version + 1,
-          updated_by_client_id = coalesce(p_client_id, ''),
-          updated_by_client_name = coalesce(p_client_name, '')
-      where library_id = v_library.id
-        and id = v_item."dbId"::uuid;
+    update public.keynote_entries
+    set keynote_key = btrim(coalesce(v_item.key, '')),
+        keynote_text = btrim(coalesce(v_item."text", '')),
+        parent_key = btrim(coalesce(v_item."parentKey", '')),
+        sort_order = coalesce(v_item."sortOrder", sort_order),
+        row_version = row_version + 1,
+        updated_by_client_id = coalesce(p_client_id, ''),
+        updated_by_client_name = coalesce(p_client_name, '')
+    where library_id = v_library.id
+      and (
+        (coalesce(v_item."dbId", '') <> '' and id = v_item."dbId"::uuid)
+        or (
+          coalesce(v_item."dbId", '') = ''
+          and coalesce(v_item."previousKey", '') <> ''
+          and keynote_key = coalesce(v_item."previousKey", '')
+        )
+        or (
+          coalesce(v_item."dbId", '') = ''
+          and coalesce(v_item."previousKey", '') = ''
+          and keynote_key = coalesce(v_item.key, '')
+        )
+      );
+
+    if found then
       v_touched_count := v_touched_count + 1;
     else
       insert into public.keynote_entries (
@@ -605,7 +638,11 @@ begin
         from public.keynote_entries
         where library_id = v_library.id
       ),
-      display_path = coalesce(nullif(display_path, ''), p_library_key),
+      display_path = coalesce(nullif(v_metadata ->> 'displayPath', ''), nullif(display_path, ''), p_library_key),
+      encoding = coalesce(nullif(v_metadata ->> 'encoding', ''), encoding),
+      line_ending = coalesce(nullif(v_metadata ->> 'lineEnding', ''), line_ending),
+      file_hash = coalesce(v_metadata ->> 'fileHash', file_hash),
+      last_write_utc = coalesce(v_last_write_utc, last_write_utc),
       last_saved_by_client_id = coalesce(p_client_id, ''),
       last_saved_by_client_name = coalesce(p_client_name, '')
   where id = v_library.id;
@@ -654,6 +691,7 @@ revoke execute on function public.save_keynote_changes(text, text, text, bigint,
 grant execute on function public.ensure_keynote_library(text, text, text, text, jsonb, text, text) to anon, authenticated;
 grant execute on function public.get_keynote_snapshot(text) to anon, authenticated;
 grant execute on function public.sync_keynote_file_snapshot(text, text, text, text, text, double precision, jsonb, text, text) to anon, authenticated;
+grant execute on function public.save_keynote_changes(text, text, text, bigint, jsonb) to anon, authenticated;
 
 do $$
 begin

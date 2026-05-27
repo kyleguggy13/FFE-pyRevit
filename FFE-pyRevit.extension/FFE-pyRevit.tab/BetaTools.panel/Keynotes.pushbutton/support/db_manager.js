@@ -41,7 +41,9 @@
     return snapshot;
   }
 
-  function rpc(functionName, args) {
+  function rpc(functionName, args, options) {
+    options = options || {};
+
     if (!supabaseClient) {
       return Promise.reject(new Error("Supabase is not configured."));
     }
@@ -53,6 +55,9 @@
       }
       if (data.status === "error") {
         throw new Error(data.message || "Supabase request failed.");
+      }
+      if (options.raw) {
+        return data;
       }
       return normalizeSnapshot(data);
     });
@@ -115,6 +120,25 @@
     });
   }
 
+  function saveChanges(payload) {
+    payload = payload || {};
+    return rpc("save_keynote_changes", {
+      p_library_key: payload.libraryKey,
+      p_client_id: payload.clientId || "",
+      p_client_name: payload.clientName || "",
+      p_base_dataset_version: payload.baseDatasetVersion || 0,
+      p_changes: payload.changes || {}
+    }, { raw: true }).then(function (data) {
+      if (data && data.snapshot) {
+        data.snapshot = normalizeSnapshot(data.snapshot);
+      }
+      if (data && data.status === "ready") {
+        return normalizeSnapshot(data);
+      }
+      return data || {};
+    });
+  }
+
   function unsubscribe() {
     var channel = activeChannel;
     activeChannel = null;
@@ -172,6 +196,7 @@
     ensureLibrary: ensureLibrary,
     getSnapshot: getSnapshot,
     syncFileSnapshot: syncFileSnapshot,
+    saveChanges: saveChanges,
     subscribeLibrary: subscribeLibrary,
     unsubscribe: unsubscribe
   };

@@ -16,6 +16,7 @@
     dbInitializing: false,
     dbSnapshot: null,
     baselineEntries: [],
+    pendingDbChanges: null,
     syncIssues: [],
     remotePending: false,
     allowNextLoad: false,
@@ -682,17 +683,17 @@
     }
   }
 
-  function resizeNoteTextInput(input) {
-    var borderSize;
+  // function resizeNoteTextInput(input) {
+  //   var borderSize;
 
-    if (!input) {
-      return;
-    }
+  //   if (!input) {
+  //     return;
+  //   }
 
-    input.style.height = "auto";
-    borderSize = input.offsetHeight - input.clientHeight;
-    input.style.height = (input.scrollHeight + borderSize) + "px";
-  }
+  //   input.style.height = "auto";
+  //   borderSize = input.offsetHeight - input.clientHeight;
+  //   input.style.height = (input.scrollHeight + borderSize) + "px";
+  // }
 
   function renderNotes() {
     var body = byId("keynote-table-body");
@@ -756,7 +757,7 @@
 
       textInput.addEventListener("input", function () {
         updateEntryField(entry.id, "text", textInput.value, false);
-        resizeNoteTextInput(textInput);
+        // resizeNoteTextInput(textInput);
       });
 
       item.addEventListener("click", function (event) {
@@ -770,7 +771,7 @@
       item.appendChild(keyCell);
       item.appendChild(textCell);
       body.appendChild(item);
-      resizeNoteTextInput(textInput);
+      // resizeNoteTextInput(textInput);
     });
   }
 
@@ -969,6 +970,158 @@
     };
   }
 
+  function indexEntriesById(entries) {
+    var map = {};
+    (entries || []).forEach(function (entry) {
+      if (entry.id) {
+        map[entry.id] = entry;
+      }
+    });
+    return map;
+  }
+
+  function indexEntriesByKey(entries) {
+    var map = {};
+    (entries || []).forEach(function (entry) {
+      var key = trim(entry.key);
+      if (key && !map[key]) {
+        map[key] = entry;
+      }
+    });
+    return map;
+  }
+
+  function entryFieldsEqual(first, second) {
+    return Boolean(first && second) &&
+      trim(first.key) === trim(second.key) &&
+      trim(first.text) === trim(second.text) &&
+      trim(first.parentKey) === trim(second.parentKey);
+  }
+
+  function numericVersion(value) {
+    var number = Number(value || 0);
+    return isNaN(number) ? 0 : number;
+  }
+
+  function sortOrderFor(entry, fallbackIndex, baseEntry) {
+    if (baseEntry && (baseEntry.sortOrder || baseEntry.sortOrder === 0)) {
+      return Number(baseEntry.sortOrder);
+    }
+    if (entry && (entry.sortOrder || entry.sortOrder === 0)) {
+      return Number(entry.sortOrder);
+    }
+    return fallbackIndex || 0;
+  }
+
+  function makeDbUpsert(entry, baseEntry, index) {
+    return {
+      dbId: text((baseEntry && baseEntry.dbId) || entry.dbId || ""),
+      key: trim(entry.key),
+      text: trim(entry.text),
+      parentKey: trim(entry.parentKey),
+      sortOrder: sortOrderFor(entry, index, baseEntry),
+      baseVersion: numericVersion((baseEntry && baseEntry.rowVersion) || entry.rowVersion),
+      previousKey: baseEntry ? trim(baseEntry.key) : ""
+    };
+  }
+
+  function makeDbDelete(baseEntry) {
+    return {
+      dbId: text(baseEntry.dbId || ""),
+      key: trim(baseEntry.key),
+      baseVersion: numericVersion(baseEntry.rowVersion)
+    };
+  }
+
+  function buildPendingDbChanges() {
+    var baselineById = indexEntriesById(state.baselineEntries);
+    var currentById = indexEntriesById(state.entries);
+    var seen = {};
+    var changes = {
+      upserts: [],
+      deletes: []
+    };
+
+    state.baselineEntries.forEach(function (baseEntry) {
+      var currentEntry = currentById[baseEntry.id];
+      seen[baseEntry.id] = true;
+
+      if (!currentEntry) {
+        changes.deletes.push(makeDbDelete(baseEntry));
+        return;
+      }
+
+      if (!entryFieldsEqual(baseEntry, currentEntry)) {
+        changes.upserts.push(makeDbUpsert(
+          currentEntry,
+          baseEntry,
+          state.entries.indexOf(currentEntry)
+        ));
+      }
+    });
+
+    state.entries.forEach(function (entry, index) {
+      if (!seen[entry.id]) {
+        changes.upserts.push(makeDbUpsert(entry, null, index));
+      }
+    });
+
+    return changes;
+  }
+
+  function addFileMetadataToChanges(changes, payload) {
+    changes = changes || { upserts: [], deletes: [] };
+    payload = payload || {};
+    changes.metadata = {
+      displayPath: payload.displayPath || payload.keynotePath || "",
+      encoding: payload.encoding || "utf-8",
+      lineEnding: payload.lineEnding || "\r\n",
+      fileHash: payload.fileHash || "",
+      lastWriteUtc: payload.lastWriteUtc || null
+    };
+    return changes;
+  }
+
+  function mergeSnapshotMetadataInto(entries, snapshot) {
+    var snapshotByKey = indexEntriesByKey(snapshot && snapshot.entries);
+    var count = 0;
+
+    (entries || []).forEach(function (entry) {
+      var match = snapshotByKey[trim(entry.key)];
+      if (!match) {
+        return;
+      }
+
+      entry.dbId = text(match.dbId || match.id || "");
+      entry.rowVersion = match.rowVersion || null;
+      entry.sortOrder = match.sortOrder === 0 ? 0 : (match.sortOrder || entry.sortOrder);
+      count += 1;
+    });
+
+    return count;
+  }
+
+  function applySnapshotMetadata(snapshot) {
+    if (!snapshot) {
+      return;
+    }
+
+    state.dbSnapshot = snapshot;
+    if (state.payload) {
+      state.payload.libraryId = snapshot.libraryId || state.payload.libraryId || "";
+      state.payload.datasetVersion = snapshot.datasetVersion || 0;
+    }
+
+    mergeSnapshotMetadataInto(state.entries, snapshot);
+    mergeSnapshotMetadataInto(state.baselineEntries, snapshot);
+
+    if (!state.dirty) {
+      rememberBaseline();
+    }
+
+    renderAll();
+  }
+
   function rememberBaseline() {
     state.baselineEntries = state.entries.map(function (entry) {
       return {
@@ -1021,7 +1174,7 @@
     });
   }
 
-  function mirrorFileSnapshot(payload, reason) {
+  function attachSupabaseLibrary(payload, reason) {
     var db = dbManager();
     var settings = (payload && payload.supabase) || {};
     var client = currentClient();
@@ -1064,24 +1217,23 @@
       return;
     }
 
-    db.syncFileSnapshot({
-        libraryKey: payload.libraryKey,
-        displayPath: payload.displayPath || payload.keynotePath,
-        keynotePath: payload.keynotePath,
-        encoding: payload.encoding || "utf-8",
-        lineEnding: payload.lineEnding || "\r\n",
-        fileHash: payload.fileHash || "",
-        lastWriteUtc: payload.lastWriteUtc || null,
-        entries: payload.entries || [],
-        clientId: client.clientId,
-        clientName: client.clientName
+    db.ensureLibrary({
+      libraryKey: payload.libraryKey,
+      displayPath: payload.displayPath || payload.keynotePath,
+      keynotePath: payload.keynotePath,
+      encoding: payload.encoding || "utf-8",
+      lineEnding: payload.lineEnding || "\r\n",
+      entries: payload.entries || [],
+      clientId: client.clientId,
+      clientName: client.clientName
     }).then(function (snapshot) {
       state.dbInitializing = false;
       state.dbReady = true;
-      state.dbSnapshot = snapshot;
+      state.syncIssues = [];
+      applySnapshotMetadata(snapshot);
       subscribeToLibrary(snapshot);
-      if (!state.dirty && reason === "save") {
-        setStatus({ status: "ready", message: "Saved shared keynote file and mirrored to Supabase." });
+      if (!state.dirty && reason === "load") {
+        setStatus({ status: "ready", message: "Loaded shared keynote file and attached Supabase row metadata." });
       }
     }).catch(function (error) {
       state.dbInitializing = false;
@@ -1089,6 +1241,143 @@
       state.syncIssues = [makeIssue("warning", error.message, "", "supabaseMirrorError")];
       renderValidation();
       renderSaveState();
+    });
+  }
+
+  function makeSupabaseSyncIssue(message, code) {
+    return makeIssue("warning", message || "Supabase delta sync failed.", "", code || "supabaseDeltaSyncFailed");
+  }
+
+  function makeSupabaseConflictIssues(result) {
+    var conflicts = (result && result.conflicts) || [];
+    if (!conflicts.length) {
+      return [makeSupabaseSyncIssue(
+        (result && result.message) || "Some keynotes changed in Supabase before the delta save completed.",
+        "supabaseConflict"
+      )];
+    }
+
+    return conflicts.map(function (conflict) {
+      return makeIssue(
+        "warning",
+        conflict.message || "This keynote changed in Supabase before the delta save completed.",
+        conflict.key || "",
+        "supabaseConflict"
+      );
+    });
+  }
+
+  function describeSupabaseDeltaResult(result) {
+    var inserted = Number(result.insertedCount || 0);
+    var updated = Number(result.updatedCount || 0);
+    var deleted = Number(result.deletedCount || 0);
+    var parts = [];
+
+    if (inserted) {
+      parts.push(inserted + " inserted");
+    }
+    if (updated) {
+      parts.push(updated + " updated");
+    }
+    if (deleted) {
+      parts.push(deleted + " deleted");
+    }
+    if (!parts.length) {
+      return "metadata updated";
+    }
+    return parts.join(", ");
+  }
+
+  function savePendingDbChanges(filePayload, pendingChanges, fileMessage) {
+    var db = dbManager();
+    var settings = (state.payload && state.payload.supabase) || {};
+    var client = currentClient();
+    var baseDatasetVersion = (state.dbSnapshot && state.dbSnapshot.datasetVersion) ||
+      (state.payload && state.payload.datasetVersion) ||
+      0;
+
+    filePayload = filePayload || {};
+    pendingChanges = addFileMetadataToChanges(pendingChanges || { upserts: [], deletes: [] }, filePayload);
+
+    if (!filePayload.libraryKey) {
+      state.pendingDbChanges = null;
+      return;
+    }
+
+    if (!settings.configured) {
+      state.pendingDbChanges = null;
+      state.dbReady = false;
+      state.syncIssues = [makeSupabaseSyncIssue(
+        "Saved the shared keynote file, but Supabase is not configured for delta sync.",
+        "supabaseConfigMissing"
+      )];
+      renderValidation();
+      renderSaveState();
+      return;
+    }
+
+    if (!db || typeof db.saveChanges !== "function") {
+      state.pendingDbChanges = null;
+      state.dbReady = false;
+      state.syncIssues = [makeSupabaseSyncIssue(
+        "Saved the shared keynote file, but the Supabase delta save API was not available.",
+        "supabaseClientMissing"
+      )];
+      renderValidation();
+      renderSaveState();
+      return;
+    }
+
+    setStatus({
+      status: "syncing",
+      message: "Saved shared keynote file. Updating changed Supabase rows..."
+    });
+
+    db.saveChanges({
+      libraryKey: filePayload.libraryKey,
+      clientId: client.clientId,
+      clientName: client.clientName,
+      baseDatasetVersion: baseDatasetVersion,
+      changes: pendingChanges
+    }).then(function (result) {
+      state.pendingDbChanges = null;
+
+      if ((result.status || "") === "conflict") {
+        state.dbReady = false;
+        state.syncIssues = makeSupabaseConflictIssues(result);
+        if (result.snapshot) {
+          applySnapshotMetadata(result.snapshot);
+        }
+        setStatus({
+          status: "conflict",
+          message: (fileMessage || "Saved shared keynote file.") + " Supabase delta sync has conflicts."
+        });
+        renderValidation();
+        renderSaveState();
+        return;
+      }
+
+      state.dbReady = true;
+      state.syncIssues = [];
+      applySnapshotMetadata(result);
+      subscribeToLibrary(result);
+      setStatus({
+        status: "ready",
+        message: (fileMessage || "Saved shared keynote file.") + " Supabase delta sync complete: " + describeSupabaseDeltaResult(result) + "."
+      });
+    }).catch(function (error) {
+      state.pendingDbChanges = null;
+      state.dbReady = false;
+      state.syncIssues = [makeSupabaseSyncIssue(
+        "Saved the shared keynote file, but Supabase delta sync failed: " + (error.message || error),
+        "supabaseDeltaSyncFailed"
+      )];
+      renderValidation();
+      renderSaveState();
+      setStatus({
+        status: "warning",
+        message: (fileMessage || "Saved shared keynote file.") + " Supabase delta sync failed."
+      });
     });
   }
 
@@ -1147,7 +1436,7 @@
     state.remotePending = false;
     applyData(payload);
     rememberBaseline();
-    mirrorFileSnapshot(state.payload, "load");
+    attachSupabaseLibrary(state.payload, "load");
   }
 
   function updateEntryField(entryId, fieldName, value, shouldRender) {
@@ -1382,6 +1671,8 @@
       return;
     }
 
+    state.pendingDbChanges = buildPendingDbChanges();
+
     payload = {
       keynotePath: state.payload.keynotePath,
       encoding: state.payload.encoding || "utf-8",
@@ -1416,15 +1707,20 @@
 
     if (!postWebViewMessage({ type: "saveKeynotes", payload: payload })) {
       state.saving = false;
+      state.pendingDbChanges = null;
       renderSaveState();
     }
   }
 
   function handleSaveResult(result) {
+    var pendingChanges = state.pendingDbChanges;
+    var fileMessage;
+
     result = result || {};
     state.saving = false;
 
     if ((result.status || "") === "conflict") {
+      state.pendingDbChanges = null;
       state.syncIssues = result.issues || [makeIssue(
         "error",
         result.message || "Some keynote rows changed in the shared file before your save.",
@@ -1443,8 +1739,17 @@
     if ((result.status || "") === "ready" && result.payload) {
       applyData(result.payload);
       rememberBaseline();
-      mirrorFileSnapshot(result.payload, "save");
+      fileMessage = result.backupPath
+        ? (result.message || "") + " Backup: " + result.backupPath
+        : (result.message || "");
+      setStatus({
+        status: "ready",
+        message: fileMessage
+      });
+      savePendingDbChanges(result.payload, pendingChanges, fileMessage);
+      return;
     } else if ((result.status || "") !== "ready") {
+      state.pendingDbChanges = null;
       state.syncIssues = result.issues || [];
     }
 

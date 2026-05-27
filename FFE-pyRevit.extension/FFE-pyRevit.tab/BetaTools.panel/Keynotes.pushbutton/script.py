@@ -19,19 +19,6 @@ Key behaviors:
   Supabase mirror updates, and an immediate Revit keynote table reload.
 - When a keynote key is renamed, writable placed/model keynote references using
   the old key are updated to the new key.
-
-Revit API notes:
-- Targets Revit 2026.
-- Modeless refresh/save requests are routed through ExternalEvent so
-  document API calls run in a valid Revit API context.
-
-Design decisions:
-- V1 only manages the keynote file already assigned to the model. It
-  does not repoint the project to a different keynote file.
-- The shared text file is canonical. Supabase/Postgres is a coordination and
-  realtime mirror layer, not the source of truth.
-- Malformed source lines are shown and block save because the structured
-  editor cannot safely preserve or repair arbitrary tab layouts.
 __________________________________________________________________
 How-To:
 - Click the button to open the keynote manager.
@@ -47,6 +34,22 @@ Last update:
 
 __________________________________________________________________
 Author: Kyle Guggenheim"""
+
+
+"""
+Revit API notes:
+- Targets Revit 2026.
+- Modeless refresh/save requests are routed through ExternalEvent so
+  document API calls run in a valid Revit API context.
+
+Design decisions:
+- V1 only manages the keynote file already assigned to the model. It
+  does not repoint the project to a different keynote file.
+- The shared text file is canonical. Supabase/Postgres is a coordination and
+  realtime mirror layer, not the source of truth.
+- Malformed source lines are shown and block save because the structured
+  editor cannot safely preserve or repair arbitrary tab layouts.
+"""
 
 
 # ____________________________________________________________________ IMPORTS
