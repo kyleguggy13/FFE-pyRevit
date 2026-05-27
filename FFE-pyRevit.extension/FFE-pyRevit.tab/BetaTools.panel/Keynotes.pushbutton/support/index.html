@@ -34,9 +34,34 @@
         </div>
 
         <div class="window-actions" aria-label="Window actions">
-          <button id="configure-supabase" class="utility-button" type="button">Supabase</button>
-          <button id="refresh-data" class="utility-button" type="button">Refresh</button>
-          <button id="save-data" class="save-button" type="button" disabled>Save</button>
+          <button id="configure-supabase" class="utility-button" type="button"
+            type="button"
+            class="btn btn-secondary"
+            data-bs-toggle="tooltip"
+            data-bs-placement="top"
+            title="Configure Supabase connection settings"
+          >
+            Config
+          </button>
+          <button id="refresh-data" class="utility-button" type="button"
+            type="button"
+            class="btn btn-secondary"
+            data-bs-toggle="tooltip"
+            data-bs-placement="top"
+            title="Refresh data from Keynote file"
+          >
+            Refresh
+          </button>
+          <button id="save-data" class="save-button" type="button"
+            type="button"
+            class="btn btn-secondary"
+            data-bs-toggle="tooltip"
+            data-bs-placement="top"
+            title="Save data to Keynote file"
+            disabled
+          >
+            Save
+          </button>
           <button id="close-window" class="utility-button" type="button">Close</button>
         </div>
       </header>

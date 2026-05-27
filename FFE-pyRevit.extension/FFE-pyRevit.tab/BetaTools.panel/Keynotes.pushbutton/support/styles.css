@@ -467,6 +467,7 @@ h2 {
 .division-row.list-group-item.is-claimed {
   background: var(--page-2);
   color: var(--ink-3);
+  border-color: var(--warning-line);
 }
 
 .division-row.list-group-item.is-claimed:hover,
@@ -726,6 +727,10 @@ h2 {
 
 .note-row.is-selected > *:last-child {
   box-shadow: inset -2px 0 0 var(--accent), inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent);
+}
+
+.note-row.is-claimed > *{
+  border: 3px solid var(--warning);
 }
 
 .note-row.is-claimed > *,
