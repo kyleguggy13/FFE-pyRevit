@@ -31,7 +31,7 @@ Last update:
 - [05.20.2026] - v0.3 Made window stay on top of Revit and show in taskbar to prevent it from getting lost behind the main UI.
 - [05.21.2026] - v0.4 Updated UI styles and layout, and added more robust file encoding detection and handling.
 - [05.26.2026] - v0.5 Added in-place shared-file concurrent editing with Supabase/Postgres mirroring.
-
+- [05.27.2026] - v0.6 Added row-level locking with Supabase to prevent concurrent edit conflicts.
 __________________________________________________________________
 Author: Kyle Guggenheim"""
 
