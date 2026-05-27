@@ -1805,24 +1805,81 @@
     return makeUniqueKey(("0" + (max + 1)).slice(-2));
   }
 
-  function makeChildKey(parentKey) {
-    var prefix = trim(parentKey) ? trim(parentKey) + "." : "NEW.";
-    var existing = {};
-    var index;
-    var candidate;
+  function normalizeChildKeyPrefix(parentKey) {
+    var value = trim(parentKey);
+    var number;
 
-    state.entries.forEach(function (entry) {
-      existing[entry.key] = true;
-    });
+    if (!value) {
+      return "NEW";
+    }
 
-    for (index = 1; index < 1000; index += 1) {
-      candidate = prefix + ("0" + index).slice(-2);
-      if (!existing[candidate]) {
-        return candidate;
+    if (/^\d+$/.test(value)) {
+      number = Number(value);
+      if (!isNaN(number)) {
+        return String(number);
       }
     }
 
-    return makeUniqueKey(prefix + "NEW");
+    return value;
+  }
+
+  function padNumber(value, width) {
+    var result = String(value);
+
+    while (result.length < width) {
+      result = "0" + result;
+    }
+
+    return result;
+  }
+
+  function makeChildKey(parentKey) {
+    var normalizedParentKey = trim(parentKey);
+    var prefix = normalizeChildKeyPrefix(parentKey);
+    var existing = {};
+    var max = 0;
+    var width = 2;
+    var bestPrefix = prefix;
+    var nextNumber;
+    var candidate;
+    var match;
+
+    state.entries.forEach(function (entry) {
+      var key = trim(entry.key);
+      var suffixNumber;
+      existing[key] = true;
+
+      if (trim(entry.parentKey) !== normalizedParentKey) {
+        return;
+      }
+
+      match = key.match(/^(.+)\.(\d+)$/);
+      if (!match) {
+        return;
+      }
+
+      suffixNumber = Number(match[2]);
+      if (isNaN(suffixNumber)) {
+        return;
+      }
+
+      if (suffixNumber > max) {
+        max = suffixNumber;
+        bestPrefix = match[1];
+        width = match[2].length;
+      }
+    });
+
+    nextNumber = max + 1;
+    while (nextNumber < 10000) {
+      candidate = bestPrefix + "." + padNumber(nextNumber, width);
+      if (!existing[candidate]) {
+        return candidate;
+      }
+      nextNumber += 1;
+    }
+
+    return makeUniqueKey(bestPrefix + ".NEW");
   }
 
   function addRoot() {
