@@ -17,6 +17,8 @@
     dbSnapshot: null,
     baselineEntries: [],
     pendingDbChanges: null,
+    remoteEditClaims: {},
+    localEditClaimSignature: "",
     syncIssues: [],
     remotePending: false,
     allowNextLoad: false,
@@ -603,13 +605,16 @@
       var subtitle = document.createElement("span");
       var badge = document.createElement("span");
       var isSelected = selectedModel && model.id === selectedModel.id;
+      var claimTitle = model.entry ? editClaimTitle(model.entry) : "";
 
       item.type = "button";
-      item.className = "list-group-item list-group-item-action division-row" + (isSelected ? " active is-selected" : "");
+      item.className = "list-group-item list-group-item-action division-row" +
+        (isSelected ? " active is-selected" : "") +
+        (claimTitle ? " is-claimed" : "");
       item.setAttribute("role", "option");
       item.setAttribute("aria-selected", isSelected ? "true" : "false");
       item.setAttribute("data-entry-id", model.id);
-      item.setAttribute("title", model.title + " - " + model.text);
+      item.setAttribute("title", claimTitle || (model.title + " - " + model.text));
       item.tabIndex = -1;
 
       copy.className = "division-row-copy";
@@ -652,11 +657,12 @@
       var item = document.createElement("li");
       var button = document.createElement("button");
       var isSelected = selectedModel && model.id === selectedModel.id;
+      var claimTitle = model.entry ? editClaimTitle(model.entry) : "";
 
       button.type = "button";
-      button.className = "dropdown-item" + (isSelected ? " active" : "");
+      button.className = "dropdown-item" + (isSelected ? " active" : "") + (claimTitle ? " is-claimed" : "");
       button.setAttribute("data-division-id", model.id);
-      button.setAttribute("title", model.title + " - " + model.text);
+      button.setAttribute("title", claimTitle || (model.title + " - " + model.text));
       if (isSelected) {
         button.setAttribute("aria-current", "true");
       }
@@ -672,14 +678,23 @@
     var keyInput = byId("division-key-input");
     var textInput = byId("division-text-input");
     var hasEntry = Boolean(model && model.entry);
+    var claimTitle = hasEntry ? editClaimTitle(model.entry) : "";
+    var card = document.querySelector(".selected-division-card");
+
+    if (card) {
+      card.classList.toggle("is-claimed", Boolean(claimTitle));
+      card.setAttribute("title", claimTitle || "");
+    }
 
     if (keyInput) {
-      keyInput.disabled = !hasEntry;
+      keyInput.disabled = !hasEntry || Boolean(claimTitle);
       keyInput.value = hasEntry ? model.entry.key : "UNGROUPED";
+      keyInput.setAttribute("title", claimTitle || "");
     }
     if (textInput) {
-      textInput.disabled = !hasEntry;
+      textInput.disabled = !hasEntry || Boolean(claimTitle);
       textInput.value = hasEntry ? model.entry.text : "Keynotes without a root division";
+      textInput.setAttribute("title", claimTitle || "");
     }
   }
 
@@ -723,9 +738,13 @@
       var textCell = document.createElement("td");
       var keyInput = document.createElement("input");
       var textInput = document.createElement("textarea");
+      var claimTitle = editClaimTitle(entry);
 
-      item.className = "note-row" + (entry.id === state.selectedNoteId ? " is-selected" : "");
+      item.className = "note-row" +
+        (entry.id === state.selectedNoteId ? " is-selected" : "") +
+        (claimTitle ? " is-claimed" : "");
       item.setAttribute("data-entry-id", entry.id);
+      item.setAttribute("title", claimTitle || "");
       item.tabIndex = -1;
       item.style.setProperty("--depth", row.depth);
 
@@ -736,11 +755,15 @@
       keyInput.className = "form-control form-control-sm note-input note-key-input";
       keyInput.value = entry.key;
       keyInput.setAttribute("aria-label", "Key for " + (entry.key || "new keynote"));
+      keyInput.disabled = Boolean(claimTitle);
+      keyInput.setAttribute("title", claimTitle || "");
 
       textInput.className = "form-control form-control-sm note-input note-text-input";
       textInput.rows = 2;
       textInput.value = entry.text;
       textInput.setAttribute("aria-label", "Description for " + (entry.key || "new keynote"));
+      textInput.disabled = Boolean(claimTitle);
+      textInput.setAttribute("title", claimTitle || "");
 
       [keyInput, textInput].forEach(function (input) {
         input.addEventListener("focus", function () {
@@ -838,15 +861,17 @@
     var deleteButton = byId("delete-row");
     var addChildButton = byId("add-child");
     var duplicateButton = byId("duplicate-row");
+    var targetClaimed = target && isEntryRemotelyClaimed(target);
+    var divisionClaimed = division && isEntryRemotelyClaimed(division);
 
     if (addChildButton) {
-      addChildButton.disabled = !division;
+      addChildButton.disabled = !division || divisionClaimed;
     }
     if (duplicateButton) {
-      duplicateButton.disabled = !target;
+      duplicateButton.disabled = !target || targetClaimed;
     }
     if (deleteButton) {
-      deleteButton.disabled = !target;
+      deleteButton.disabled = !target || targetClaimed;
     }
   }
 
@@ -968,6 +993,262 @@
       clientId: text(settings.clientId),
       clientName: text(settings.clientName)
     };
+  }
+
+  function findBaselineEntry(entry) {
+    var index;
+    if (!entry) {
+      return null;
+    }
+    for (index = 0; index < state.baselineEntries.length; index += 1) {
+      if (state.baselineEntries[index].id === entry.id) {
+        return state.baselineEntries[index];
+      }
+    }
+    return null;
+  }
+
+  function claimKeyForEntry(entry, baselineEntry) {
+    var dbId = text((baselineEntry && baselineEntry.dbId) || (entry && entry.dbId));
+    var key = trim(baselineEntry && baselineEntry.key);
+
+    if (dbId) {
+      return "db:" + dbId;
+    }
+    if (key) {
+      return "key:" + key;
+    }
+    return "";
+  }
+
+  function claimKeysForEntry(entry) {
+    var baselineEntry = findBaselineEntry(entry);
+    var keys = [];
+    var dbId = text((baselineEntry && baselineEntry.dbId) || (entry && entry.dbId));
+    var baseKey = trim(baselineEntry && baselineEntry.key);
+    var currentKey = trim(entry && entry.key);
+
+    if (dbId) {
+      keys.push("db:" + dbId);
+    }
+    if (baseKey) {
+      keys.push("key:" + baseKey);
+    }
+    if (currentKey && currentKey !== baseKey) {
+      keys.push("key:" + currentKey);
+    }
+    return keys;
+  }
+
+  function remoteClaimForEntry(entry) {
+    var keys = claimKeysForEntry(entry);
+    var index;
+    for (index = 0; index < keys.length; index += 1) {
+      if (state.remoteEditClaims[keys[index]]) {
+        return state.remoteEditClaims[keys[index]];
+      }
+    }
+    return null;
+  }
+
+  function isEntryRemotelyClaimed(entry) {
+    return Boolean(remoteClaimForEntry(entry));
+  }
+
+  function editClaimTitle(entry) {
+    var claim = remoteClaimForEntry(entry);
+    var name;
+    if (!claim) {
+      return "";
+    }
+    name = trim(claim.clientName) || "another user";
+    return "Being edited by " + name;
+  }
+
+  function normalizeEditClaimsData(data) {
+    data = data || {};
+    data.claims = data.claims || [];
+    return data;
+  }
+
+  function remoteEditClaimSignature(claims) {
+    return Object.keys(claims || {}).sort().map(function (claimKey) {
+      var claim = claims[claimKey] || {};
+      return claimKey + ":" + text(claim.clientId) + ":" + text(claim.clientName);
+    }).join("|");
+  }
+
+  function applyEditClaimsData(data) {
+    var client = currentClient();
+    var remote = {};
+    var previousSignature = remoteEditClaimSignature(state.remoteEditClaims);
+    var nextSignature;
+
+    data = normalizeEditClaimsData(data);
+    data.claims.forEach(function (claim) {
+      var claimKey = text(claim.claimKey);
+      if (!claimKey || (client.clientId && text(claim.clientId) === client.clientId)) {
+        return;
+      }
+      remote[claimKey] = {
+        claimKey: claimKey,
+        dbId: text(claim.dbId),
+        key: text(claim.key),
+        clientId: text(claim.clientId),
+        clientName: text(claim.clientName),
+        updatedAt: text(claim.updatedAt)
+      };
+    });
+
+    nextSignature = remoteEditClaimSignature(remote);
+    state.remoteEditClaims = remote;
+    if (previousSignature !== nextSignature) {
+      renderAll();
+    }
+  }
+
+  function entryHasClaimableEdit(entry, baselineEntry) {
+    return Boolean(
+      entry &&
+      baselineEntry &&
+      (
+        trim(entry.key) !== trim(baselineEntry.key) ||
+        trim(entry.text) !== trim(baselineEntry.text)
+      )
+    );
+  }
+
+  function buildLocalEditClaims() {
+    var claims = [];
+
+    state.entries.forEach(function (entry) {
+      var baselineEntry = findBaselineEntry(entry);
+      var claimKey = claimKeyForEntry(entry, baselineEntry);
+
+      if (!claimKey || !entryHasClaimableEdit(entry, baselineEntry)) {
+        return;
+      }
+
+      claims.push({
+        claimKey: claimKey,
+        dbId: text((baselineEntry && baselineEntry.dbId) || entry.dbId || ""),
+        key: trim(baselineEntry.key)
+      });
+    });
+
+    return claims;
+  }
+
+  function editClaimSignature(claims) {
+    return (claims || []).map(function (claim) {
+      return claim.claimKey;
+    }).sort().join("|");
+  }
+
+  function claimsAreConfigured() {
+    var settings = (state.payload && state.payload.supabase) || {};
+    var db = dbManager();
+    return Boolean(
+      state.payload &&
+      state.payload.libraryKey &&
+      settings.configured &&
+      db &&
+      typeof db.setEditClaims === "function"
+    );
+  }
+
+  function syncLocalEditClaims() {
+    var db = dbManager();
+    var client = currentClient();
+    var claims = buildLocalEditClaims();
+    var signature = editClaimSignature(claims);
+
+    if (signature === state.localEditClaimSignature) {
+      return Promise.resolve(null);
+    }
+    state.localEditClaimSignature = signature;
+
+    if (!claimsAreConfigured()) {
+      return Promise.resolve(null);
+    }
+
+    return db.setEditClaims({
+      libraryKey: state.payload.libraryKey,
+      clientId: client.clientId,
+      clientName: client.clientName,
+      claims: claims
+    }).then(function (data) {
+      applyEditClaimsData(data);
+      return data;
+    }).catch(function (error) {
+      state.syncIssues = [makeIssue(
+        "warning",
+        "Could not update unsaved edit locks: " + (error.message || error),
+        "",
+        "editClaimUpdateFailed"
+      )];
+      renderValidation();
+      renderSaveState();
+      return null;
+    });
+  }
+
+  function clearLocalEditClaims() {
+    var db = dbManager();
+    var client = currentClient();
+    var shouldClearRemote = state.localEditClaimSignature;
+
+    state.localEditClaimSignature = "";
+
+    if (!claimsAreConfigured() || !shouldClearRemote) {
+      return Promise.resolve(null);
+    }
+
+    return db.setEditClaims({
+      libraryKey: state.payload.libraryKey,
+      clientId: client.clientId,
+      clientName: client.clientName,
+      claims: []
+    }).then(function (data) {
+      applyEditClaimsData(data);
+      return data;
+    }).catch(function () {
+      return null;
+    });
+  }
+
+  function refreshEditClaims() {
+    var db = dbManager();
+    if (
+      !state.payload ||
+      !state.payload.libraryKey ||
+      !db ||
+      typeof db.getEditClaims !== "function"
+    ) {
+      return Promise.resolve(null);
+    }
+
+    return db.getEditClaims(state.payload.libraryKey).then(function (data) {
+      applyEditClaimsData(data);
+      return data;
+    }).catch(function () {
+      return null;
+    });
+  }
+
+  function subscribeToEditClaims(snapshot) {
+    var db = dbManager();
+    var client = currentClient();
+
+    if (!db || !snapshot || !snapshot.libraryId || typeof db.subscribeEditClaims !== "function") {
+      return;
+    }
+
+    db.subscribeEditClaims(snapshot.libraryId, client.clientId, {
+      onClaimsChanged: function () {
+        refreshEditClaims();
+      }
+    });
   }
 
   function indexEntriesById(entries) {
@@ -1232,6 +1513,8 @@
       state.syncIssues = [];
       applySnapshotMetadata(snapshot);
       subscribeToLibrary(snapshot);
+      subscribeToEditClaims(snapshot);
+      refreshEditClaims();
       if (!state.dirty && reason === "load") {
         setStatus({ status: "ready", message: "Loaded shared keynote file and attached Supabase row metadata." });
       }
@@ -1361,6 +1644,8 @@
       state.syncIssues = [];
       applySnapshotMetadata(result);
       subscribeToLibrary(result);
+      subscribeToEditClaims(result);
+      refreshEditClaims();
       setStatus({
         status: "ready",
         message: (fileMessage || "Saved shared keynote file.") + " Supabase delta sync complete: " + describeSupabaseDeltaResult(result) + "."
@@ -1432,8 +1717,10 @@
       state.allowNextLoad = false;
     }
 
+    clearLocalEditClaims();
     state.syncIssues = [];
     state.remotePending = false;
+    state.remoteEditClaims = {};
     applyData(payload);
     rememberBaseline();
     attachSupabaseLibrary(state.payload, "load");
@@ -1444,6 +1731,11 @@
     var oldKey;
 
     if (!entry) {
+      return;
+    }
+    if (isEntryRemotelyClaimed(entry)) {
+      setStatus({ status: "warning", message: editClaimTitle(entry) || "This keynote is being edited by another user." });
+      renderAll();
       return;
     }
 
@@ -1465,6 +1757,9 @@
     }
 
     markDirty();
+    if (fieldName === "key" || fieldName === "text") {
+      syncLocalEditClaims();
+    }
 
     if (shouldRender) {
       renderAll();
@@ -1558,6 +1853,11 @@
       });
       return;
     }
+    if (isEntryRemotelyClaimed(parent)) {
+      setStatus({ status: "warning", message: editClaimTitle(parent) || "This division is being edited by another user." });
+      renderAll();
+      return;
+    }
 
     entry = {
       id: makeLocalId(),
@@ -1585,6 +1885,11 @@
     if (!entry) {
       return;
     }
+    if (isEntryRemotelyClaimed(entry)) {
+      setStatus({ status: "warning", message: editClaimTitle(entry) || "This keynote is being edited by another user." });
+      renderAll();
+      return;
+    }
 
     copy = {
       id: makeLocalId(),
@@ -1604,6 +1909,11 @@
     var entry = actionTargetEntry();
 
     if (!entry) {
+      return;
+    }
+    if (isEntryRemotelyClaimed(entry)) {
+      setStatus({ status: "warning", message: editClaimTitle(entry) || "This keynote is being edited by another user." });
+      renderAll();
       return;
     }
 
@@ -1628,6 +1938,7 @@
     state.selectedId = null;
     ensureSelection();
     markDirty();
+    syncLocalEditClaims();
     renderAll();
   }
 
@@ -1639,11 +1950,13 @@
     }
 
     setStatus({ status: "warning", message: "Refreshing keynote file..." });
-    if (postWebViewMessage({ type: "refreshData" })) {
-      state.allowNextLoad = shouldAllowLoad;
-    } else {
-      state.allowNextLoad = false;
-    }
+    clearLocalEditClaims().then(function () {
+      if (postWebViewMessage({ type: "refreshData" })) {
+        state.allowNextLoad = shouldAllowLoad;
+      } else {
+        state.allowNextLoad = false;
+      }
+    });
   }
 
   function requestRefresh() {
@@ -1746,6 +2059,7 @@
         status: "ready",
         message: fileMessage
       });
+      clearLocalEditClaims();
       savePendingDbChanges(result.payload, pendingChanges, fileMessage);
       return;
     } else if ((result.status || "") !== "ready") {
@@ -1773,15 +2087,17 @@
       return;
     }
 
-    if (postWebViewMessage({ type: "closeWindow", discardConfirmed: discardConfirmed })) {
-      return;
-    }
+    clearLocalEditClaims().then(function () {
+      if (postWebViewMessage({ type: "closeWindow", discardConfirmed: discardConfirmed })) {
+        return;
+      }
 
-    try {
-      globalScope.close();
-    } catch (ignore) {
-      // Browser fallback only.
-    }
+      try {
+        globalScope.close();
+      } catch (ignore) {
+        // Browser fallback only.
+      }
+    });
   }
 
   function configureSupabase() {
@@ -1790,9 +2106,11 @@
     }
 
     setStatus({ status: "warning", message: "Opening Supabase settings..." });
-    if (postWebViewMessage({ type: "configureSupabase" })) {
-      state.allowNextLoad = state.dirty;
-    }
+    clearLocalEditClaims().then(function () {
+      if (postWebViewMessage({ type: "configureSupabase" })) {
+        state.allowNextLoad = state.dirty;
+      }
+    });
   }
 
   function bindDivisionInput(id, fieldName) {

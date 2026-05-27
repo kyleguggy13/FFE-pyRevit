@@ -464,6 +464,24 @@ h2 {
   box-shadow: inset 5px 0 0 var(--accent);
 }
 
+.division-row.list-group-item.is-claimed {
+  background: var(--page-2);
+  color: var(--ink-3);
+}
+
+.division-row.list-group-item.is-claimed:hover,
+.division-row.list-group-item.is-claimed:focus-visible,
+.division-row.list-group-item.is-claimed.active,
+.division-row.list-group-item.is-claimed.is-selected {
+  background: var(--page-2);
+  color: var(--ink-3);
+}
+
+.division-row.list-group-item.is-claimed .division-note-badge {
+  background: var(--divider);
+  color: var(--ink-3);
+}
+
 .division-row-copy {
   min-width: 0;
   display: grid;
@@ -525,6 +543,11 @@ h2 {
   color: var(--ink-1);
   font-size: var(--t-em-lg);
   line-height: 1;
+}
+
+.selected-division-card.is-claimed {
+  background: var(--page-2);
+  color: var(--ink-3);
 }
 
 .division-key-field,
@@ -634,6 +657,11 @@ h2 {
   color: var(--ink-1);
 }
 
+.division-select-menu .dropdown-item.is-claimed {
+  background: var(--page-2);
+  color: var(--ink-3);
+}
+
 .note-table-shell {
   min-width: 0;
   min-height: 540px;
@@ -698,6 +726,25 @@ h2 {
 
 .note-row.is-selected > *:last-child {
   box-shadow: inset -2px 0 0 var(--accent), inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent);
+}
+
+.note-row.is-claimed > *,
+.note-table.table-hover > tbody > .note-row.is-claimed:hover > *,
+.note-row.is-claimed.is-selected > * {
+  background-color: var(--page-2);
+  color: var(--ink-3);
+}
+
+.note-row.is-claimed.is-selected > * {
+  box-shadow: inset 0 2px 0 var(--divider), inset 0 -2px 0 var(--divider);
+}
+
+.note-row.is-claimed.is-selected > *:first-child {
+  box-shadow: inset 2px 0 0 var(--divider), inset 0 2px 0 var(--divider), inset 0 -2px 0 var(--divider);
+}
+
+.note-row.is-claimed.is-selected > *:last-child {
+  box-shadow: inset -2px 0 0 var(--divider), inset 0 2px 0 var(--divider), inset 0 -2px 0 var(--divider);
 }
 
 .note-cell {

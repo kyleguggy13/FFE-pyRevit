@@ -4,6 +4,8 @@
   var supabaseClient = null;
   var activeChannel = null;
   var currentLibraryId = "";
+  var activeClaimsChannel = null;
+  var currentClaimsLibraryId = "";
 
   function text(value) {
     if (value === null || value === undefined) {
@@ -39,6 +41,23 @@
     snapshot.encoding = text(snapshot.encoding || "utf-8");
     snapshot.lineEnding = snapshot.lineEnding || snapshot.line_ending || "\r\n";
     return snapshot;
+  }
+
+  function normalizeClaims(data) {
+    data = data || {};
+    data.libraryId = text(data.libraryId || data.library_id);
+    data.libraryKey = text(data.libraryKey || data.library_key);
+    data.claims = (data.claims || []).map(function (claim) {
+      return {
+        claimKey: text(claim.claimKey || claim.claim_key),
+        dbId: text(claim.dbId || claim.db_id),
+        key: text(claim.key || claim.keynote_key),
+        clientId: text(claim.clientId || claim.client_id),
+        clientName: text(claim.clientName || claim.client_name),
+        updatedAt: text(claim.updatedAt || claim.updated_at)
+      };
+    });
+    return data;
   }
 
   function rpc(functionName, args, options) {
@@ -139,14 +158,38 @@
     });
   }
 
-  function unsubscribe() {
-    var channel = activeChannel;
-    activeChannel = null;
-    currentLibraryId = "";
+  function getEditClaims(libraryKey) {
+    return rpc("get_keynote_edit_claims", {
+      p_library_key: libraryKey
+    }, { raw: true }).then(normalizeClaims);
+  }
 
+  function setEditClaims(payload) {
+    payload = payload || {};
+    return rpc("replace_keynote_edit_claims", {
+      p_library_key: payload.libraryKey,
+      p_client_id: payload.clientId || "",
+      p_client_name: payload.clientName || "",
+      p_claims: payload.claims || []
+    }, { raw: true }).then(normalizeClaims);
+  }
+
+  function removeChannel(channel) {
     if (channel && supabaseClient && typeof supabaseClient.removeChannel === "function") {
       supabaseClient.removeChannel(channel);
     }
+  }
+
+  function unsubscribe() {
+    var channel = activeChannel;
+    var claimsChannel = activeClaimsChannel;
+    activeChannel = null;
+    activeClaimsChannel = null;
+    currentLibraryId = "";
+    currentClaimsLibraryId = "";
+
+    removeChannel(channel);
+    removeChannel(claimsChannel);
   }
 
   function subscribeLibrary(libraryId, clientId, handlers) {
@@ -161,7 +204,8 @@
       return activeChannel;
     }
 
-    unsubscribe();
+    removeChannel(activeChannel);
+    activeChannel = null;
     currentLibraryId = libraryId;
     activeChannel = supabaseClient.channel("keynote-library-" + libraryId)
       .on(
@@ -191,13 +235,54 @@
     return activeChannel;
   }
 
+  function subscribeEditClaims(libraryId, clientId, handlers) {
+    handlers = handlers || {};
+    libraryId = text(libraryId);
+
+    if (!supabaseClient || !libraryId) {
+      return null;
+    }
+    if (currentClaimsLibraryId === libraryId && activeClaimsChannel) {
+      return activeClaimsChannel;
+    }
+
+    removeChannel(activeClaimsChannel);
+    activeClaimsChannel = null;
+    currentClaimsLibraryId = libraryId;
+    activeClaimsChannel = supabaseClient.channel("keynote-edit-claims-" + libraryId)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "keynote_edit_claims",
+          filter: "library_id=eq." + libraryId
+        },
+        function (payload) {
+          if (typeof handlers.onClaimsChanged === "function") {
+            handlers.onClaimsChanged(payload || {});
+          }
+        }
+      )
+      .subscribe(function (status) {
+        if (typeof handlers.onStatus === "function") {
+          handlers.onStatus(status);
+        }
+      });
+
+    return activeClaimsChannel;
+  }
+
   globalScope.ffeKeynoteDb = {
     configure: configure,
     ensureLibrary: ensureLibrary,
     getSnapshot: getSnapshot,
     syncFileSnapshot: syncFileSnapshot,
     saveChanges: saveChanges,
+    getEditClaims: getEditClaims,
+    setEditClaims: setEditClaims,
     subscribeLibrary: subscribeLibrary,
+    subscribeEditClaims: subscribeEditClaims,
     unsubscribe: unsubscribe
   };
 }(typeof window !== "undefined" ? window : this));

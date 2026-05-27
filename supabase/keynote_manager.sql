@@ -47,6 +47,24 @@ create index if not exists keynote_entries_library_order_idx
 create index if not exists keynote_entries_library_parent_idx
   on public.keynote_entries (library_id, parent_key);
 
+create table if not exists public.keynote_edit_claims (
+  id uuid primary key default gen_random_uuid(),
+  library_id uuid not null references public.keynote_libraries(id) on delete cascade,
+  claim_key text not null,
+  db_id uuid,
+  keynote_key text not null default '',
+  client_id text not null,
+  client_name text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint keynote_edit_claims_claim_key_not_empty check (btrim(claim_key) <> ''),
+  constraint keynote_edit_claims_client_id_not_empty check (btrim(client_id) <> ''),
+  constraint keynote_edit_claims_library_claim_unique unique (library_id, claim_key)
+);
+
+create index if not exists keynote_edit_claims_library_client_idx
+  on public.keynote_edit_claims (library_id, client_id);
+
 create or replace function public.touch_keynote_updated_at()
 returns trigger
 language plpgsql
@@ -65,6 +83,11 @@ for each row execute function public.touch_keynote_updated_at();
 drop trigger if exists touch_keynote_entries_updated_at on public.keynote_entries;
 create trigger touch_keynote_entries_updated_at
 before update on public.keynote_entries
+for each row execute function public.touch_keynote_updated_at();
+
+drop trigger if exists touch_keynote_edit_claims_updated_at on public.keynote_edit_claims;
+create trigger touch_keynote_edit_claims_updated_at
+before update on public.keynote_edit_claims
 for each row execute function public.touch_keynote_updated_at();
 
 create or replace function public.build_keynote_snapshot(p_library_id uuid)
@@ -277,6 +300,132 @@ begin
 
   return public.build_keynote_snapshot(v_library_id)
     || jsonb_build_object('status', 'ready', 'message', 'Loaded keynote library from Supabase.');
+end;
+$$;
+
+create or replace function public.build_keynote_edit_claims(p_library_id uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select jsonb_build_object(
+    'libraryId', l.id::text,
+    'libraryKey', l.library_key,
+    'claims', coalesce((
+      select jsonb_agg(
+        jsonb_build_object(
+          'claimKey', c.claim_key,
+          'dbId', coalesce(c.db_id::text, ''),
+          'key', c.keynote_key,
+          'clientId', c.client_id,
+          'clientName', c.client_name,
+          'updatedAt', c.updated_at
+        )
+        order by c.updated_at desc, c.claim_key
+      )
+      from public.keynote_edit_claims c
+      where c.library_id = l.id
+    ), '[]'::jsonb)
+  )
+  from public.keynote_libraries l
+  where l.id = p_library_id;
+$$;
+
+create or replace function public.get_keynote_edit_claims(p_library_key text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_library_id uuid;
+begin
+  select id into v_library_id
+  from public.keynote_libraries
+  where library_key = p_library_key;
+
+  if v_library_id is null then
+    return jsonb_build_object(
+      'status', 'error',
+      'message', 'Keynote library was not found.',
+      'claims', '[]'::jsonb
+    );
+  end if;
+
+  return public.build_keynote_edit_claims(v_library_id)
+    || jsonb_build_object('status', 'ready', 'message', 'Loaded keynote edit claims.');
+end;
+$$;
+
+create or replace function public.replace_keynote_edit_claims(
+  p_library_key text,
+  p_client_id text default '',
+  p_client_name text default '',
+  p_claims jsonb default '[]'::jsonb
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_library_id uuid;
+  v_claim record;
+begin
+  if btrim(coalesce(p_client_id, '')) = '' then
+    raise exception 'Client id is required.';
+  end if;
+
+  select id into v_library_id
+  from public.keynote_libraries
+  where library_key = p_library_key;
+
+  if v_library_id is null then
+    return jsonb_build_object(
+      'status', 'error',
+      'message', 'Keynote library was not found.',
+      'claims', '[]'::jsonb
+    );
+  end if;
+
+  delete from public.keynote_edit_claims
+  where library_id = v_library_id
+    and client_id = p_client_id;
+
+  for v_claim in
+    select *
+    from jsonb_to_recordset(coalesce(p_claims, '[]'::jsonb))
+      as claim("claimKey" text, "dbId" text, key text)
+  loop
+    if btrim(coalesce(v_claim."claimKey", '')) <> '' then
+      insert into public.keynote_edit_claims (
+        library_id,
+        claim_key,
+        db_id,
+        keynote_key,
+        client_id,
+        client_name
+      )
+      values (
+        v_library_id,
+        btrim(coalesce(v_claim."claimKey", '')),
+        nullif(v_claim."dbId", '')::uuid,
+        btrim(coalesce(v_claim.key, '')),
+        p_client_id,
+        coalesce(p_client_name, '')
+      )
+      on conflict (library_id, claim_key) do update
+      set db_id = excluded.db_id,
+          keynote_key = excluded.keynote_key,
+          client_name = excluded.client_name
+      where public.keynote_edit_claims.client_id = excluded.client_id;
+    end if;
+  end loop;
+
+  return public.build_keynote_edit_claims(v_library_id)
+    || jsonb_build_object('status', 'ready', 'message', 'Updated keynote edit claims.');
 end;
 $$;
 
@@ -661,6 +810,7 @@ $$;
 
 alter table public.keynote_libraries enable row level security;
 alter table public.keynote_entries enable row level security;
+alter table public.keynote_edit_claims enable row level security;
 
 drop policy if exists "anon can read keynote libraries" on public.keynote_libraries;
 create policy "anon can read keynote libraries"
@@ -676,20 +826,34 @@ for select
 to anon, authenticated
 using (true);
 
+drop policy if exists "anon can read keynote edit claims" on public.keynote_edit_claims;
+create policy "anon can read keynote edit claims"
+on public.keynote_edit_claims
+for select
+to anon, authenticated
+using (true);
+
 revoke all on public.keynote_libraries from anon, authenticated;
 revoke all on public.keynote_entries from anon, authenticated;
+revoke all on public.keynote_edit_claims from anon, authenticated;
 grant select on public.keynote_libraries to anon, authenticated;
 grant select on public.keynote_entries to anon, authenticated;
+grant select on public.keynote_edit_claims to anon, authenticated;
 
 revoke execute on function public.build_keynote_snapshot(uuid) from public;
+revoke execute on function public.build_keynote_edit_claims(uuid) from public;
 revoke execute on function public.validate_keynote_library(uuid) from public;
 revoke execute on function public.ensure_keynote_library(text, text, text, text, jsonb, text, text) from public;
 revoke execute on function public.get_keynote_snapshot(text) from public;
+revoke execute on function public.get_keynote_edit_claims(text) from public;
+revoke execute on function public.replace_keynote_edit_claims(text, text, text, jsonb) from public;
 revoke execute on function public.sync_keynote_file_snapshot(text, text, text, text, text, double precision, jsonb, text, text) from public;
 revoke execute on function public.save_keynote_changes(text, text, text, bigint, jsonb) from public;
 
 grant execute on function public.ensure_keynote_library(text, text, text, text, jsonb, text, text) to anon, authenticated;
 grant execute on function public.get_keynote_snapshot(text) to anon, authenticated;
+grant execute on function public.get_keynote_edit_claims(text) to anon, authenticated;
+grant execute on function public.replace_keynote_edit_claims(text, text, text, jsonb) to anon, authenticated;
 grant execute on function public.sync_keynote_file_snapshot(text, text, text, text, text, double precision, jsonb, text, text) to anon, authenticated;
 grant execute on function public.save_keynote_changes(text, text, text, bigint, jsonb) to anon, authenticated;
 
@@ -703,6 +867,16 @@ begin
       and tablename = 'keynote_libraries'
   ) then
     alter publication supabase_realtime add table public.keynote_libraries;
+  end if;
+
+  if not exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'keynote_edit_claims'
+  ) then
+    alter publication supabase_realtime add table public.keynote_edit_claims;
   end if;
 end;
 $$;
