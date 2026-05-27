@@ -128,6 +128,10 @@ textarea:disabled {
   opacity: 0.58;
 }
 
+textarea {
+  field-sizing: content;
+}
+
 h1,
 h2,
 p {
