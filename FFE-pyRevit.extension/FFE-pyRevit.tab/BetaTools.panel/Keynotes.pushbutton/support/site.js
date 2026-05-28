@@ -23,6 +23,7 @@
     remotePending: false,
     allowNextLoad: false,
     collapsedEntryIds: {},
+    sheetVisibleKeynotes: {},
     nextLocalId: 1
   };
 
@@ -118,6 +119,45 @@
       lineNumber: entry.lineNumber || null,
       originalIndex: index
     };
+  }
+
+  function normalizeSheetVisibleKeynotes(value) {
+    var result = {};
+    Object.keys(value || {}).forEach(function (key) {
+      var normalizedKey = trim(key);
+      if (normalizedKey && value[key]) {
+        result[normalizedKey] = true;
+      }
+    });
+    return result;
+  }
+
+  function keyIsPlaced(key) {
+    return Boolean(state.sheetVisibleKeynotes[trim(key)]);
+  }
+
+  function createPlacedKeyBadge(key) {
+    var badge;
+    if (!keyIsPlaced(key)) {
+      return null;
+    }
+
+    badge = document.createElement("span");
+    badge.className = "position-absolute top-50 start-100 translate-middle p-1 bg-danger border border-light rounded-circle sheet-visible-marker";
+    // badge.className = "rounded-circle sheet-visible-marker";
+    badge.setAttribute("role", "img");
+    badge.setAttribute("aria-label", "Placed keynote annotation");
+    badge.setAttribute("title", "Placed keynote annotation");
+    return badge;
+  }
+
+  function appendPlacedKeyBadge(parent, key) {
+    var badge = createPlacedKeyBadge(key);
+    if (badge && parent) {
+      parent.classList.add("sheet-marker-anchor");
+      parent.appendChild(badge);
+    }
+    return badge;
   }
 
   function sourceIssueBlocksSave(issue) {
@@ -815,6 +855,7 @@
 
       copy.className = "division-row-copy";
       title.textContent = model.title;
+      appendPlacedKeyBadge(title, model.entry ? model.entry.key : "");
       subtitle.textContent = model.text || "Untitled division";
       badge.className = "badge rounded-pill division-note-badge";
       badge.textContent = formatNumber(model.rows.length);
@@ -852,6 +893,7 @@
     models.forEach(function (model) {
       var item = document.createElement("li");
       var button = document.createElement("button");
+      var label = document.createElement("span");
       var isSelected = selectedModel && model.id === selectedModel.id;
       var claimTitle = model.entry ? editClaimTitle(model.entry) : "";
 
@@ -862,7 +904,9 @@
       if (isSelected) {
         button.setAttribute("aria-current", "true");
       }
-      button.textContent = model.title + " - " + model.text;
+      label.textContent = model.title + " - " + model.text;
+      button.appendChild(label);
+      appendPlacedKeyBadge(button, model.entry ? model.entry.key : "");
 
       item.appendChild(button);
       menu.appendChild(item);
@@ -876,6 +920,15 @@
     var hasEntry = Boolean(model && model.entry);
     var claimTitle = hasEntry ? editClaimTitle(model.entry) : "";
     var card = document.querySelector(".selected-division-card");
+    var keyField = document.querySelector(".division-key-field");
+    var existingBadge = keyField ? keyField.querySelector(".sheet-visible-marker") : null;
+
+    if (existingBadge) {
+      existingBadge.parentNode.removeChild(existingBadge);
+    }
+    if (keyField) {
+      keyField.classList.remove("sheet-marker-anchor");
+    }
 
     if (card) {
       card.classList.toggle("is-claimed", Boolean(claimTitle));
@@ -886,6 +939,9 @@
       keyInput.disabled = !hasEntry || Boolean(claimTitle);
       keyInput.value = hasEntry ? model.entry.key : "UNGROUPED";
       keyInput.setAttribute("title", claimTitle || "");
+    }
+    if (keyField && hasEntry) {
+      appendPlacedKeyBadge(keyField, model.entry.key);
     }
     if (textInput) {
       textInput.disabled = !hasEntry || Boolean(claimTitle);
@@ -1048,6 +1104,7 @@
 
       keyWrap.appendChild(treeControl);
       keyWrap.appendChild(keyInput);
+      appendPlacedKeyBadge(keyWrap, entry.key);
       keyCell.appendChild(keyWrap);
       textCell.appendChild(textInput);
       item.appendChild(keyCell);
@@ -2045,6 +2102,7 @@
 
     state.payload = payload || {};
     state.entries = (state.payload.entries || []).map(normalizeEntry);
+    state.sheetVisibleKeynotes = normalizeSheetVisibleKeynotes(state.payload.sheetVisibleKeynotes || {});
     state.sourceIssues = (state.payload.issues || []).filter(sourceIssueBlocksSave);
     state.collapsedEntryIds = {};
     state.saving = false;

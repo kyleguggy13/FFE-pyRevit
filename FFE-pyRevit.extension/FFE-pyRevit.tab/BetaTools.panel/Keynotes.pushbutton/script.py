@@ -74,6 +74,7 @@ from System.Windows.Controls import Grid, TextBlock
 from System.Windows.Interop import WindowInteropHelper
 
 from Autodesk.Revit.DB import (
+    BuiltInCategory,
     BuiltInParameter,
     FilteredElementCollector,
     KeyBasedTreeEntriesLoadResults,
@@ -81,6 +82,7 @@ from Autodesk.Revit.DB import (
     Material,
     ModelPathUtils,
     Transaction,
+    WorksetKind,
 )
 from Autodesk.Revit.UI import ExternalEvent, IExternalEventHandler
 
@@ -796,6 +798,7 @@ def build_base_payload(target_doc, status, message):
         "entries": [],
         "issues": [],
         "entryCount": 0,
+        "sheetVisibleKeynotes": {},
     }
 
 
@@ -827,8 +830,19 @@ def build_keynote_payload(target_doc):
         issues = validate_entries(entries, parse_issues)
         file_state = get_file_state(keynote_path)
         write_ok, write_message = check_file_write_available(keynote_path)
+        sheet_visible_keynotes = {}
         if not write_ok:
             issues.append(make_issue("warning", write_message, "", None, "writeUnavailable"))
+        try:
+            sheet_visible_keynotes = collect_sheet_visible_keynotes(target_doc)
+        except Exception as scan_exc:
+            issues.append(make_issue(
+                "warning",
+                "Could not scan placed keynote annotations: {0}".format(safe_str(scan_exc)),
+                "",
+                None,
+                "sheetVisibleKeynoteScanFailed"
+            ))
 
         payload.update({
             "status": "invalidFormat" if has_error_issues(issues) else "ready",
@@ -842,6 +856,7 @@ def build_keynote_payload(target_doc):
             "entries": entries,
             "issues": issues,
             "entryCount": len(entries),
+            "sheetVisibleKeynotes": sheet_visible_keynotes,
         })
 
         if has_error_issues(issues):
@@ -965,6 +980,63 @@ def get_keynote_parameters(element):
         except:
             pass
     return parameters
+
+
+def get_lookup_parameter_text(element, parameter_names):
+    for parameter_name in parameter_names or []:
+        try:
+            value = get_parameter_text(element.LookupParameter(parameter_name))
+            if value:
+                return value
+        except:
+            pass
+    return ""
+
+
+def get_keynote_tag_key(tag):
+    key = get_lookup_parameter_text(tag, ["Key Value", "Keynote Key"])
+    if key:
+        return key
+
+    for parameter in get_keynote_parameters(tag):
+        key = get_parameter_text(parameter)
+        if key:
+            return key
+    return ""
+
+
+def element_is_on_non_user_workset(target_doc, element):
+    try:
+        workset = target_doc.GetWorksetTable().GetWorkset(element.WorksetId)
+    except:
+        return False
+
+    try:
+        return workset.Kind != WorksetKind.UserWorkset
+    except:
+        return safe_str(getattr(workset, "Kind", "")) != "UserWorkset"
+
+
+def collect_sheet_visible_keynotes(target_doc):
+    result = {}
+    if target_doc is None:
+        return result
+
+    tags = (
+        FilteredElementCollector(target_doc)
+        .OfCategory(BuiltInCategory.OST_KeynoteTags)
+        .WhereElementIsNotElementType()
+    )
+
+    for tag in tags:
+        if not element_is_on_non_user_workset(target_doc, tag):
+            continue
+
+        key = safe_unicode(get_keynote_tag_key(tag)).strip()
+        if key:
+            result[key] = True
+
+    return result
 
 
 def iter_keynote_reference_candidates(target_doc):

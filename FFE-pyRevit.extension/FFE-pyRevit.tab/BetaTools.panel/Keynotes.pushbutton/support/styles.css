@@ -502,6 +502,13 @@ h2 {
   font-size: var(--t-em-sm);
 }
 
+.division-row-copy strong.sheet-marker-anchor {
+  width: fit-content;
+  max-width: 100%;
+  overflow: visible;
+  padding-right: 8px;
+}
+
 .division-row-copy span {
   font-size: var(--t-em-xs);
 }
@@ -555,6 +562,10 @@ h2 {
 .division-key-field,
 .division-text-field {
   min-width: 0;
+}
+
+.division-key-field.sheet-marker-anchor {
+  padding-right: 8px;
 }
 
 .division-key-field input,
@@ -640,11 +651,25 @@ h2 {
 }
 
 .division-select-menu .dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 8px 12px;
   color: var(--ink-1);
   font-size: var(--t-em-sm);
   line-height: var(--lh-tight);
   white-space: normal;
+}
+
+.division-select-menu .dropdown-item.sheet-marker-anchor {
+  padding-right: 20px;
+}
+
+.division-select-menu .dropdown-item > span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .division-select-menu .dropdown-item:hover,
@@ -781,6 +806,18 @@ h2 {
   align-items: flex-start;
   gap: 4px;
   padding-left: calc(var(--depth, 0) * 18px);
+}
+
+.note-key-wrap.sheet-marker-anchor {
+  padding-right: 12px;
+}
+
+.sheet-marker-anchor {
+  position: relative;
+}
+
+.sheet-visible-marker {
+  pointer-events: auto;
 }
 
 .note-tree-toggle,
