@@ -1410,6 +1410,7 @@
     return Boolean(
       state.payload &&
       state.payload.libraryKey &&
+      state.dbReady &&
       settings.configured &&
       db &&
       typeof db.setEditClaims === "function"
@@ -1421,15 +1422,16 @@
     var client = currentClient();
     var claims = buildLocalEditClaims();
     var signature = editClaimSignature(claims);
+    var previousSignature = state.localEditClaimSignature;
 
     if (signature === state.localEditClaimSignature) {
       return Promise.resolve(null);
     }
-    state.localEditClaimSignature = signature;
 
     if (!claimsAreConfigured()) {
       return Promise.resolve(null);
     }
+    state.localEditClaimSignature = signature;
 
     return db.setEditClaims({
       libraryKey: state.payload.libraryKey,
@@ -1437,9 +1439,15 @@
       clientName: client.clientName,
       claims: claims
     }).then(function (data) {
+      state.syncIssues = (state.syncIssues || []).filter(function (issue) {
+        return text(issue.code) !== "editClaimUpdateFailed";
+      });
       applyEditClaimsData(data);
+      renderValidation();
+      renderSaveState();
       return data;
     }).catch(function (error) {
+      state.localEditClaimSignature = previousSignature;
       state.syncIssues = [makeIssue(
         "warning",
         "Could not update unsaved edit locks: " + (error.message || error),
@@ -1457,11 +1465,10 @@
     var client = currentClient();
     var shouldClearRemote = state.localEditClaimSignature;
 
-    state.localEditClaimSignature = "";
-
     if (!claimsAreConfigured() || !shouldClearRemote) {
       return Promise.resolve(null);
     }
+    state.localEditClaimSignature = "";
 
     return db.setEditClaims({
       libraryKey: state.payload.libraryKey,
@@ -1472,6 +1479,7 @@
       applyEditClaimsData(data);
       return data;
     }).catch(function () {
+      state.localEditClaimSignature = shouldClearRemote;
       return null;
     });
   }
@@ -1774,6 +1782,7 @@
       subscribeToLibrary(snapshot);
       subscribeToEditClaims(snapshot);
       refreshEditClaims();
+      syncLocalEditClaims();
       if (!state.dirty && reason === "load") {
         setStatus({ status: "ready", message: "Loaded shared keynote file and attached Supabase row metadata." });
       }
@@ -1830,6 +1839,84 @@
     return parts.join(", ");
   }
 
+  function isMissingSupabaseLibraryError(error) {
+    return text(error && (error.message || error)).toLowerCase().indexOf("keynote library was not found") !== -1;
+  }
+
+  function applySupabaseSnapshotResult(result, fileMessage, suffix) {
+    state.pendingDbChanges = null;
+    state.dbReady = true;
+    state.syncIssues = [];
+    applySnapshotMetadata(result);
+    subscribeToLibrary(result);
+    subscribeToEditClaims(result);
+    refreshEditClaims();
+    syncLocalEditClaims();
+    setStatus({
+      status: "ready",
+      message: (fileMessage || "Saved shared keynote file.") + " " + suffix
+    });
+  }
+
+  function syncSavedFileSnapshot(db, filePayload, fileMessage, fallbackReason) {
+    var client = currentClient();
+
+    if (!db || typeof db.syncFileSnapshot !== "function") {
+      state.pendingDbChanges = null;
+      state.dbReady = false;
+      state.syncIssues = [makeSupabaseSyncIssue(
+        "Saved the shared keynote file, but the Supabase full snapshot sync API was not available.",
+        "supabaseClientMissing"
+      )];
+      renderValidation();
+      renderSaveState();
+      setStatus({
+        status: "warning",
+        message: (fileMessage || "Saved shared keynote file.") + " Supabase snapshot sync failed."
+      });
+      return Promise.resolve(null);
+    }
+
+    setStatus({
+      status: "syncing",
+      message: "Saved shared keynote file. Mirroring the full keynote file to Supabase..."
+    });
+
+    return db.syncFileSnapshot({
+      libraryKey: filePayload.libraryKey,
+      displayPath: filePayload.displayPath || filePayload.keynotePath || "",
+      keynotePath: filePayload.keynotePath || "",
+      encoding: filePayload.encoding || "utf-8",
+      lineEnding: filePayload.lineEnding || "\r\n",
+      fileHash: filePayload.fileHash || "",
+      lastWriteUtc: filePayload.lastWriteUtc || null,
+      entries: filePayload.entries || [],
+      clientId: client.clientId,
+      clientName: client.clientName
+    }).then(function (result) {
+      applySupabaseSnapshotResult(
+        result,
+        fileMessage,
+        fallbackReason || "Supabase snapshot sync complete."
+      );
+      return result;
+    }).catch(function (error) {
+      state.pendingDbChanges = null;
+      state.dbReady = false;
+      state.syncIssues = [makeSupabaseSyncIssue(
+        "Saved the shared keynote file, but Supabase snapshot sync failed: " + (error.message || error),
+        "supabaseSnapshotSyncFailed"
+      )];
+      renderValidation();
+      renderSaveState();
+      setStatus({
+        status: "warning",
+        message: (fileMessage || "Saved shared keynote file.") + " Supabase snapshot sync failed."
+      });
+      return null;
+    });
+  }
+
   function savePendingDbChanges(filePayload, pendingChanges, fileMessage) {
     var db = dbManager();
     var settings = (state.payload && state.payload.supabase) || {};
@@ -1870,6 +1957,16 @@
       return;
     }
 
+    if (!state.dbReady || !state.dbSnapshot || !state.dbSnapshot.libraryId) {
+      syncSavedFileSnapshot(
+        db,
+        filePayload,
+        fileMessage,
+        "Supabase library was reattached from the saved file."
+      );
+      return;
+    }
+
     setStatus({
       status: "syncing",
       message: "Saved shared keynote file. Updating changed Supabase rows..."
@@ -1901,15 +1998,22 @@
 
       state.dbReady = true;
       state.syncIssues = [];
-      applySnapshotMetadata(result);
-      subscribeToLibrary(result);
-      subscribeToEditClaims(result);
-      refreshEditClaims();
-      setStatus({
-        status: "ready",
-        message: (fileMessage || "Saved shared keynote file.") + " Supabase delta sync complete: " + describeSupabaseDeltaResult(result) + "."
-      });
+      applySupabaseSnapshotResult(
+        result,
+        fileMessage,
+        "Supabase delta sync complete: " + describeSupabaseDeltaResult(result) + "."
+      );
     }).catch(function (error) {
+      if (isMissingSupabaseLibraryError(error)) {
+        syncSavedFileSnapshot(
+          db,
+          filePayload,
+          fileMessage,
+          "Supabase library was recreated from the saved file."
+        );
+        return;
+      }
+
       state.pendingDbChanges = null;
       state.dbReady = false;
       state.syncIssues = [makeSupabaseSyncIssue(
