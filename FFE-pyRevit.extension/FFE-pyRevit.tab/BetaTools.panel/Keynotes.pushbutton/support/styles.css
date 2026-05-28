@@ -434,12 +434,13 @@ h2 {
 }
 
 .division-row.list-group-item {
-  min-height: 64px;
+  /* min-height: 64px; */
+  max-height: var(--control-h-lg);
   min-width: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--s-2);
   align-content: center;
   padding: 9px 20px;
   border-width: 0 0 2px;
@@ -486,7 +487,7 @@ h2 {
 .division-row-copy {
   min-width: 0;
   display: grid;
-  gap: 3px;
+  gap: 1px;
 }
 
 .division-row-copy strong,
