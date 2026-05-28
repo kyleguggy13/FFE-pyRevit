@@ -681,7 +681,7 @@ h2 {
 }
 
 .note-key-col {
-  width: 118px;
+  width: 190px;
 }
 
 .note-table > :not(caption) > * > * {
@@ -710,6 +710,18 @@ h2 {
 
 .note-row {
   background-color: var(--page-3);
+}
+
+.note-row.is-parent-row > * {
+  background-color: #fbfcff;
+}
+
+.note-row.is-search-context > * {
+  background-color: var(--page-1);
+}
+
+.note-row.is-search-context .note-input {
+  color: var(--ink-2);
 }
 
 .note-table.table-hover > tbody > .note-row:hover > *,
@@ -761,6 +773,47 @@ h2 {
   border-right: 2px solid var(--accent);
 }
 
+.note-key-wrap {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  padding-left: calc(var(--depth, 0) * 18px);
+}
+
+.note-tree-toggle,
+.note-tree-spacer {
+  width: 22px;
+  min-width: 22px;
+  height: 28px;
+  margin-top: 1px;
+}
+
+.note-tree-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--divider-soft);
+  border-radius: var(--r-sm);
+  background: var(--page-3);
+  color: var(--accent);
+  font-size: var(--t-em-xs);
+  line-height: 1;
+}
+
+.note-tree-toggle:hover,
+.note-tree-toggle:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--accent-wash);
+}
+
+.note-row.is-parent-row .note-key-input {
+  font-weight: var(--w-semibold);
+}
+
 .note-input {
   width: 100%;
   min-width: 0;
@@ -772,8 +825,9 @@ h2 {
 }
 
 .note-key-input {
+  flex: 1 1 auto;
   height: auto;
-  text-align: center;
+  text-align: left;
   vertical-align: top;
 }
 

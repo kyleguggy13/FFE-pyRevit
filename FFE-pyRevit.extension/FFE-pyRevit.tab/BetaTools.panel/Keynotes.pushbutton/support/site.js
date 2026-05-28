@@ -22,6 +22,7 @@
     syncIssues: [],
     remotePending: false,
     allowNextLoad: false,
+    collapsedEntryIds: {},
     nextLocalId: 1
   };
 
@@ -182,12 +183,17 @@
 
   function childCount(key) {
     var count = 0;
+    var parentKey = trim(key);
     state.entries.forEach(function (entry) {
-      if (entry.parentKey === key) {
+      if (trim(entry.parentKey) === parentKey) {
         count += 1;
       }
     });
     return count;
+  }
+
+  function entryHasChildren(entry) {
+    return Boolean(entry && childCount(entry.key));
   }
 
   function rootEntries() {
@@ -339,6 +345,48 @@
     return cursor && !cursor.parentKey ? cursor : null;
   }
 
+  function entryIsDescendantOf(entry, ancestor) {
+    var byKey = entriesByKey();
+    var seen = {};
+    var cursor = entry;
+    var parent;
+
+    if (!entry || !ancestor || entry.id === ancestor.id) {
+      return false;
+    }
+
+    while (cursor && cursor.parentKey) {
+      parent = byKey[cursor.parentKey];
+      if (!parent || seen[parent.id]) {
+        return false;
+      }
+      if (parent.id === ancestor.id) {
+        return true;
+      }
+      seen[parent.id] = true;
+      cursor = parent;
+    }
+
+    return false;
+  }
+
+  function expandAncestorsForEntry(entry) {
+    var byKey = entriesByKey();
+    var seen = {};
+    var cursor = entry;
+    var parent;
+
+    while (cursor && cursor.parentKey) {
+      parent = byKey[cursor.parentKey];
+      if (!parent || seen[parent.id]) {
+        return;
+      }
+      delete state.collapsedEntryIds[parent.id];
+      seen[parent.id] = true;
+      cursor = parent;
+    }
+  }
+
   function setSelectionForEntry(entry) {
     var root = entry ? rootAncestorFor(entry) : null;
 
@@ -348,6 +396,8 @@
       state.selectedId = null;
       return;
     }
+
+    expandAncestorsForEntry(entry);
 
     if (root && root.id === entry.id) {
       state.selectedDivisionId = root.id;
@@ -394,11 +444,18 @@
       });
       if (!noteIsVisible) {
         state.selectedNoteId = null;
+      } else if (!currentSearchQuery() && !visibleRowIdMapForModel(selectedModel)[selectedNote.id]) {
+        selectedNote = collapsedAncestorForEntry(selectedNote, selectedModel);
+        state.selectedNoteId = selectedNote ? selectedNote.id : null;
       }
     }
 
     state.selectedId = state.selectedNoteId || (selectedModel.entry ? selectedModel.entry.id : null);
     return selectedModel;
+  }
+
+  function currentSearchQuery() {
+    return trim(byId("search-input") ? byId("search-input").value : "").toLowerCase();
   }
 
   function validateAll() {
@@ -496,10 +553,13 @@
     return state.sourceIssues.some(sourceIssueBlocksSave);
   }
 
-  function rowMatchesQuery(row, query) {
-    var entry = row.entry;
+  function entryMatchesQuery(entry, query) {
     var haystack = (entry.key + " " + entry.text + " " + entry.parentKey).toLowerCase();
     return !query || haystack.indexOf(query) !== -1;
+  }
+
+  function rowMatchesQuery(row, query) {
+    return entryMatchesQuery(row.entry, query);
   }
 
   function divisionMatchesQuery(model, query) {
@@ -514,17 +574,153 @@
     });
   }
 
+  function makeTreeRow(row, options) {
+    var hasChildren = entryHasChildren(row.entry);
+    var isSearchMode = Boolean(options && options.isSearchMode);
+    var isSearchMatch = Boolean(options && options.matchIds && options.matchIds[row.entry.id]);
+    var isSearchContext = Boolean(
+      options &&
+      options.contextIds &&
+      options.contextIds[row.entry.id] &&
+      !isSearchMatch
+    );
+
+    return {
+      entry: row.entry,
+      depth: row.depth,
+      hasChildren: hasChildren,
+      isCollapsed: hasChildren && !isSearchMode && Boolean(state.collapsedEntryIds[row.entry.id]),
+      isSearchMatch: isSearchMatch,
+      isSearchContext: isSearchContext
+    };
+  }
+
+  function expandedRowsForModel(model) {
+    var rows = [];
+    var hiddenDepth = null;
+
+    (model.rows || []).forEach(function (row) {
+      var treeRow;
+
+      if (hiddenDepth !== null) {
+        if (row.depth > hiddenDepth) {
+          return;
+        }
+        hiddenDepth = null;
+      }
+
+      treeRow = makeTreeRow(row, {});
+      rows.push(treeRow);
+
+      if (treeRow.isCollapsed) {
+        hiddenDepth = row.depth;
+      }
+    });
+
+    return rows;
+  }
+
+  function searchRowsForModel(model, query) {
+    var byKey = entriesByKey();
+    var rowIds = {};
+    var matchIds = {};
+    var contextIds = {};
+    var includeIds = {};
+
+    (model.rows || []).forEach(function (row) {
+      rowIds[row.entry.id] = true;
+    });
+
+    (model.rows || []).forEach(function (row) {
+      var cursor;
+      var parent;
+      var seen = {};
+
+      if (!rowMatchesQuery(row, query)) {
+        return;
+      }
+
+      matchIds[row.entry.id] = true;
+      includeIds[row.entry.id] = true;
+      cursor = row.entry;
+
+      while (cursor && cursor.parentKey) {
+        parent = byKey[cursor.parentKey];
+        if (!parent || seen[parent.id]) {
+          return;
+        }
+
+        if (rowIds[parent.id]) {
+          includeIds[parent.id] = true;
+          contextIds[parent.id] = true;
+        }
+
+        seen[parent.id] = true;
+        cursor = parent;
+      }
+    });
+
+    return (model.rows || []).filter(function (row) {
+      return includeIds[row.entry.id];
+    }).map(function (row) {
+      return makeTreeRow(row, {
+        isSearchMode: true,
+        matchIds: matchIds,
+        contextIds: contextIds
+      });
+    });
+  }
+
+  function visibleRowIdMapForModel(model) {
+    var ids = {};
+    expandedRowsForModel(model).forEach(function (row) {
+      ids[row.entry.id] = true;
+    });
+    return ids;
+  }
+
+  function collapsedAncestorForEntry(entry, model) {
+    var byKey = entriesByKey();
+    var modelRowIds = {};
+    var cursor = entry;
+    var parent;
+    var result = null;
+    var seen = {};
+
+    (model.rows || []).forEach(function (row) {
+      modelRowIds[row.entry.id] = true;
+    });
+
+    while (cursor && cursor.parentKey) {
+      parent = byKey[cursor.parentKey];
+      if (!parent || seen[parent.id]) {
+        return result;
+      }
+
+      if (modelRowIds[parent.id] && state.collapsedEntryIds[parent.id]) {
+        result = parent;
+      }
+
+      seen[parent.id] = true;
+      cursor = parent;
+    }
+
+    return result;
+  }
+
   function selectedRows() {
     var model = ensureSelection();
-    var query = trim(byId("search-input") ? byId("search-input").value : "").toLowerCase();
+    var query = currentSearchQuery();
 
     if (!model) {
       return [];
     }
 
-    return model.rows.filter(function (row) {
-      return rowMatchesQuery(row, query);
-    });
+    if (query) {
+      return searchRowsForModel(model, query);
+    }
+
+    return expandedRowsForModel(model);
   }
 
   function setStatus(statusOrState, message) {
@@ -710,6 +906,30 @@
   //   input.style.height = (input.scrollHeight + borderSize) + "px";
   // }
 
+  function toggleTreeRow(entryId) {
+    var entry = findEntryById(entryId);
+    var selected = selectedNoteEntry();
+
+    if (!entry || !entryHasChildren(entry)) {
+      return;
+    }
+
+    if (state.collapsedEntryIds[entry.id]) {
+      delete state.collapsedEntryIds[entry.id];
+    } else {
+      state.collapsedEntryIds[entry.id] = true;
+      if (selected && entryIsDescendantOf(selected, entry)) {
+        setSelectionForEntry(entry);
+      }
+    }
+
+    if (!selected || selected.id !== entry.id) {
+      setSelectionForEntry(entry);
+    }
+
+    renderAll();
+  }
+
   function renderNotes() {
     var body = byId("keynote-table-body");
     var rows = selectedRows();
@@ -736,20 +956,53 @@
       var item = document.createElement("tr");
       var keyCell = document.createElement("td");
       var textCell = document.createElement("td");
+      var keyWrap = document.createElement("div");
+      var treeControl;
       var keyInput = document.createElement("input");
       var textInput = document.createElement("textarea");
       var claimTitle = editClaimTitle(entry);
 
       item.className = "note-row" +
+        (row.hasChildren ? " is-parent-row" : "") +
+        (row.isCollapsed ? " is-collapsed" : "") +
+        (row.isSearchContext ? " is-search-context" : "") +
+        (row.isSearchMatch ? " is-search-match" : "") +
         (entry.id === state.selectedNoteId ? " is-selected" : "") +
         (claimTitle ? " is-claimed" : "");
       item.setAttribute("data-entry-id", entry.id);
       item.setAttribute("title", claimTitle || "");
+      item.setAttribute("aria-level", String(row.depth + 1));
+      if (row.hasChildren) {
+        item.setAttribute("aria-expanded", row.isCollapsed ? "false" : "true");
+      }
       item.tabIndex = -1;
       item.style.setProperty("--depth", row.depth);
 
       keyCell.className = "note-cell note-key-cell";
       textCell.className = "note-cell note-text-cell";
+      keyWrap.className = "note-key-wrap";
+      keyWrap.style.setProperty("--depth", row.depth);
+
+      if (row.hasChildren) {
+        treeControl = document.createElement("button");
+        treeControl.type = "button";
+        treeControl.className = "note-tree-toggle";
+        treeControl.textContent = row.isCollapsed ? ">" : "v";
+        treeControl.setAttribute("aria-expanded", row.isCollapsed ? "false" : "true");
+        treeControl.setAttribute(
+          "aria-label",
+          (row.isCollapsed ? "Expand " : "Collapse ") + (entry.key || "keynote group")
+        );
+        treeControl.addEventListener("click", function (event) {
+          event.preventDefault();
+          event.stopPropagation();
+          toggleTreeRow(entry.id);
+        });
+      } else {
+        treeControl = document.createElement("span");
+        treeControl.className = "note-tree-spacer";
+        treeControl.setAttribute("aria-hidden", "true");
+      }
 
       keyInput.type = "text";
       keyInput.className = "form-control form-control-sm note-input note-key-input";
@@ -784,12 +1037,18 @@
       });
 
       item.addEventListener("click", function (event) {
-        if (event.target.tagName !== "INPUT" && event.target.tagName !== "TEXTAREA") {
+        if (
+          event.target.tagName !== "INPUT" &&
+          event.target.tagName !== "TEXTAREA" &&
+          event.target.tagName !== "BUTTON"
+        ) {
           selectNote(entry.id, true);
         }
       });
 
-      keyCell.appendChild(keyInput);
+      keyWrap.appendChild(treeControl);
+      keyWrap.appendChild(keyInput);
+      keyCell.appendChild(keyWrap);
       textCell.appendChild(textInput);
       item.appendChild(keyCell);
       item.appendChild(textCell);
@@ -857,15 +1116,15 @@
 
   function renderRowActions() {
     var target = selectedNoteEntry() || selectedDivisionEntry();
-    var division = selectedDivisionEntry();
+    var childParent = selectedNoteEntry() || selectedDivisionEntry();
     var deleteButton = byId("delete-row");
     var addChildButton = byId("add-child");
     var duplicateButton = byId("duplicate-row");
     var targetClaimed = target && isEntryRemotelyClaimed(target);
-    var divisionClaimed = division && isEntryRemotelyClaimed(division);
+    var childParentClaimed = childParent && isEntryRemotelyClaimed(childParent);
 
     if (addChildButton) {
-      addChildButton.disabled = !division || divisionClaimed;
+      addChildButton.disabled = !childParent || childParentClaimed;
     }
     if (duplicateButton) {
       duplicateButton.disabled = !target || targetClaimed;
@@ -1683,6 +1942,7 @@
     state.payload = payload || {};
     state.entries = (state.payload.entries || []).map(normalizeEntry);
     state.sourceIssues = (state.payload.issues || []).filter(sourceIssueBlocksSave);
+    state.collapsedEntryIds = {};
     state.saving = false;
 
     if (previousKey) {
@@ -1900,18 +2160,18 @@
   }
 
   function addChild() {
-    var parent = selectedDivisionEntry();
+    var parent = selectedNoteEntry() || selectedDivisionEntry();
     var entry;
 
     if (!parent) {
       setStatus({
         status: "error",
-        message: "Add a parent division before adding a keynote note."
+        message: "Select a division or keynote parent before adding a note."
       });
       return;
     }
     if (isEntryRemotelyClaimed(parent)) {
-      setStatus({ status: "warning", message: editClaimTitle(parent) || "This division is being edited by another user." });
+      setStatus({ status: "warning", message: editClaimTitle(parent) || "This keynote parent is being edited by another user." });
       renderAll();
       return;
     }
@@ -1925,8 +2185,7 @@
       originalIndex: state.entries.length
     };
     state.entries.push(entry);
-    state.selectedNoteId = entry.id;
-    state.selectedId = entry.id;
+    setSelectionForEntry(entry);
     markDirty();
     renderAll();
   }
@@ -1985,6 +2244,7 @@
     state.entries = state.entries.filter(function (candidate) {
       return candidate.id !== entry.id;
     });
+    delete state.collapsedEntryIds[entry.id];
 
     if (state.selectedNoteId === entry.id) {
       state.selectedNoteId = null;
