@@ -74,6 +74,11 @@ from System.Windows import Clipboard, ResizeMode, Thickness, Visibility, Window,
 from System.Windows.Controls import Grid, TextBlock
 from System.Windows.Interop import WindowInteropHelper
 
+try:
+    from pyrevit.runtime.types import DocumentEventUtils
+except:
+    DocumentEventUtils = None
+
 from Autodesk.Revit.DB import (
     BuiltInCategory,
     BuiltInParameter,
@@ -108,6 +113,20 @@ PATH_INDEX = os.path.join(PATH_SUPPORT, "index.html")
 APP_NAME = "FFE Keynote Manager"
 APP_VERSION = "v0.7"
 LOCAL_APP_NAME = "KeynoteManager"
+
+SHARED_SUPABASE_SETTINGS_PARTS = (
+    "FFE Inc",
+    "FFE Revit Users - Documents",
+    "00-General",
+    "Revit_Add-Ins",
+    "FFE-pyRevit",
+    "Documentation",
+    "supabase.json",
+)
+PROVIDED_SHARED_SUPABASE_SETTINGS_PATH = "C:\\Users\\kyleg\\FFE Inc\\FFE Revit Users - Documents\\00-General\\Revit_Add-Ins\\FFE-pyRevit\\Documentation\\supabase.json"
+SUPABASE_URL_KEYS = ("url", "projectUrl", "projectURL", "supabaseUrl", "Supabase URL", "Project URL")
+SUPABASE_ANON_KEY_KEYS = ("anonKey", "anon_key", "publishableKey", "publishable_key", "Publishable key", "Anon key", "Public anon key")
+SUPABASE_CLIENT_ID_KEYS = ("clientId", "client_id", "Client ID")
 
 LOGGER = script.get_logger()
 
@@ -215,12 +234,41 @@ def normalize_path(path):
         return os.path.normcase(value)
 
 
+def get_shared_supabase_settings_paths():
+    paths = []
+    user_folder = os.path.expanduser("~")
+
+    if user_folder and user_folder != "~":
+        paths.append(os.path.join(user_folder, *SHARED_SUPABASE_SETTINGS_PARTS))
+
+    paths.append(PROVIDED_SHARED_SUPABASE_SETTINGS_PATH)
+
+    unique_paths = []
+    seen_paths = {}
+    for path in paths:
+        normalized_path = normalize_path(path)
+        if not normalized_path or normalized_path in seen_paths:
+            continue
+        seen_paths[normalized_path] = True
+        unique_paths.append(path)
+
+    return unique_paths
+
+
 def read_json_file(path):
-    if not os.path.exists(path):
+    if not path or not os.path.exists(path):
         return None
     try:
-        with open(path, "r") as file_obj:
-            return json.loads(file_obj.read())
+        with open(path, "rb") as file_obj:
+            raw_value = file_obj.read()
+
+        if raw_value.startswith(codecs.BOM_UTF8):
+            raw_value = raw_value[len(codecs.BOM_UTF8):]
+
+        try:
+            return json.loads(raw_value.decode("utf-8"))
+        except:
+            return json.loads(raw_value)
     except:
         return None
 
@@ -251,6 +299,80 @@ def ask_for_supabase_value(prompt, default_value=""):
         return None
 
 
+def normalize_supabase_config_key(key):
+    value = safe_str(key).strip().lower()
+    value = value.replace(" ", "")
+    value = value.replace("_", "")
+    value = value.replace("-", "")
+    return value
+
+
+def get_supabase_config_value(settings, allowed_keys):
+    if not isinstance(settings, dict):
+        return ""
+
+    allowed_lookup = {}
+    for key in allowed_keys:
+        allowed_lookup[normalize_supabase_config_key(key)] = True
+
+    for key, value in settings.items():
+        if normalize_supabase_config_key(key) in allowed_lookup:
+            result = safe_str(value).strip()
+            if result:
+                return result
+
+    return ""
+
+
+def iter_supabase_settings_candidates(value):
+    if isinstance(value, dict):
+        yield value
+        for nested_value in value.values():
+            if isinstance(nested_value, (dict, list, tuple)):
+                for candidate in iter_supabase_settings_candidates(nested_value):
+                    yield candidate
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            for candidate in iter_supabase_settings_candidates(item):
+                yield candidate
+
+
+def extract_supabase_settings(value):
+    partial_settings = {}
+
+    for candidate in iter_supabase_settings_candidates(value):
+        url = get_supabase_config_value(candidate, SUPABASE_URL_KEYS)
+        anon_key = get_supabase_config_value(candidate, SUPABASE_ANON_KEY_KEYS)
+        client_id = get_supabase_config_value(candidate, SUPABASE_CLIENT_ID_KEYS)
+
+        if not url and not anon_key:
+            continue
+
+        settings = {
+            "url": url,
+            "anonKey": anon_key,
+            "clientId": client_id,
+        }
+
+        if url and anon_key:
+            return settings
+
+        if not partial_settings:
+            partial_settings = settings
+
+    return partial_settings
+
+
+def load_shared_supabase_settings():
+    for path in get_shared_supabase_settings_paths():
+        settings = extract_supabase_settings(read_json_file(path))
+        if settings.get("url") or settings.get("anonKey"):
+            settings["settingsSourcePath"] = path
+            return settings
+
+    return {}
+
+
 def load_supabase_settings(prompt_if_missing=True, force_prompt=False):
     settings_path = get_supabase_settings_path()
     settings = read_json_file(settings_path) or {}
@@ -258,9 +380,19 @@ def load_supabase_settings(prompt_if_missing=True, force_prompt=False):
     url = safe_str(settings.get("url")).strip()
     anon_key = safe_str(settings.get("anonKey") or settings.get("publishableKey")).strip()
     client_id = safe_str(settings.get("clientId")).strip()
+    settings_source_path = settings_path
 
     if not client_id:
         client_id = safe_str(uuid.uuid4())
+
+    if not (url and anon_key):
+        shared_settings = load_shared_supabase_settings()
+        if shared_settings:
+            if not url:
+                url = safe_str(shared_settings.get("url")).strip()
+            if not anon_key:
+                anon_key = safe_str(shared_settings.get("anonKey")).strip()
+            settings_source_path = safe_str(shared_settings.get("settingsSourcePath")).strip() or settings_source_path
 
     if force_prompt or (prompt_if_missing and not url):
         next_url = ask_for_supabase_value(
@@ -284,6 +416,7 @@ def load_supabase_settings(prompt_if_missing=True, force_prompt=False):
         "clientId": client_id,
         "clientName": get_client_name(),
         "settingsPath": settings_path,
+        "settingsSourcePath": settings_source_path,
         "configured": bool(url and anon_key),
     }
 
@@ -293,6 +426,7 @@ def load_supabase_settings(prompt_if_missing=True, force_prompt=False):
             "anonKey": anon_key,
             "clientId": client_id,
             "clientName": payload["clientName"],
+            "settingsSourcePath": settings_source_path,
         })
         write_json_file(settings_path, settings)
 
@@ -1580,7 +1714,22 @@ def copy_text_to_clipboard(value):
         return False, safe_str(exc)
 
 
-def place_user_keynote(uiapp, place_payload, keynote_payload):
+def get_keynote_tag_default_type(target_doc):
+    try:
+        category = target_doc.Settings.Categories.get_Item(BuiltInCategory.OST_KeynoteTags)
+    except:
+        category = None
+
+    if not category:
+        return None
+
+    try:
+        return target_doc.GetElement(target_doc.GetDefaultFamilyTypeId(category.Id))
+    except:
+        return None
+
+
+def place_user_keynote(uiapp, target_doc, place_payload, keynote_payload):
     place_payload = place_payload or {}
     entry_id = safe_str(place_payload.get("id")).strip()
     key = safe_unicode(place_payload.get("key")).strip()
@@ -1601,6 +1750,23 @@ def place_user_keynote(uiapp, place_payload, keynote_payload):
         }
 
     clipboard_copied, clipboard_error = copy_text_to_clipboard(key)
+
+    if DocumentEventUtils is None:
+        fallback_message = "Could not place keynote automatically because pyRevit's document event helper was not available."
+        if clipboard_copied:
+            fallback_message += " Key copied to clipboard."
+        elif clipboard_error:
+            fallback_message += " Clipboard copy was unavailable."
+        return {
+            "status": "warning",
+            "message": fallback_message,
+        }
+
+    if get_keynote_tag_default_type(target_doc) is None:
+        return {
+            "status": "warning",
+            "message": "No default Keynote Tag type is loaded in this project.",
+        }
 
     try:
         command_id = RevitCommandId.LookupPostableCommandId(PostableCommand.UserKeynote)
@@ -1626,7 +1792,14 @@ def place_user_keynote(uiapp, place_payload, keynote_payload):
         pass
 
     try:
-        uiapp.PostCommand(command_id)
+        DocumentEventUtils.PostCommandAndUpdateNewElementProperties(
+            uiapp,
+            target_doc,
+            PostableCommand.UserKeynote,
+            "Set User Keynote Key",
+            BuiltInParameter.KEY_VALUE,
+            key
+        )
     except Exception as exc:
         return {
             "status": "warning",
@@ -1634,10 +1807,9 @@ def place_user_keynote(uiapp, place_payload, keynote_payload):
         }
 
     message = "Starting Revit User Keynote placement for key '{0}'.".format(key)
-    if clipboard_copied:
-        message += " Key copied to clipboard."
-    elif clipboard_error:
-        message += " Clipboard copy was unavailable."
+    message += " The placed keynote will use the selected row key."
+    if clipboard_error:
+        message += " Clipboard copy was unavailable, but automatic key assignment was started."
 
     return {
         "status": "ready",
@@ -1695,7 +1867,7 @@ class KeynoteManagerEventHandler(IExternalEventHandler):
             return
 
         if action == "placeUserKeynote":
-            result = place_user_keynote(uiapp, payload, window.keynote_payload)
+            result = place_user_keynote(uiapp, window.document, payload, window.keynote_payload)
             window.send_status(result.get("status"), result.get("message"))
             return
 
