@@ -1299,16 +1299,22 @@
   }
 
   function renderRowActions() {
-    var target = selectedNoteEntry() || selectedDivisionEntry();
-    var childParent = selectedNoteEntry() || selectedDivisionEntry();
+    var selectedNote = selectedNoteEntry();
+    var target = selectedNote || selectedDivisionEntry();
+    var sequenceParent = selectedSequenceParentEntry();
     var deleteButton = byId("delete-row");
-    var addChildButton = byId("add-child");
+    var addSequenceButton = byId("add-sequence");
+    var addSubNoteButton = byId("add-sub-note");
     var duplicateButton = byId("duplicate-row");
     var targetClaimed = target && isEntryRemotelyClaimed(target);
-    var childParentClaimed = childParent && isEntryRemotelyClaimed(childParent);
+    var sequenceParentClaimed = sequenceParent && isEntryRemotelyClaimed(sequenceParent);
+    var subNoteParentClaimed = selectedNote && isEntryRemotelyClaimed(selectedNote);
 
-    if (addChildButton) {
-      addChildButton.disabled = !childParent || childParentClaimed;
+    if (addSequenceButton) {
+      addSequenceButton.disabled = !sequenceParent || sequenceParentClaimed;
+    }
+    if (addSubNoteButton) {
+      addSubNoteButton.disabled = !selectedNote || subNoteParentClaimed;
     }
     if (duplicateButton) {
       duplicateButton.disabled = !target || targetClaimed;
@@ -2449,14 +2455,25 @@
     renderAll();
   }
 
-  function addChild() {
-    var parent = selectedNoteEntry() || selectedDivisionEntry();
+  function selectedSequenceParentEntry() {
+    var selectedNote = selectedNoteEntry();
+    var parentKey;
+
+    if (!selectedNote) {
+      return selectedDivisionEntry();
+    }
+
+    parentKey = trim(selectedNote.parentKey);
+    return parentKey ? entriesByKey()[parentKey] || null : null;
+  }
+
+  function addNoteUnderParent(parent, missingParentMessage) {
     var entry;
 
     if (!parent) {
       setStatus({
         status: "error",
-        message: "Select a division or keynote parent before adding a note."
+        message: missingParentMessage || "Select a division or keynote parent before adding a note."
       });
       return;
     }
@@ -2478,6 +2495,29 @@
     setSelectionForEntry(entry);
     markDirty();
     renderAll();
+  }
+
+  function addNoteInSequence() {
+    var selectedNote = selectedNoteEntry();
+    var parent = selectedSequenceParentEntry();
+    var missingParentMessage = "Select a division or keynote row before adding a note in sequence.";
+    var parentKey;
+
+    if (selectedNote) {
+      parentKey = trim(selectedNote.parentKey);
+      missingParentMessage = parentKey
+        ? "Parent key '" + parentKey + "' was not found. Fix the parent before adding a note in sequence."
+        : "Select a keynote with a parent before adding a note in sequence.";
+    }
+
+    addNoteUnderParent(parent, missingParentMessage);
+  }
+
+  function addSubNote() {
+    addNoteUnderParent(
+      selectedNoteEntry(),
+      "Select a keynote row before adding a sub-note."
+    );
   }
 
   function actionTargetEntry() {
@@ -2781,7 +2821,8 @@
     bindDivisionInput("division-text-input", "text");
 
     bindClick("add-root", addRoot);
-    bindClick("add-child", addChild);
+    bindClick("add-sequence", addNoteInSequence);
+    bindClick("add-sub-note", addSubNote);
     bindClick("duplicate-row", duplicateSelected);
     bindClick("delete-row", deleteSelected);
     bindClick("configure-supabase", configureSupabase);

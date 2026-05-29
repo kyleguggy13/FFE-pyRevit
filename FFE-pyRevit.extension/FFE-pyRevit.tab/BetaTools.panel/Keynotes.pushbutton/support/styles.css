@@ -384,13 +384,13 @@ h2 {
 .action-row {
   min-width: 0;
   display: grid;
-  grid-template-columns: repeat(4, minmax(104px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
   gap: clamp(8px, 2vw, 20px);
 }
 
 .action-button {
-  min-height: 28px;
-  padding: 0 10px;
+  min-height: 32px;
+  padding: 3px 10px;
   justify-content: center;
   border: 0;
   border-radius: var(--r-sm);
@@ -398,6 +398,7 @@ h2 {
   font-weight: var(--w-regular);
   line-height: var(--lh-tight);
   box-shadow: inset 0 0 0 1px rgba(4, 26, 51, 0.07);
+  white-space: normal;
 }
 
 .btn-outline-dark.action-button {
@@ -1198,7 +1199,7 @@ h2 {
   }
 
   .action-row {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
     gap: 8px;
   }
 }
