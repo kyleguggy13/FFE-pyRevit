@@ -837,6 +837,10 @@ h2 {
   font-family: var(--font-narrow);
 }
 
+.note-action-col {
+  width: 36px;
+}
+
 .note-key-col {
   width: 170px;
 }
@@ -863,6 +867,11 @@ h2 {
 }
 
 .note-table-header th:first-child {
+  padding: 0;
+  text-align: center;
+}
+
+.note-table-header th:nth-child(2) {
   text-align: center;
 }
 
@@ -909,6 +918,13 @@ h2 {
 .note-cell {
   min-width: 0;
   vertical-align: top;
+}
+
+.note-action-cell {
+  padding: 0;
+  border-right: 1px solid var(--divider-soft);
+  text-align: center;
+  vertical-align: middle;
 }
 
 .note-key-cell {
@@ -987,6 +1003,41 @@ h2 {
 .note-tree-toggle:focus-visible {
   outline: none;
   background: var(--accent-wash);
+}
+
+.note-place-button {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--accent);
+  line-height: 1;
+}
+
+.note-place-button svg {
+  width: 15px;
+  height: 15px;
+}
+
+.note-place-button:hover,
+.note-place-button:focus-visible {
+  outline: none;
+  background: var(--accent-wash);
+}
+
+.note-place-button:focus-visible {
+  outline: 2px solid rgba(82, 108, 165, 0.26);
+  outline-offset: 1px;
+}
+
+.note-place-button.needs-save {
+  color: var(--ink-3);
 }
 
 .note-row.is-parent-row .note-key-input {

@@ -983,6 +983,67 @@
     }
   }
 
+  function createPlaceKeynoteIcon() {
+    var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    var path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+
+    svg.setAttribute("class", "bi bi-arrow-right-square-fill");
+    svg.setAttribute("viewBox", "0 0 16 16");
+    svg.setAttribute("fill", "currentColor");
+    svg.setAttribute("focusable", "false");
+    svg.setAttribute("aria-hidden", "true");
+    path.setAttribute("d", "M0 14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H2a2 2 0 0 0-2 2zm4.5-6.5h5.793L8.146 5.354a.5.5 0 1 1 .708-.708l3 3a.5.5 0 0 1 0 .708l-3 3a.5.5 0 0 1-.708-.708L10.293 8.5H4.5a.5.5 0 0 1 0-1");
+    svg.appendChild(path);
+    return svg;
+  }
+
+  function entryCanPlaceUserKeynote(entry) {
+    var baselineEntry = findBaselineEntry(entry);
+    var key = trim(entry && entry.key);
+
+    return Boolean(key && baselineEntry && trim(baselineEntry.key) === key);
+  }
+
+  function placeUserKeynote(entry) {
+    var key = trim(entry && entry.key);
+
+    if (!entry) {
+      return;
+    }
+
+    selectNote(entry.id, false);
+
+    if (!key) {
+      setStatus({
+        status: "warning",
+        message: "Save this keynote with a key before placing it in Revit."
+      });
+      return;
+    }
+
+    if (!entryCanPlaceUserKeynote(entry)) {
+      setStatus({
+        status: "warning",
+        message: "Save this keynote before placing it in Revit."
+      });
+      return;
+    }
+
+    if (postWebViewMessage({
+      type: "placeUserKeynote",
+      payload: {
+        id: entry.id,
+        key: key,
+        text: entry.text
+      }
+    })) {
+      setStatus({
+        status: "warning",
+        message: "Starting Revit User Keynote placement for key '" + key + "'..."
+      });
+    }
+  }
+
   // function resizeNoteTextInput(input) {
   //   var borderSize;
 
@@ -1033,7 +1094,7 @@
       var emptyRow = document.createElement("tr");
       var empty = document.createElement("td");
       empty.className = "empty-cell";
-      empty.setAttribute("colspan", "2");
+      empty.setAttribute("colspan", "3");
       empty.textContent = state.entries.length ? "No notes in this division." : "No keynote notes loaded.";
       emptyRow.appendChild(empty);
       body.appendChild(emptyRow);
@@ -1043,13 +1104,19 @@
     rows.forEach(function (row) {
       var entry = row.entry;
       var item = document.createElement("tr");
+      var actionCell = document.createElement("td");
       var keyCell = document.createElement("td");
       var textCell = document.createElement("td");
       var keyWrap = document.createElement("div");
+      var placeButton = document.createElement("button");
       var treeControl;
       var keyInput = document.createElement("input");
       var textInput = document.createElement("textarea");
       var claimTitle = editClaimTitle(entry);
+      var canPlaceKeynote = entryCanPlaceUserKeynote(entry);
+      var placeTitle = canPlaceKeynote
+        ? "Place user keynote " + (entry.key || "")
+        : "Save this keynote before placing it in Revit";
 
       item.className = "note-row" +
         (row.hasChildren ? " is-parent-row" : "") +
@@ -1067,10 +1134,22 @@
       item.tabIndex = -1;
       item.style.setProperty("--depth", row.depth);
 
+      actionCell.className = "note-cell note-action-cell";
       keyCell.className = "note-cell note-key-cell";
       textCell.className = "note-cell note-text-cell";
       keyWrap.className = "note-key-wrap";
       keyWrap.style.setProperty("--depth", row.depth);
+
+      placeButton.type = "button";
+      placeButton.className = "note-place-button" + (canPlaceKeynote ? "" : " needs-save");
+      placeButton.setAttribute("aria-label", "Place user keynote " + (entry.key || "new keynote"));
+      placeButton.setAttribute("title", placeTitle);
+      placeButton.appendChild(createPlaceKeynoteIcon());
+      placeButton.addEventListener("click", function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        placeUserKeynote(entry);
+      });
 
       if (row.hasChildren) {
         treeControl = document.createElement("button");
@@ -1147,8 +1226,10 @@
       keyWrap.appendChild(treeControl);
       keyWrap.appendChild(keyInput);
       appendPlacedKeyBadge(keyWrap, entry.key);
+      actionCell.appendChild(placeButton);
       keyCell.appendChild(keyWrap);
       textCell.appendChild(textInput);
+      item.appendChild(actionCell);
       item.appendChild(keyCell);
       item.appendChild(textCell);
       body.appendChild(item);
@@ -2169,6 +2250,7 @@
     }
 
     setDirty(false);
+    rememberBaseline();
     setStatusFromPayload(state.payload);
     renderAll();
   }

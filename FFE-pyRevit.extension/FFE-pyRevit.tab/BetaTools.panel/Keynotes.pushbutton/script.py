@@ -70,7 +70,7 @@ clr.AddReference("PresentationFramework")
 clr.AddReference("WindowsBase")
 
 from System import Uri
-from System.Windows import ResizeMode, Thickness, Visibility, Window, WindowStartupLocation
+from System.Windows import Clipboard, ResizeMode, Thickness, Visibility, Window, WindowStartupLocation
 from System.Windows.Controls import Grid, TextBlock
 from System.Windows.Interop import WindowInteropHelper
 
@@ -85,7 +85,7 @@ from Autodesk.Revit.DB import (
     Transaction,
     WorksetKind,
 )
-from Autodesk.Revit.UI import ExternalEvent, IExternalEventHandler
+from Autodesk.Revit.UI import ExternalEvent, IExternalEventHandler, PostableCommand, RevitCommandId
 
 from pyrevit import forms, revit, script
 
@@ -1552,6 +1552,99 @@ def save_keynote_payload(target_doc, save_payload):
         }
 
 
+def keynote_payload_has_entry_key(keynote_payload, entry_id, key):
+    entry_id = safe_str(entry_id).strip()
+    key = safe_unicode(key).strip()
+    if not key:
+        return False
+
+    for entry in (keynote_payload or {}).get("entries") or []:
+        entry_key = safe_unicode(entry.get("key")).strip()
+        if entry_id:
+            if safe_str(entry.get("id")).strip() == entry_id:
+                return entry_key == key
+        elif entry_key == key:
+            return True
+    return False
+
+
+def copy_text_to_clipboard(value):
+    try:
+        Clipboard.SetText(safe_unicode(value))
+        return True, ""
+    except Exception as exc:
+        try:
+            LOGGER.debug(traceback.format_exc())
+        except:
+            pass
+        return False, safe_str(exc)
+
+
+def place_user_keynote(uiapp, place_payload, keynote_payload):
+    place_payload = place_payload or {}
+    entry_id = safe_str(place_payload.get("id")).strip()
+    key = safe_unicode(place_payload.get("key")).strip()
+    clipboard_copied = False
+    clipboard_error = ""
+    command_id = None
+
+    if not key:
+        return {
+            "status": "warning",
+            "message": "Save this keynote with a key before placing it in Revit.",
+        }
+
+    if not keynote_payload_has_entry_key(keynote_payload, entry_id, key):
+        return {
+            "status": "warning",
+            "message": "Save this keynote before placing it in Revit.",
+        }
+
+    clipboard_copied, clipboard_error = copy_text_to_clipboard(key)
+
+    try:
+        command_id = RevitCommandId.LookupPostableCommandId(PostableCommand.UserKeynote)
+    except Exception as exc:
+        return {
+            "status": "warning",
+            "message": "Could not find Revit's User Keynote command: {0}".format(safe_str(exc)),
+        }
+
+    if command_id is None:
+        return {
+            "status": "warning",
+            "message": "Revit's User Keynote command was not available.",
+        }
+
+    try:
+        if hasattr(uiapp, "CanPostCommand") and not uiapp.CanPostCommand(command_id):
+            return {
+                "status": "warning",
+                "message": "Revit cannot start User Keynote placement in the current context.",
+            }
+    except:
+        pass
+
+    try:
+        uiapp.PostCommand(command_id)
+    except Exception as exc:
+        return {
+            "status": "warning",
+            "message": "Could not start Revit User Keynote placement: {0}".format(safe_str(exc)),
+        }
+
+    message = "Starting Revit User Keynote placement for key '{0}'.".format(key)
+    if clipboard_copied:
+        message += " Key copied to clipboard."
+    elif clipboard_error:
+        message += " Clipboard copy was unavailable."
+
+    return {
+        "status": "ready",
+        "message": message,
+    }
+
+
 # ____________________________________________________________________ EXTERNAL EVENT
 class KeynoteManagerEventHandler(IExternalEventHandler):
     def __init__(self):
@@ -1568,6 +1661,10 @@ class KeynoteManagerEventHandler(IExternalEventHandler):
 
     def queue_save(self, payload):
         self.pending_action = "save"
+        self.pending_payload = payload
+
+    def queue_place_user_keynote(self, payload):
+        self.pending_action = "placeUserKeynote"
         self.pending_payload = payload
 
     def clear_pending(self):
@@ -1595,6 +1692,11 @@ class KeynoteManagerEventHandler(IExternalEventHandler):
             if result.get("payload"):
                 window.set_payload(result.get("payload"))
             window.send_save_result(result)
+            return
+
+        if action == "placeUserKeynote":
+            result = place_user_keynote(uiapp, payload, window.keynote_payload)
+            window.send_status(result.get("status"), result.get("message"))
             return
 
         window.send_status("warning", "No keynote manager action was queued.")
@@ -1874,6 +1976,19 @@ class KeynoteManagerWindow(Window):
             self.event_handler.queue_save(message.get("payload") or {})
             self.send_status("warning", "Saving keynote file and reloading Revit...")
             self.raise_external_event("save")
+            return
+
+        if message_type == "placeUserKeynote":
+            place_payload = message.get("payload") or {}
+            key = safe_unicode(place_payload.get("key")).strip()
+            self.event_handler.queue_place_user_keynote(place_payload)
+            self.send_status(
+                "warning",
+                "Starting Revit User Keynote placement{0}...".format(
+                    key and " for key '{0}'".format(key) or ""
+                )
+            )
+            self.raise_external_event("place user keynote")
             return
 
         if message_type == "closeWindow":
