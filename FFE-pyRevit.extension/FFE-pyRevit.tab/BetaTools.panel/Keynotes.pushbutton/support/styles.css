@@ -610,7 +610,7 @@ h2 {
   width: fit-content;
   max-width: 100%;
   overflow: visible;
-  padding-right: 8px;
+  padding-right: 17px;
 }
 
 .division-row-copy span {
@@ -684,7 +684,7 @@ h2 {
 }
 
 .division-key-field.sheet-marker-anchor {
-  padding-right: 8px;
+  padding-right: 18px;
 }
 
 .division-key-field input,
@@ -792,7 +792,7 @@ h2 {
 }
 
 .division-select-menu .dropdown-item.sheet-marker-anchor {
-  padding-right: 20px;
+  padding-right: 26px;
 }
 
 .division-select-menu .dropdown-item > span {
@@ -942,7 +942,7 @@ h2 {
 }
 
 .note-key-wrap.sheet-marker-anchor {
-  padding-right: 12px;
+  padding-right: 20px;
 }
 
 .sheet-marker-anchor {
@@ -950,15 +950,14 @@ h2 {
 }
 
 .sheet-visible-marker {
-  width: 8px;
-  height: 8px;
+  width: 13px;
+  height: 13px;
   position: absolute;
   top: 50%;
-  right: -7px;
+  right: 2px;
   z-index: 2;
-  border-radius: 50%;
-  background: var(--negative);
-  box-shadow: 0 0 0 2px var(--page-3);
+  color: #f77c0a;
+  fill: currentColor;
   pointer-events: auto;
   transform: translateY(-50%);
 }
