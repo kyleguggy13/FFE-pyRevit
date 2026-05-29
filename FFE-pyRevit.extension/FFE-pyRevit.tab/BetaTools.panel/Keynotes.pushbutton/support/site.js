@@ -947,8 +947,9 @@
 
     if (keyInput) {
       keyInput.disabled = !hasEntry || Boolean(claimTitle);
+      lockKeyInput(keyInput);
       keyInput.value = hasEntry ? model.entry.key : "UNGROUPED";
-      keyInput.setAttribute("title", claimTitle || "");
+      keyInput.setAttribute("title", claimTitle || "Double-click to edit division key");
     }
     if (keyField && hasEntry) {
       appendPlacedKeyBadge(keyField, model.entry.key);
@@ -957,6 +958,28 @@
       textInput.disabled = !hasEntry || Boolean(claimTitle);
       textInput.value = hasEntry ? model.entry.text : "Keynotes without a root division";
       textInput.setAttribute("title", claimTitle || "");
+    }
+  }
+
+  function lockKeyInput(input) {
+    if (!input) {
+      return;
+    }
+
+    input.readOnly = true;
+    input.setAttribute("aria-readonly", "true");
+  }
+
+  function unlockKeyInput(input) {
+    if (!input || input.disabled) {
+      return;
+    }
+
+    input.readOnly = false;
+    input.setAttribute("aria-readonly", "false");
+    input.focus();
+    if (typeof input.select === "function") {
+      input.select();
     }
   }
 
@@ -1075,7 +1098,8 @@
       keyInput.value = entry.key;
       keyInput.setAttribute("aria-label", "Key for " + (entry.key || "new keynote"));
       keyInput.disabled = Boolean(claimTitle);
-      keyInput.setAttribute("title", claimTitle || "");
+      lockKeyInput(keyInput);
+      keyInput.setAttribute("title", claimTitle || "Double-click to edit key");
 
       textInput.className = "form-control form-control-sm note-input note-text-input";
       textInput.rows = 2;
@@ -1089,8 +1113,16 @@
           selectNote(entry.id, false);
         });
         input.addEventListener("blur", function () {
+          if (input === keyInput) {
+            lockKeyInput(keyInput);
+          }
           deferRenderAllWhenEditingSettles();
         });
+      });
+
+      keyInput.addEventListener("dblclick", function (event) {
+        event.preventDefault();
+        unlockKeyInput(keyInput);
       });
 
       keyInput.addEventListener("input", function () {
@@ -2612,6 +2644,13 @@
       return;
     }
 
+    if (fieldName === "key") {
+      input.addEventListener("dblclick", function (event) {
+        event.preventDefault();
+        unlockKeyInput(input);
+      });
+    }
+
     input.addEventListener("input", function () {
       var entry = selectedDivisionEntry();
       if (entry) {
@@ -2619,6 +2658,9 @@
       }
     });
     input.addEventListener("blur", function () {
+      if (fieldName === "key") {
+        lockKeyInput(input);
+      }
       deferRenderAllWhenEditingSettles();
     });
   }

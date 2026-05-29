@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 __title__ = "FFE-Keynotes"
-__version__ = "Version = v0.5"
+__version__ = "Version = v0.7"
 __persistentengine__ = True
 __min_revit_ver__ = 2025
-__doc__ = """Version = v0.5
-Date    = 05.26.2026
+__doc__ = """Version = v0.7
+Date    = 05.29.2026
 __________________________________________________________________
 Description:
 Persistent WebView2 keynote manager for the active Revit document's
@@ -32,6 +32,7 @@ Last update:
 - [05.21.2026] - v0.4 Updated UI styles and layout, and added more robust file encoding detection and handling.
 - [05.26.2026] - v0.5 Added in-place shared-file concurrent editing with Supabase/Postgres mirroring.
 - [05.27.2026] - v0.6 Added row-level locking with Supabase to prevent concurrent edit conflicts.
+- [05.29.2026] - v0.7 Improved error handling and improved UI
 __________________________________________________________________
 Author: Kyle Guggenheim"""
 
@@ -105,7 +106,7 @@ PATH_SUPPORT = os.path.join(PATH_SCRIPT, "support")
 PATH_INDEX = os.path.join(PATH_SUPPORT, "index.html")
 
 APP_NAME = "FFE Keynote Manager"
-APP_VERSION = "v0.5"
+APP_VERSION = "v0.7"
 LOCAL_APP_NAME = "KeynoteManager"
 
 LOGGER = script.get_logger()
