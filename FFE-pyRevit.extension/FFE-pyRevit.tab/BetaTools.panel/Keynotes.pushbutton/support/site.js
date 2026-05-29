@@ -143,8 +143,7 @@
     }
 
     badge = document.createElement("span");
-    badge.className = "position-absolute top-50 start-100 translate-middle p-1 bg-danger border border-light rounded-circle sheet-visible-marker";
-    // badge.className = "rounded-circle sheet-visible-marker";
+    badge.className = "sheet-visible-marker";
     badge.setAttribute("role", "img");
     badge.setAttribute("aria-label", "Placed keynote annotation");
     badge.setAttribute("title", "Placed keynote annotation");
@@ -788,9 +787,13 @@
   function setDirty(isDirty) {
     var nextDirty = Boolean(isDirty);
     var didChange = state.dirty !== nextDirty;
+    var dirtyElement = byId("dirty-state");
 
     state.dirty = nextDirty;
-    setText("dirty-state", state.dirty ? "UNSAVED CHANGES" : "NO CHANGES");
+    setText(dirtyElement, state.dirty ? "UNSAVED CHANGES" : "NO CHANGES");
+    if (dirtyElement) {
+      dirtyElement.setAttribute("data-dirty", state.dirty ? "true" : "false");
+    }
     renderSaveState();
 
     if (didChange && hasWebViewBridge()) {
@@ -1116,6 +1119,7 @@
 
   function renderValidation() {
     var container = byId("validation-list");
+    var warningPill = document.querySelector(".warning-pill");
     var issues = validateAll();
     var errors = issues.filter(function (issue) {
       return text(issue.severity).toLowerCase() === "error";
@@ -1126,6 +1130,9 @@
     var total = errors.length + warnings.length;
 
     setText("validation-summary", formatNumber(total));
+    if (warningPill) {
+      warningPill.setAttribute("data-severity", errors.length ? "error" : (warnings.length ? "warning" : "none"));
+    }
 
     if (!container) {
       return;

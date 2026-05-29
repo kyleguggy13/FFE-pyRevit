@@ -29,32 +29,35 @@
           <h1>KEYNOTE MANAGER v0.5</h1>
           <p class="meta-line">
             <span id="doc-title">Waiting for Revit document</span>
-            <span id="dirty-state">NO CHANGES</span>
+            <span id="dirty-state" data-dirty="false">NO CHANGES</span>
           </p>
         </div>
 
         <div class="window-actions" aria-label="Window actions">
-          <button id="configure-supabase" class="utility-button" type="button"
+          <button
+            id="configure-supabase"
+            class="utility-button"
             type="button"
-            class="btn btn-secondary"
             data-bs-toggle="tooltip"
             data-bs-placement="top"
             title="Configure Supabase connection settings"
           >
             Config
           </button>
-          <button id="refresh-data" class="utility-button" type="button"
+          <button
+            id="refresh-data"
+            class="utility-button"
             type="button"
-            class="btn btn-secondary"
             data-bs-toggle="tooltip"
             data-bs-placement="top"
             title="Refresh data from Keynote file"
           >
             Refresh
           </button>
-          <button id="save-data" class="save-button" type="button"
+          <button
+            id="save-data"
+            class="save-button"
             type="button"
-            class="btn btn-secondary"
             data-bs-toggle="tooltip"
             data-bs-placement="top"
             title="Save data to Keynote file"
@@ -71,7 +74,7 @@
           <strong id="state-title">&lt;Messages&gt;</strong>
           <span id="state-message"></span>
         </div>
-        <div class="warning-pill" aria-label="Warnings">
+        <div class="warning-pill" data-severity="none" aria-label="Warnings">
           <span>Warnings</span>
           <span id="validation-summary" class="warning-count">0</span>
         </div>
