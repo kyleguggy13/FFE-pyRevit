@@ -20,10 +20,12 @@
     remoteEditClaims: {},
     localEditClaimSignature: "",
     syncIssues: [],
+    operationIssues: [],
     remotePending: false,
     allowNextLoad: false,
     collapsedEntryIds: {},
     sheetVisibleKeynotes: {},
+    placementMode: "userKeynote",
     nextLocalId: 1
   };
 
@@ -505,7 +507,7 @@
   }
 
   function validateAll() {
-    var issues = state.sourceIssues.concat(state.syncIssues || []);
+    var issues = state.sourceIssues.concat(state.operationIssues || [], state.syncIssues || []);
     var keyCounts = {};
     var keyMap = {};
     var parentMap = {};
@@ -997,15 +999,23 @@
     return svg;
   }
 
-  function entryCanPlaceUserKeynote(entry) {
+  function placementModeLabel() {
+    return state.placementMode === "genericAnnotation" ? "Generic Annotation keynote" : "User Keynote";
+  }
+
+  function entryCanPlaceKeynote(entry) {
     var baselineEntry = findBaselineEntry(entry);
     var key = trim(entry && entry.key);
 
-    return Boolean(key && baselineEntry && trim(baselineEntry.key) === key);
+    return Boolean(key && baselineEntry && entryFieldsEqual(entry, baselineEntry));
   }
 
-  function placeUserKeynote(entry) {
+  function placeKeynote(entry) {
     var key = trim(entry && entry.key);
+    var messageType = state.placementMode === "genericAnnotation"
+      ? "placeGenericAnnotation"
+      : "placeUserKeynote";
+    var label = placementModeLabel();
 
     if (!entry) {
       return;
@@ -1021,7 +1031,7 @@
       return;
     }
 
-    if (!entryCanPlaceUserKeynote(entry)) {
+    if (!entryCanPlaceKeynote(entry)) {
       setStatus({
         status: "warning",
         message: "Save this keynote before placing it in Revit."
@@ -1030,16 +1040,15 @@
     }
 
     if (postWebViewMessage({
-      type: "placeUserKeynote",
+      type: messageType,
       payload: {
         id: entry.id,
-        key: key,
-        text: entry.text
+        key: key
       }
     })) {
       setStatus({
         status: "warning",
-        message: "Starting Revit User Keynote placement for key '" + key + "'..."
+        message: "Starting Revit " + label + " placement for key '" + key + "'..."
       });
     }
   }
@@ -1113,9 +1122,10 @@
       var keyInput = document.createElement("input");
       var textInput = document.createElement("textarea");
       var claimTitle = editClaimTitle(entry);
-      var canPlaceKeynote = entryCanPlaceUserKeynote(entry);
+      var canPlaceKeynote = entryCanPlaceKeynote(entry);
+      var placementLabel = placementModeLabel();
       var placeTitle = canPlaceKeynote
-        ? "Place user keynote " + (entry.key || "")
+        ? "Place " + placementLabel + " " + (entry.key || "")
         : "Save this keynote before placing it in Revit";
 
       item.className = "note-row" +
@@ -1142,13 +1152,13 @@
 
       placeButton.type = "button";
       placeButton.className = "note-place-button" + (canPlaceKeynote ? "" : " needs-save");
-      placeButton.setAttribute("aria-label", "Place user keynote " + (entry.key || "new keynote"));
+      placeButton.setAttribute("aria-label", "Place " + placementLabel + " " + (entry.key || "new keynote"));
       placeButton.setAttribute("title", placeTitle);
       placeButton.appendChild(createPlaceKeynoteIcon());
       placeButton.addEventListener("click", function (event) {
         event.preventDefault();
         event.stopPropagation();
-        placeUserKeynote(entry);
+        placeKeynote(entry);
       });
 
       if (row.hasChildren) {
@@ -2237,6 +2247,7 @@
     state.entries = (state.payload.entries || []).map(normalizeEntry);
     state.sheetVisibleKeynotes = normalizeSheetVisibleKeynotes(state.payload.sheetVisibleKeynotes || {});
     state.sourceIssues = (state.payload.issues || []).filter(sourceIssueBlocksSave);
+    state.operationIssues = [];
     state.collapsedEntryIds = {};
     state.saving = false;
 
@@ -2275,6 +2286,7 @@
 
     clearLocalEditClaims();
     state.syncIssues = [];
+    state.operationIssues = [];
     state.remotePending = false;
     state.remoteEditClaims = {};
     applyData(payload);
@@ -2662,6 +2674,7 @@
 
     state.saving = true;
     state.syncIssues = [];
+    state.operationIssues = [];
     renderSaveState();
     setStatus({ status: "syncing", message: "Merging edits into the shared keynote file..." });
 
@@ -2698,6 +2711,9 @@
 
     if ((result.status || "") === "ready" && result.payload) {
       applyData(result.payload);
+      state.operationIssues = (result.issues || []).filter(function (issue) {
+        return !sourceIssueBlocksSave(issue);
+      });
       rememberBaseline();
       fileMessage = result.backupPath
         ? (result.message || "") + " Backup: " + result.backupPath
@@ -2707,6 +2723,7 @@
         message: fileMessage
       });
       clearLocalEditClaims();
+      renderValidation();
       savePendingDbChanges(result.payload, pendingChanges, fileMessage);
       return;
     } else if ((result.status || "") !== "ready") {
@@ -2797,6 +2814,7 @@
   function init() {
     var searchInput = byId("search-input");
     var divisionSelectMenu = byId("division-select-menu");
+    var placementModeSelect = byId("placement-mode-select");
 
     if (searchInput) {
       searchInput.addEventListener("input", function () {
@@ -2814,6 +2832,16 @@
         }
         event.preventDefault();
         selectDivision(target.getAttribute("data-division-id"));
+      });
+    }
+
+    if (placementModeSelect) {
+      placementModeSelect.value = state.placementMode;
+      placementModeSelect.addEventListener("change", function () {
+        state.placementMode = placementModeSelect.value === "genericAnnotation"
+          ? "genericAnnotation"
+          : "userKeynote";
+        renderNotes();
       });
     }
 

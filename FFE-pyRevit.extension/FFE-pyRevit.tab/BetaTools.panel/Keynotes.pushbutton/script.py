@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 __title__ = "FFE-Keynotes"
-__version__ = "Version = v0.7"
+__version__ = "Version = v0.9"
 __persistentengine__ = True
 __min_revit_ver__ = 2025
-__doc__ = """Version = v0.7
-Date    = 05.29.2026
+__doc__ = """Version = v0.9
+Date    = 06.02.2026
 __________________________________________________________________
 Description:
 Persistent WebView2 keynote manager for the active Revit document's
@@ -19,6 +19,8 @@ Key behaviors:
   Supabase mirror updates, and an immediate Revit keynote table reload.
 - When a keynote key is renamed, writable placed/model keynote references using
   the old key are updated to the new key.
+- Places saved rows as either Revit User Keynotes or FFE_Symbol_Keynote Generic
+  Annotations.
 __________________________________________________________________
 How-To:
 - Click the button to open the keynote manager.
@@ -33,6 +35,8 @@ Last update:
 - [05.26.2026] - v0.5 Added in-place shared-file concurrent editing with Supabase/Postgres mirroring.
 - [05.27.2026] - v0.6 Added row-level locking with Supabase to prevent concurrent edit conflicts.
 - [05.29.2026] - v0.7 Improved error handling and improved UI
+- [06.02.2026] - v0.8 Added Generic Annotation keynote placement and type synchronization.
+- [06.02.2026] - v0.9 Applied the standard leader arrowhead to Generic Annotation keynote types.
 __________________________________________________________________
 Author: Kyle Guggenheim"""
 
@@ -82,6 +86,8 @@ except:
 from Autodesk.Revit.DB import (
     BuiltInCategory,
     BuiltInParameter,
+    ElementType,
+    Family,
     FilteredElementCollector,
     KeyBasedTreeEntriesLoadResults,
     KeynoteTable,
@@ -111,8 +117,12 @@ PATH_SUPPORT = os.path.join(PATH_SCRIPT, "support")
 PATH_INDEX = os.path.join(PATH_SUPPORT, "index.html")
 
 APP_NAME = "FFE Keynote Manager"
-APP_VERSION = "v0.7"
+APP_VERSION = "v0.9"
 LOCAL_APP_NAME = "KeynoteManager"
+GENERIC_KEYNOTE_FAMILY_NAME = "FFE_Symbol_Keynote (Type)"
+GENERIC_KEYNOTE_NUMBER_PARAMETER = "Number"
+GENERIC_KEYNOTE_TEXT_PARAMETER = "Text"
+GENERIC_KEYNOTE_LEADER_ARROWHEAD_NAME = "Arrow Filled 20 Degree"
 
 SHARED_SUPABASE_SETTINGS_PARTS = (
     "FFE Inc",
@@ -1067,6 +1077,11 @@ def reload_revit_keynotes(target_doc):
 
 def get_element_id_key(element):
     try:
+        return int(element.Id.Value)
+    except:
+        pass
+
+    try:
         return int(element.Id.IntegerValue)
     except:
         return safe_str(getattr(element, "Id", ""))
@@ -1140,6 +1155,520 @@ def get_keynote_tag_key(tag):
     return ""
 
 
+def get_element_name(element):
+    if element is None:
+        return ""
+
+    try:
+        parameter = element.get_Parameter(BuiltInParameter.SYMBOL_NAME_PARAM)
+        value = get_parameter_text(parameter)
+        if value:
+            return value
+    except:
+        pass
+
+    try:
+        return safe_unicode(element.Name).strip()
+    except:
+        return ""
+
+
+def get_generic_annotation_keynote_family(target_doc):
+    if target_doc is None:
+        return None
+
+    try:
+        category = target_doc.Settings.Categories.get_Item(BuiltInCategory.OST_GenericAnnotation)
+        category_id = category.Id
+    except:
+        return None
+
+    try:
+        families = FilteredElementCollector(target_doc).OfClass(Family)
+    except:
+        return None
+    for family in families:
+        try:
+            if family.Name == GENERIC_KEYNOTE_FAMILY_NAME and family.FamilyCategory.Id == category_id:
+                return family
+        except:
+            continue
+
+    return None
+
+
+def get_family_symbols(target_doc, family):
+    symbols = []
+    if target_doc is None or family is None:
+        return symbols
+
+    try:
+        symbol_ids = family.GetFamilySymbolIds()
+    except:
+        return symbols
+
+    for symbol_id in symbol_ids:
+        try:
+            symbol = target_doc.GetElement(symbol_id)
+            if symbol is not None:
+                symbols.append(symbol)
+        except:
+            continue
+
+    return symbols
+
+
+def get_generic_annotation_symbol_key(symbol):
+    key = get_lookup_parameter_text(symbol, [GENERIC_KEYNOTE_NUMBER_PARAMETER])
+    if key:
+        return key
+    return get_element_name(symbol)
+
+
+def generic_annotation_symbol_matches_key(symbol, key):
+    key = safe_unicode(key).strip()
+    if not key:
+        return False
+    return (
+        get_lookup_parameter_text(symbol, [GENERIC_KEYNOTE_NUMBER_PARAMETER]) == key or
+        get_element_name(symbol) == key
+    )
+
+
+def get_generic_annotation_instance_symbol(target_doc, instance):
+    try:
+        symbol = instance.Symbol
+        if symbol is not None:
+            return symbol
+    except:
+        pass
+
+    try:
+        return target_doc.GetElement(instance.GetTypeId())
+    except:
+        return None
+
+
+def iter_generic_annotation_keynote_instances(target_doc):
+    if target_doc is None:
+        return
+
+    instances = (
+        FilteredElementCollector(target_doc)
+        .OfCategory(BuiltInCategory.OST_GenericAnnotation)
+        .WhereElementIsNotElementType()
+    )
+
+    for instance in instances:
+        symbol = get_generic_annotation_instance_symbol(target_doc, instance)
+        if symbol is None:
+            continue
+        try:
+            family = symbol.Family
+            if family is not None and family.Name == GENERIC_KEYNOTE_FAMILY_NAME:
+                yield instance, symbol
+        except:
+            continue
+
+
+def collect_generic_annotation_instances_by_symbol(target_doc):
+    result = {}
+    for instance, symbol in iter_generic_annotation_keynote_instances(target_doc):
+        symbol_key = get_element_id_key(symbol)
+        if symbol_key not in result:
+            result[symbol_key] = []
+        result[symbol_key].append(instance)
+    return result
+
+
+def make_generic_annotation_sync_summary():
+    return {
+        "familyFound": False,
+        "createdCount": 0,
+        "updatedCount": 0,
+        "migratedCount": 0,
+        "retypedCount": 0,
+        "deletedCount": 0,
+        "preservedCount": 0,
+        "failedCount": 0,
+        "failures": [],
+    }
+
+
+def record_generic_annotation_sync_failure(summary, message):
+    summary["failedCount"] += 1
+    if len(summary["failures"]) < 10:
+        summary["failures"].append(safe_str(message))
+
+
+def get_writable_symbol_parameter(symbol, parameter_name):
+    try:
+        parameter = symbol.LookupParameter(parameter_name)
+    except:
+        parameter = None
+
+    if parameter is None:
+        raise Exception("Type '{0}' is missing the '{1}' parameter.".format(get_element_name(symbol), parameter_name))
+
+    try:
+        if parameter.IsReadOnly:
+            raise Exception("Type '{0}' has a read-only '{1}' parameter.".format(get_element_name(symbol), parameter_name))
+    except AttributeError:
+        pass
+
+    return parameter
+
+
+def get_writable_builtin_symbol_parameter(symbol, parameter_id, parameter_label):
+    try:
+        parameter = symbol.get_Parameter(parameter_id)
+    except:
+        parameter = None
+
+    if parameter is None:
+        raise Exception("Type '{0}' is missing the '{1}' parameter.".format(get_element_name(symbol), parameter_label))
+
+    try:
+        if parameter.IsReadOnly:
+            raise Exception("Type '{0}' has a read-only '{1}' parameter.".format(get_element_name(symbol), parameter_label))
+    except AttributeError:
+        pass
+
+    return parameter
+
+
+def get_element_id_value(element_id):
+    try:
+        return int(element_id.Value)
+    except:
+        pass
+
+    try:
+        return int(element_id.IntegerValue)
+    except:
+        return safe_str(element_id)
+
+
+def get_leader_arrowhead_type(target_doc):
+    if target_doc is None:
+        return None
+
+    try:
+        element_types = (
+            FilteredElementCollector(target_doc)
+            .OfClass(ElementType)
+            .WhereElementIsElementType()
+        )
+    except:
+        return None
+
+    for element_type in element_types:
+        try:
+            if (
+                safe_str(element_type.FamilyName).strip() == "Arrowhead" and
+                get_element_name(element_type) == GENERIC_KEYNOTE_LEADER_ARROWHEAD_NAME
+            ):
+                return element_type
+        except:
+            continue
+
+    return None
+
+
+def set_parameter_text(parameter, value):
+    value = safe_unicode(value)
+    if get_parameter_text(parameter) == value:
+        return False
+
+    set_result = parameter.Set(value)
+    if safe_str(set_result).lower() in ["false", "0"]:
+        raise Exception("Revit rejected parameter value '{0}'.".format(value))
+    return True
+
+
+def set_symbol_type_name(symbol, value):
+    value = safe_unicode(value).strip()
+    if get_element_name(symbol) == value:
+        return False
+
+    direct_name_error = ""
+    try:
+        symbol.Name = value
+        return True
+    except Exception as exc:
+        direct_name_error = safe_str(exc)
+
+    try:
+        parameter = symbol.get_Parameter(BuiltInParameter.SYMBOL_NAME_PARAM)
+    except:
+        parameter = None
+
+    if parameter is not None:
+        try:
+            if parameter.IsReadOnly:
+                raise Exception("Type name is read-only.")
+        except AttributeError:
+            pass
+        set_result = parameter.Set(value)
+        if safe_str(set_result).lower() in ["false", "0"]:
+            raise Exception("Revit rejected type name '{0}'.".format(value))
+        return True
+
+    raise Exception("Could not rename Generic Annotation type to '{0}': {1}".format(value, direct_name_error))
+
+
+def set_generic_annotation_symbol_leader_arrowhead(symbol, leader_arrowhead_type):
+    if leader_arrowhead_type is None:
+        raise Exception("Arrowhead type '{0}' was not found.".format(GENERIC_KEYNOTE_LEADER_ARROWHEAD_NAME))
+
+    parameter = get_writable_builtin_symbol_parameter(
+        symbol,
+        BuiltInParameter.LEADER_ARROWHEAD,
+        "Leader Arrowhead"
+    )
+
+    try:
+        if get_element_id_value(parameter.AsElementId()) == get_element_id_value(leader_arrowhead_type.Id):
+            return False
+    except:
+        pass
+
+    set_result = parameter.Set(leader_arrowhead_type.Id)
+    if safe_str(set_result).lower() in ["false", "0"]:
+        raise Exception("Revit rejected Leader Arrowhead '{0}'.".format(GENERIC_KEYNOTE_LEADER_ARROWHEAD_NAME))
+    return True
+
+
+def set_generic_annotation_symbol_values(symbol, key, text, leader_arrowhead_type):
+    old_name = get_element_name(symbol)
+    changed = False
+    changed = set_symbol_type_name(symbol, key) or changed
+    changed = set_parameter_text(
+        get_writable_symbol_parameter(symbol, GENERIC_KEYNOTE_NUMBER_PARAMETER),
+        key
+    ) or changed
+    changed = set_parameter_text(
+        get_writable_symbol_parameter(symbol, GENERIC_KEYNOTE_TEXT_PARAMETER),
+        text
+    ) or changed
+    changed = set_generic_annotation_symbol_leader_arrowhead(symbol, leader_arrowhead_type) or changed
+    return changed, bool(old_name and old_name != safe_unicode(key).strip())
+
+
+def choose_generic_annotation_symbol(symbols, key):
+    key = safe_unicode(key).strip()
+    matching = [symbol for symbol in symbols if generic_annotation_symbol_matches_key(symbol, key)]
+    for symbol in matching:
+        if get_element_name(symbol) == key:
+            return symbol
+    return matching and matching[0] or None
+
+
+def duplicate_family_symbol(target_doc, base_symbol, new_type_name):
+    duplicate_result = base_symbol.Duplicate(safe_unicode(new_type_name).strip())
+    try:
+        symbol = target_doc.GetElement(duplicate_result)
+        if symbol is not None:
+            return symbol
+    except:
+        pass
+    return duplicate_result
+
+
+def change_generic_annotation_instances_type(instances_by_symbol, old_symbol, new_symbol, summary):
+    old_symbol_key = get_element_id_key(old_symbol)
+    new_symbol_key = get_element_id_key(new_symbol)
+    remaining_instances = []
+
+    for instance in list(instances_by_symbol.get(old_symbol_key) or []):
+        try:
+            instance.ChangeTypeId(new_symbol.Id)
+            summary["retypedCount"] += 1
+            if new_symbol_key not in instances_by_symbol:
+                instances_by_symbol[new_symbol_key] = []
+            instances_by_symbol[new_symbol_key].append(instance)
+        except Exception as exc:
+            remaining_instances.append(instance)
+            record_generic_annotation_sync_failure(
+                summary,
+                "Could not retype Generic Annotation instance {0}: {1}".format(
+                    get_element_id_key(instance),
+                    exc
+                )
+            )
+
+    instances_by_symbol[old_symbol_key] = remaining_instances
+    return not remaining_instances
+
+
+def delete_generic_annotation_symbol_if_unused(target_doc, symbol, instances_by_symbol, summary, reason):
+    symbol_key = get_element_id_key(symbol)
+    if instances_by_symbol.get(symbol_key):
+        summary["preservedCount"] += 1
+        return False
+
+    try:
+        target_doc.Delete(symbol.Id)
+        summary["deletedCount"] += 1
+        return True
+    except Exception as exc:
+        summary["preservedCount"] += 1
+        record_generic_annotation_sync_failure(
+            summary,
+            "Could not delete {0} Generic Annotation type '{1}': {2}".format(
+                reason,
+                get_element_name(symbol),
+                exc
+            )
+        )
+        return False
+
+
+def sync_generic_annotation_types(target_doc, entries, key_renames, deleted_keys):
+    summary = make_generic_annotation_sync_summary()
+    family = get_generic_annotation_keynote_family(target_doc)
+    if family is None:
+        return summary
+
+    summary["familyFound"] = True
+    symbols = get_family_symbols(target_doc, family)
+    if not symbols:
+        record_generic_annotation_sync_failure(
+            summary,
+            "Family '{0}' does not contain a type to synchronize.".format(GENERIC_KEYNOTE_FAMILY_NAME)
+        )
+        return summary
+
+    leader_arrowhead_type = get_leader_arrowhead_type(target_doc)
+    if leader_arrowhead_type is None:
+        record_generic_annotation_sync_failure(
+            summary,
+            "Arrowhead type '{0}' was not found. Load or create it before synchronizing Generic Annotation keynotes.".format(
+                GENERIC_KEYNOTE_LEADER_ARROWHEAD_NAME
+            )
+        )
+        return summary
+
+    instances_by_symbol = collect_generic_annotation_instances_by_symbol(target_doc)
+    deleted_symbol_keys = set()
+    active_keys = set([
+        safe_unicode(entry.get("key")).strip()
+        for entry in entries or []
+        if safe_unicode(entry.get("key")).strip()
+    ])
+    transaction = Transaction(target_doc, "Sync Generic Annotation Keynotes")
+
+    try:
+        transaction.Start()
+
+        for entry in entries or []:
+            key = safe_unicode(entry.get("key")).strip()
+            text = safe_unicode(entry.get("text")).strip()
+            if not key:
+                continue
+
+            target_symbol = choose_generic_annotation_symbol(symbols, key)
+            previous_keys = [
+                old_key for old_key, new_key in (key_renames or {}).items()
+                if safe_unicode(new_key).strip() == key
+            ]
+            previous_symbols = []
+            for previous_key in previous_keys:
+                previous_symbols.extend([
+                    symbol for symbol in symbols
+                    if get_element_id_key(symbol) not in deleted_symbol_keys and
+                    generic_annotation_symbol_matches_key(symbol, previous_key)
+                ])
+
+            if target_symbol is None and previous_symbols:
+                target_symbol = previous_symbols[0]
+            if target_symbol is None:
+                continue
+
+            try:
+                changed, migrated = set_generic_annotation_symbol_values(
+                    target_symbol,
+                    key,
+                    text,
+                    leader_arrowhead_type
+                )
+                if changed:
+                    summary["updatedCount"] += 1
+                if migrated:
+                    summary["migratedCount"] += 1
+            except Exception as exc:
+                record_generic_annotation_sync_failure(
+                    summary,
+                    "Could not synchronize Generic Annotation type '{0}' for keynote '{1}': {2}".format(
+                        get_element_name(target_symbol),
+                        key,
+                        exc
+                    )
+                )
+                continue
+
+            redundant_symbols = []
+            for symbol in symbols:
+                symbol_key = get_element_id_key(symbol)
+                if symbol_key == get_element_id_key(target_symbol) or symbol_key in deleted_symbol_keys:
+                    continue
+                if generic_annotation_symbol_matches_key(symbol, key) or symbol in previous_symbols:
+                    redundant_symbols.append(symbol)
+
+            for redundant_symbol in redundant_symbols:
+                if not change_generic_annotation_instances_type(
+                    instances_by_symbol,
+                    redundant_symbol,
+                    target_symbol,
+                    summary
+                ):
+                    summary["preservedCount"] += 1
+                    continue
+                if delete_generic_annotation_symbol_if_unused(
+                    target_doc,
+                    redundant_symbol,
+                    instances_by_symbol,
+                    summary,
+                    "redundant"
+                ):
+                    deleted_symbol_keys.add(get_element_id_key(redundant_symbol))
+
+        for deleted_key in deleted_keys or []:
+            if deleted_key in active_keys:
+                continue
+            for symbol in symbols:
+                symbol_key = get_element_id_key(symbol)
+                if symbol_key in deleted_symbol_keys:
+                    continue
+                if not generic_annotation_symbol_matches_key(symbol, deleted_key):
+                    continue
+                if delete_generic_annotation_symbol_if_unused(
+                    target_doc,
+                    symbol,
+                    instances_by_symbol,
+                    summary,
+                    "deleted-keynote"
+                ):
+                    deleted_symbol_keys.add(symbol_key)
+
+        transaction.Commit()
+    except Exception as exc:
+        try:
+            transaction.RollBack()
+        except:
+            pass
+        summary["updatedCount"] = 0
+        summary["migratedCount"] = 0
+        summary["retypedCount"] = 0
+        summary["deletedCount"] = 0
+        record_generic_annotation_sync_failure(
+            summary,
+            "Generic Annotation synchronization was rolled back: {0}".format(exc)
+        )
+
+    return summary
+
+
 def element_is_on_non_user_workset(target_doc, element):
     try:
         workset = target_doc.GetWorksetTable().GetWorkset(element.WorksetId)
@@ -1168,6 +1697,11 @@ def collect_sheet_visible_keynotes(target_doc):
             continue
 
         key = safe_unicode(get_keynote_tag_key(tag)).strip()
+        if key:
+            result[key] = True
+
+    for instance, symbol in iter_generic_annotation_keynote_instances(target_doc):
+        key = safe_unicode(get_generic_annotation_symbol_key(symbol)).strip()
         if key:
             result[key] = True
 
@@ -1415,6 +1949,18 @@ def make_key_rename_map(baseline_entries, desired_entries):
     return key_renames
 
 
+def make_deleted_key_set(baseline_entries, desired_entries):
+    desired_by_id = indexed_entries(desired_entries)
+    deleted_keys = set()
+
+    for baseline in baseline_entries or []:
+        base_entry = normalize_merge_entry(baseline)
+        if base_entry["id"] and base_entry["id"] not in desired_by_id and base_entry["key"]:
+            deleted_keys.add(base_entry["key"])
+
+    return deleted_keys
+
+
 def current_entry_changed(current_entry, baseline_entry):
     if current_entry is None:
         return True
@@ -1552,9 +2098,12 @@ def save_keynote_payload(target_doc, save_payload):
         encoding = safe_str(save_payload.get("encoding")) or "utf-8"
         line_ending = save_payload.get("lineEnding") or "\r\n"
         key_renames = make_key_rename_map(baseline_entries, entries)
+        deleted_keys = make_deleted_key_set(baseline_entries, entries)
         reference_update = {}
+        generic_annotation_sync = make_generic_annotation_sync_summary()
         lock_path = get_sync_lock_path(current_path)
         backup_path = ""
+        merged_entries = []
 
         acquire_sync_lock(lock_path)
 
@@ -1617,6 +2166,19 @@ def save_keynote_payload(target_doc, save_payload):
         finally:
             release_sync_lock(lock_path)
 
+        try:
+            generic_annotation_sync = sync_generic_annotation_types(
+                target_doc,
+                merged_entries,
+                key_renames,
+                deleted_keys
+            )
+        except Exception as exc:
+            generic_annotation_sync = make_generic_annotation_sync_summary()
+            record_generic_annotation_sync_failure(
+                generic_annotation_sync,
+                "Generic Annotation synchronization could not start: {0}".format(exc)
+            )
         payload = build_keynote_payload(target_doc)
         result_issues = payload.get("issues") or []
         if reference_update.get("readOnlyCount"):
@@ -1635,6 +2197,26 @@ def save_keynote_payload(target_doc, save_payload):
                 None,
                 "keynoteReferenceUpdateFailed"
             ))
+        if generic_annotation_sync.get("preservedCount"):
+            result_issues.append(make_issue(
+                "warning",
+                "{0} Generic Annotation keynote type(s) were preserved because they are still in use or could not be removed.".format(
+                    generic_annotation_sync.get("preservedCount")
+                ),
+                "",
+                None,
+                "genericAnnotationTypePreserved"
+            ))
+        if generic_annotation_sync.get("failedCount"):
+            result_issues.append(make_issue(
+                "warning",
+                "{0} Generic Annotation keynote synchronization action(s) could not be completed.".format(
+                    generic_annotation_sync.get("failedCount")
+                ),
+                "",
+                None,
+                "genericAnnotationSyncFailed"
+            ))
         try:
             file_state = get_file_state(current_path)
             write_sync_sidecar(current_path, {
@@ -1648,6 +2230,7 @@ def save_keynote_payload(target_doc, save_payload):
                 "clientName": get_client_name(),
                 "keyRenames": key_renames,
                 "keynoteReferenceUpdate": reference_update,
+                "genericAnnotationSync": generic_annotation_sync,
                 "source": "sharedFileCanonical",
             })
         except Exception as exc:
@@ -1663,6 +2246,11 @@ def save_keynote_payload(target_doc, save_payload):
             message += " Updated {0} model keynote reference(s) for renamed keys.".format(
                 reference_update.get("updatedCount", 0)
             )
+        if generic_annotation_sync.get("updatedCount") or generic_annotation_sync.get("deletedCount"):
+            message += " Synchronized {0} and removed {1} Generic Annotation keynote type(s).".format(
+                generic_annotation_sync.get("updatedCount", 0),
+                generic_annotation_sync.get("deletedCount", 0)
+            )
 
         return {
             "status": "ready",
@@ -1670,6 +2258,7 @@ def save_keynote_payload(target_doc, save_payload):
             "backupPath": backup_path,
             "keyRenames": key_renames,
             "keynoteReferenceUpdate": reference_update,
+            "genericAnnotationSync": generic_annotation_sync,
             "issues": result_issues,
             "payload": payload,
         }
@@ -1686,20 +2275,24 @@ def save_keynote_payload(target_doc, save_payload):
         }
 
 
-def keynote_payload_has_entry_key(keynote_payload, entry_id, key):
+def get_keynote_payload_entry(keynote_payload, entry_id, key):
     entry_id = safe_str(entry_id).strip()
     key = safe_unicode(key).strip()
     if not key:
-        return False
+        return None
 
     for entry in (keynote_payload or {}).get("entries") or []:
         entry_key = safe_unicode(entry.get("key")).strip()
         if entry_id:
             if safe_str(entry.get("id")).strip() == entry_id:
-                return entry_key == key
+                return entry_key == key and entry or None
         elif entry_key == key:
-            return True
-    return False
+            return entry
+    return None
+
+
+def keynote_payload_has_entry_key(keynote_payload, entry_id, key):
+    return get_keynote_payload_entry(keynote_payload, entry_id, key) is not None
 
 
 def copy_text_to_clipboard(value):
@@ -1817,6 +2410,183 @@ def place_user_keynote(uiapp, target_doc, place_payload, keynote_payload):
     }
 
 
+def get_active_uidocument(uiapp, target_doc):
+    try:
+        uidoc = uiapp.ActiveUIDocument
+    except:
+        uidoc = None
+
+    if uidoc is None:
+        return None, "No active Revit document is available for Generic Annotation placement."
+
+    try:
+        if uidoc.Document != target_doc:
+            return None, "Activate the Revit document associated with this Keynote Manager before placing a Generic Annotation."
+    except:
+        return None, "Could not confirm the active Revit document for Generic Annotation placement."
+
+    return uidoc, ""
+
+
+def get_valid_generic_annotation_base_symbol(symbols):
+    for symbol in symbols or []:
+        try:
+            get_writable_symbol_parameter(symbol, GENERIC_KEYNOTE_NUMBER_PARAMETER)
+            get_writable_symbol_parameter(symbol, GENERIC_KEYNOTE_TEXT_PARAMETER)
+            get_writable_builtin_symbol_parameter(
+                symbol,
+                BuiltInParameter.LEADER_ARROWHEAD,
+                "Leader Arrowhead"
+            )
+            return symbol
+        except:
+            continue
+    return None
+
+
+def ensure_generic_annotation_keynote_symbol(target_doc, key, text):
+    summary = make_generic_annotation_sync_summary()
+    family = get_generic_annotation_keynote_family(target_doc)
+    if family is None:
+        return None, summary, "Load the Generic Annotation family '{0}' before placing symbol keynotes.".format(
+            GENERIC_KEYNOTE_FAMILY_NAME
+        )
+
+    summary["familyFound"] = True
+    symbols = get_family_symbols(target_doc, family)
+    if not symbols:
+        return None, summary, "Family '{0}' does not contain a type to duplicate.".format(
+            GENERIC_KEYNOTE_FAMILY_NAME
+        )
+
+    leader_arrowhead_type = get_leader_arrowhead_type(target_doc)
+    if leader_arrowhead_type is None:
+        return None, summary, "Load or create the Arrowhead type '{0}' before placing symbol keynotes.".format(
+            GENERIC_KEYNOTE_LEADER_ARROWHEAD_NAME
+        )
+
+    symbol = choose_generic_annotation_symbol(symbols, key)
+    transaction = Transaction(target_doc, "Prepare Generic Annotation Keynote")
+
+    try:
+        transaction.Start()
+
+        if symbol is None:
+            base_symbol = get_valid_generic_annotation_base_symbol(symbols)
+            if base_symbol is None:
+                raise Exception(
+                    "No type in family '{0}' has writable '{1}' and '{2}' parameters.".format(
+                        GENERIC_KEYNOTE_FAMILY_NAME,
+                        GENERIC_KEYNOTE_NUMBER_PARAMETER,
+                        GENERIC_KEYNOTE_TEXT_PARAMETER
+                    )
+                )
+            symbol = duplicate_family_symbol(target_doc, base_symbol, key)
+            if symbol is None:
+                raise Exception("Revit did not return the duplicated Generic Annotation type.")
+            summary["createdCount"] += 1
+
+        changed, migrated = set_generic_annotation_symbol_values(
+            symbol,
+            key,
+            text,
+            leader_arrowhead_type
+        )
+        if changed:
+            summary["updatedCount"] += 1
+        if migrated:
+            summary["migratedCount"] += 1
+
+        try:
+            if not symbol.IsActive:
+                symbol.Activate()
+                target_doc.Regenerate()
+        except Exception as exc:
+            raise Exception("Could not activate Generic Annotation type '{0}': {1}".format(key, exc))
+
+        transaction.Commit()
+    except Exception as exc:
+        try:
+            transaction.RollBack()
+        except:
+            pass
+        return None, summary, safe_str(exc)
+
+    return symbol, summary, ""
+
+
+def place_generic_annotation_keynote(uiapp, target_doc, place_payload, keynote_payload):
+    place_payload = place_payload or {}
+    entry_id = safe_str(place_payload.get("id")).strip()
+    key = safe_unicode(place_payload.get("key")).strip()
+
+    if not key:
+        return {
+            "status": "warning",
+            "message": "Save this keynote with a key before placing it in Revit.",
+        }
+
+    entry = get_keynote_payload_entry(keynote_payload, entry_id, key)
+    if entry is None:
+        return {
+            "status": "warning",
+            "message": "Save this keynote before placing it in Revit.",
+        }
+
+    uidoc, active_document_error = get_active_uidocument(uiapp, target_doc)
+    if uidoc is None:
+        return {
+            "status": "warning",
+            "message": active_document_error,
+        }
+
+    text = safe_unicode(entry.get("text")).strip()
+    symbol, summary, prepare_error = ensure_generic_annotation_keynote_symbol(target_doc, key, text)
+    if symbol is None:
+        return {
+            "status": "warning",
+            "message": "Could not prepare Generic Annotation keynote '{0}': {1}".format(key, prepare_error),
+            "genericAnnotationSync": summary,
+        }
+
+    try:
+        if hasattr(uidoc, "CanPlaceElementType") and not uidoc.CanPlaceElementType(symbol):
+            return {
+                "status": "warning",
+                "message": "Revit cannot place Generic Annotation keynote '{0}' in the active view.".format(key),
+                "genericAnnotationSync": summary,
+            }
+    except:
+        pass
+
+    try:
+        uidoc.PromptForFamilyInstancePlacement(symbol)
+    except Exception as exc:
+        try:
+            exception_name = safe_str(exc.GetType().Name)
+        except:
+            exception_name = exc.__class__.__name__
+
+        if exception_name == "OperationCanceledException":
+            return {
+                "status": "ready",
+                "message": "Finished Generic Annotation keynote placement for key '{0}'.".format(key),
+                "genericAnnotationSync": summary,
+            }
+
+        return {
+            "status": "warning",
+            "message": "Could not place Generic Annotation keynote '{0}': {1}".format(key, safe_str(exc)),
+            "genericAnnotationSync": summary,
+        }
+
+    return {
+        "status": "ready",
+        "message": "Finished Generic Annotation keynote placement for key '{0}'.".format(key),
+        "genericAnnotationSync": summary,
+    }
+
+
 # ____________________________________________________________________ EXTERNAL EVENT
 class KeynoteManagerEventHandler(IExternalEventHandler):
     def __init__(self):
@@ -1837,6 +2607,10 @@ class KeynoteManagerEventHandler(IExternalEventHandler):
 
     def queue_place_user_keynote(self, payload):
         self.pending_action = "placeUserKeynote"
+        self.pending_payload = payload
+
+    def queue_place_generic_annotation(self, payload):
+        self.pending_action = "placeGenericAnnotation"
         self.pending_payload = payload
 
     def clear_pending(self):
@@ -1868,6 +2642,11 @@ class KeynoteManagerEventHandler(IExternalEventHandler):
 
         if action == "placeUserKeynote":
             result = place_user_keynote(uiapp, window.document, payload, window.keynote_payload)
+            window.send_status(result.get("status"), result.get("message"))
+            return
+
+        if action == "placeGenericAnnotation":
+            result = place_generic_annotation_keynote(uiapp, window.document, payload, window.keynote_payload)
             window.send_status(result.get("status"), result.get("message"))
             return
 
@@ -2161,6 +2940,19 @@ class KeynoteManagerWindow(Window):
                 )
             )
             self.raise_external_event("place user keynote")
+            return
+
+        if message_type == "placeGenericAnnotation":
+            place_payload = message.get("payload") or {}
+            key = safe_unicode(place_payload.get("key")).strip()
+            self.event_handler.queue_place_generic_annotation(place_payload)
+            self.send_status(
+                "warning",
+                "Preparing Generic Annotation keynote placement{0}...".format(
+                    key and " for key '{0}'".format(key) or ""
+                )
+            )
+            self.raise_external_event("place generic annotation keynote")
             return
 
         if message_type == "closeWindow":

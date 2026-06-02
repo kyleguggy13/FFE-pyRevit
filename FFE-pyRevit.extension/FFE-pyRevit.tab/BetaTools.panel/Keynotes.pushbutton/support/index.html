@@ -26,7 +26,7 @@
       <header class="title-card">
         <div class="brand-copy">
           <p class="eyebrow">FFE-PYREVIT v1.13.1</p>
-          <h1>KEYNOTE MANAGER v0.7</h1>
+          <h1>KEYNOTE MANAGER v0.9</h1>
           <p class="meta-line">
             <span id="doc-title">Waiting for Revit document</span>
             <span id="dirty-state" data-dirty="false">NO CHANGES</span>
@@ -123,6 +123,16 @@
         </aside>
 
         <section class="notes-panel" aria-labelledby="notes-title">
+          <div class="placement-toolbar" aria-label="Keynote placement settings">
+            <label class="placement-mode-field" for="placement-mode-select">
+              <span>Place As</span>
+              <select id="placement-mode-select" class="form-select form-select-sm">
+                <option value="userKeynote" selected>User Keynote</option>
+                <option value="genericAnnotation">Generic Annotation</option>
+              </select>
+            </label>
+          </div>
+
           <div class="selected-division-card">
             <div class="dropdown division-select">
               <button
