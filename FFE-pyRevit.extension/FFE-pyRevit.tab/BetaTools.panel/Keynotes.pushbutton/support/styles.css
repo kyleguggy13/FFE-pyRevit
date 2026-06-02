@@ -637,8 +637,43 @@ h2 {
 
 .notes-panel {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 12px;
+}
+
+.placement-toolbar {
+  min-width: 0;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.placement-mode-field {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink-2);
+  font-size: var(--t-em-xs);
+  font-weight: var(--w-regular);
+  text-transform: uppercase;
+}
+
+.placement-mode-field select {
+  width: auto;
+  min-width: 158px;
+  min-height: 30px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background-color: var(--page-3);
+  color: var(--ink-1);
+  font-size: var(--t-em-sm);
+  text-transform: none;
+  box-shadow: inset 0 0 0 1px var(--divider-soft);
+}
+
+.placement-mode-field select:focus {
+  outline: 2px solid rgba(82, 108, 165, 0.26);
+  border-color: var(--accent);
+  box-shadow: none;
 }
 
 .selected-division-card {
