@@ -94,6 +94,8 @@ from Autodesk.Revit.DB import (
     Material,
     ModelPathUtils,
     Transaction,
+    Viewport,
+    ViewSheet,
     WorksetKind,
 )
 from Autodesk.Revit.UI import ExternalEvent, IExternalEventHandler, PostableCommand, RevitCommandId
@@ -1708,6 +1710,490 @@ def collect_sheet_visible_keynotes(target_doc):
     return result
 
 
+def is_valid_element_id_value(value):
+    try:
+        return int(value) > 0
+    except:
+        return bool(value and safe_str(value) not in ["", "-1"])
+
+
+def get_document_central_path(target_doc):
+    if target_doc is None:
+        return ""
+
+    try:
+        model_path = target_doc.GetWorksharingCentralModelPath()
+        if model_path:
+            path = safe_str(ModelPathUtils.ConvertModelPathToUserVisiblePath(model_path)).strip()
+            if path:
+                return path
+    except:
+        pass
+
+    return ""
+
+
+def get_document_path(target_doc):
+    if target_doc is None:
+        return ""
+
+    try:
+        return safe_str(target_doc.PathName).strip()
+    except:
+        return ""
+
+
+def get_document_analytics_identity(target_doc):
+    title = get_document_title(target_doc)
+    central_path = get_document_central_path(target_doc)
+    document_path = get_document_path(target_doc)
+    key_source = "title"
+    key_value = title
+
+    if central_path:
+        key_source = "centralPath"
+        key_value = central_path
+    elif document_path:
+        key_source = "path"
+        key_value = document_path
+
+    if key_source == "title":
+        document_key = "title:{0}".format(title)
+    else:
+        document_key = normalize_path(key_value)
+
+    return {
+        "documentKey": document_key,
+        "documentKeySource": key_source,
+        "documentTitle": title,
+        "documentPath": document_path,
+        "centralPath": central_path,
+    }
+
+
+def element_is_sheet(element):
+    if element is None:
+        return False
+
+    try:
+        if isinstance(element, ViewSheet):
+            return True
+    except:
+        pass
+
+    try:
+        safe_unicode(element.SheetNumber)
+        return True
+    except:
+        return False
+
+
+def make_sheet_analytics_info(sheet):
+    if sheet is None:
+        return None
+
+    try:
+        sheet_id = safe_str(get_element_id_key(sheet))
+    except:
+        sheet_id = ""
+
+    try:
+        sheet_number = safe_unicode(sheet.SheetNumber).strip()
+    except:
+        sheet_number = ""
+
+    sheet_name = get_element_name(sheet)
+
+    if not (sheet_id or sheet_number or sheet_name):
+        return None
+
+    return {
+        "id": sheet_id,
+        "number": sheet_number,
+        "name": sheet_name,
+    }
+
+
+def make_view_analytics_info(view):
+    if view is None:
+        return None
+
+    try:
+        view_id = safe_str(get_element_id_key(view))
+    except:
+        view_id = ""
+
+    view_name = get_element_name(view)
+    if not (view_id or view_name):
+        return None
+
+    return {
+        "id": view_id,
+        "name": view_name,
+    }
+
+
+def sheet_analytics_key(sheet_info):
+    if not sheet_info:
+        return ""
+    return safe_str(sheet_info.get("id")).strip() or safe_unicode(sheet_info.get("number")).strip()
+
+
+def add_sheet_to_view_lookup(result, view_id_value, sheet_info):
+    if not is_valid_element_id_value(view_id_value):
+        return
+
+    sheet_key = sheet_analytics_key(sheet_info)
+    if not sheet_key:
+        return
+
+    if view_id_value not in result:
+        result[view_id_value] = []
+
+    for existing in result[view_id_value]:
+        if sheet_analytics_key(existing) == sheet_key:
+            return
+
+    result[view_id_value].append(sheet_info)
+
+
+def build_view_sheet_lookup(target_doc):
+    result = {}
+    if target_doc is None:
+        return result
+
+    try:
+        viewports = (
+            FilteredElementCollector(target_doc)
+            .OfClass(Viewport)
+            .WhereElementIsNotElementType()
+        )
+    except:
+        return result
+
+    for viewport in viewports:
+        try:
+            view_id = viewport.ViewId
+            view_id_value = get_element_id_value(view_id)
+            sheet = target_doc.GetElement(viewport.SheetId)
+            sheet_info = make_sheet_analytics_info(sheet)
+            add_sheet_to_view_lookup(result, view_id_value, sheet_info)
+        except:
+            continue
+
+    return result
+
+
+def get_element_owner_view(target_doc, element):
+    try:
+        owner_view_id = element.OwnerViewId
+    except:
+        return None, None
+
+    owner_view_id_value = get_element_id_value(owner_view_id)
+    if not is_valid_element_id_value(owner_view_id_value):
+        return None, None
+
+    try:
+        return target_doc.GetElement(owner_view_id), owner_view_id_value
+    except:
+        return None, owner_view_id_value
+
+
+def get_element_sheet_infos(target_doc, element, view_sheet_lookup):
+    owner_view, owner_view_id_value = get_element_owner_view(target_doc, element)
+    if owner_view is None and not is_valid_element_id_value(owner_view_id_value):
+        return [], None
+
+    view_info = make_view_analytics_info(owner_view)
+    if element_is_sheet(owner_view):
+        sheet_info = make_sheet_analytics_info(owner_view)
+        return sheet_info and [sheet_info] or [], view_info
+
+    return list(view_sheet_lookup.get(owner_view_id_value) or []), view_info
+
+
+def make_keynote_analytics_row(key, entry):
+    return {
+        "keynoteKey": safe_unicode(key).strip(),
+        "keynoteText": safe_unicode((entry or {}).get("text")).strip(),
+        "parentKey": safe_unicode((entry or {}).get("parentKey")).strip(),
+        "inLibrary": bool(entry),
+        "placed": False,
+        "placedCount": 0,
+        "userKeynoteCount": 0,
+        "genericAnnotationCount": 0,
+        "sheetCount": 0,
+        "unsheetedCount": 0,
+        "sheets": [],
+        "_sheetMap": {},
+    }
+
+
+def analytics_sheet_sort_key(sheet_info):
+    if not sheet_info:
+        return ""
+    return "{0}|{1}|{2}".format(
+        safe_unicode(sheet_info.get("number")).strip(),
+        safe_unicode(sheet_info.get("name")).strip(),
+        safe_unicode(sheet_info.get("id")).strip()
+    ).lower()
+
+
+def sort_analytics_rows(rows):
+    return sorted(rows, key=lambda row: safe_unicode(row.get("keynoteKey")).lower())
+
+
+def record_sheet_analytics(row, sheet_info, source_type, view_info):
+    sheet_key = sheet_analytics_key(sheet_info)
+    if not sheet_key:
+        row["unsheetedCount"] += 1
+        return
+
+    sheet_map = row["_sheetMap"]
+    if sheet_key not in sheet_map:
+        sheet_map[sheet_key] = {
+            "id": safe_str(sheet_info.get("id")).strip(),
+            "number": safe_unicode(sheet_info.get("number")).strip(),
+            "name": safe_unicode(sheet_info.get("name")).strip(),
+            "count": 0,
+            "userKeynoteCount": 0,
+            "genericAnnotationCount": 0,
+            "viewIds": [],
+            "viewNames": [],
+            "_viewIdMap": {},
+            "_viewNameMap": {},
+        }
+
+    sheet_row = sheet_map[sheet_key]
+    sheet_row["count"] += 1
+    if source_type == "userKeynote":
+        sheet_row["userKeynoteCount"] += 1
+    elif source_type == "genericAnnotation":
+        sheet_row["genericAnnotationCount"] += 1
+
+    if view_info:
+        view_id = safe_str(view_info.get("id")).strip()
+        view_name = safe_unicode(view_info.get("name")).strip()
+        if view_id and view_id not in sheet_row["_viewIdMap"]:
+            sheet_row["_viewIdMap"][view_id] = True
+            sheet_row["viewIds"].append(view_id)
+        if view_name and view_name not in sheet_row["_viewNameMap"]:
+            sheet_row["_viewNameMap"][view_name] = True
+            sheet_row["viewNames"].append(view_name)
+
+
+def record_keynote_analytics_placement(rows_by_key, entry_by_key, key, source_type, element, target_doc, view_sheet_lookup):
+    key = safe_unicode(key).strip()
+    if not key:
+        return False
+
+    if key not in rows_by_key:
+        rows_by_key[key] = make_keynote_analytics_row(key, entry_by_key.get(key))
+
+    row = rows_by_key[key]
+    row["placed"] = True
+    row["placedCount"] += 1
+    if source_type == "userKeynote":
+        row["userKeynoteCount"] += 1
+    elif source_type == "genericAnnotation":
+        row["genericAnnotationCount"] += 1
+
+    sheet_infos, view_info = get_element_sheet_infos(target_doc, element, view_sheet_lookup)
+    if sheet_infos:
+        for sheet_info in sheet_infos:
+            record_sheet_analytics(row, sheet_info, source_type, view_info)
+    else:
+        row["unsheetedCount"] += 1
+
+    return True
+
+
+def finalize_keynote_analytics_rows(rows_by_key):
+    rows = []
+    for row in rows_by_key.values():
+        sheet_values = []
+        for sheet_row in row.get("_sheetMap", {}).values():
+            sheet_row.pop("_viewIdMap", None)
+            sheet_row.pop("_viewNameMap", None)
+            sheet_row["viewIds"] = sorted(sheet_row.get("viewIds") or [])
+            sheet_row["viewNames"] = sorted(sheet_row.get("viewNames") or [])
+            sheet_values.append(sheet_row)
+        sheet_values = sorted(sheet_values, key=analytics_sheet_sort_key)
+        row["sheetCount"] = len(sheet_values)
+        row["sheets"] = sheet_values
+        row["placed"] = bool(row.get("placedCount"))
+        row.pop("_sheetMap", None)
+        rows.append(row)
+
+    return sort_analytics_rows(rows)
+
+
+def summarize_keynote_analytics_rows(rows):
+    sheet_keys = set()
+    placed_key_count = 0
+    placed_count = 0
+    user_keynote_count = 0
+    generic_annotation_count = 0
+    unsheeted_count = 0
+    orphan_key_count = 0
+    placed_key_map = {}
+
+    for row in rows or []:
+        key = safe_unicode(row.get("keynoteKey")).strip()
+        if row.get("placed"):
+            placed_key_count += 1
+            if key:
+                placed_key_map[key] = True
+        if row.get("placed") and not row.get("inLibrary"):
+            orphan_key_count += 1
+        placed_count += int(row.get("placedCount") or 0)
+        user_keynote_count += int(row.get("userKeynoteCount") or 0)
+        generic_annotation_count += int(row.get("genericAnnotationCount") or 0)
+        unsheeted_count += int(row.get("unsheetedCount") or 0)
+        for sheet in row.get("sheets") or []:
+            sheet_key = sheet_analytics_key(sheet)
+            if sheet_key:
+                sheet_keys.add(sheet_key)
+
+    return {
+        "placedKeyCount": placed_key_count,
+        "placedCount": placed_count,
+        "userKeynoteCount": user_keynote_count,
+        "genericAnnotationCount": generic_annotation_count,
+        "sheetCount": len(sheet_keys),
+        "unsheetedCount": unsheeted_count,
+        "orphanKeyCount": orphan_key_count,
+        "placedKeyMap": placed_key_map,
+    }
+
+
+def collect_keynote_analytics(target_doc, keynote_payload):
+    keynote_payload = keynote_payload or {}
+    entry_by_key = {}
+    rows_by_key = {}
+    view_sheet_lookup = build_view_sheet_lookup(target_doc)
+
+    for entry in keynote_payload.get("entries") or []:
+        key = safe_unicode(entry.get("key")).strip()
+        if not key:
+            continue
+        entry_by_key[key] = entry
+        if key not in rows_by_key:
+            rows_by_key[key] = make_keynote_analytics_row(key, entry)
+
+    user_keynote_scanned_count = 0
+    generic_annotation_scanned_count = 0
+    skipped_count = 0
+
+    tags = (
+        FilteredElementCollector(target_doc)
+        .OfCategory(BuiltInCategory.OST_KeynoteTags)
+        .WhereElementIsNotElementType()
+    )
+    for tag in tags:
+        key = safe_unicode(get_keynote_tag_key(tag)).strip()
+        if record_keynote_analytics_placement(
+            rows_by_key,
+            entry_by_key,
+            key,
+            "userKeynote",
+            tag,
+            target_doc,
+            view_sheet_lookup
+        ):
+            user_keynote_scanned_count += 1
+        else:
+            skipped_count += 1
+
+    for instance, symbol in iter_generic_annotation_keynote_instances(target_doc):
+        key = safe_unicode(get_generic_annotation_symbol_key(symbol)).strip()
+        if record_keynote_analytics_placement(
+            rows_by_key,
+            entry_by_key,
+            key,
+            "genericAnnotation",
+            instance,
+            target_doc,
+            view_sheet_lookup
+        ):
+            generic_annotation_scanned_count += 1
+        else:
+            skipped_count += 1
+
+    rows = finalize_keynote_analytics_rows(rows_by_key)
+    summary = summarize_keynote_analytics_rows(rows)
+    identity = get_document_analytics_identity(target_doc)
+
+    analytics = {
+        "libraryKey": keynote_payload.get("libraryKey") or "",
+        "displayPath": keynote_payload.get("displayPath") or keynote_payload.get("keynotePath") or "",
+        "keynotePath": keynote_payload.get("keynotePath") or "",
+        "encoding": keynote_payload.get("encoding") or "utf-8",
+        "lineEnding": keynote_payload.get("lineEnding") or "\r\n",
+        "fileHash": keynote_payload.get("fileHash") or "",
+        "lastWriteUtc": keynote_payload.get("lastWriteUtc"),
+        "entries": keynote_payload.get("entries") or [],
+        "entryCount": len(keynote_payload.get("entries") or []),
+        "analyticsRows": rows,
+        "analyticsRowCount": len(rows),
+        "collectedAt": get_generated_at(),
+        "userKeynoteScannedCount": user_keynote_scanned_count,
+        "genericAnnotationScannedCount": generic_annotation_scanned_count,
+        "skippedCount": skipped_count,
+    }
+    analytics.update(identity)
+    analytics.update(summary)
+    return analytics
+
+
+def collect_keynote_analytics_payload(target_doc):
+    try:
+        keynote_payload = build_keynote_payload(target_doc)
+        if not keynote_payload.get("libraryKey"):
+            return {
+                "status": "error",
+                "message": keynote_payload.get("message") or "No keynote library is available for analytics.",
+                "issues": keynote_payload.get("issues") or [],
+            }
+
+        if has_error_issues(keynote_payload.get("issues") or []):
+            return {
+                "status": "error",
+                "message": "Fix keynote file validation errors before collecting analytics.",
+                "issues": keynote_payload.get("issues") or [],
+            }
+
+        analytics = collect_keynote_analytics(target_doc, keynote_payload)
+        message = (
+            "Collected analytics for {0} placed keynote key(s), {1} placed annotation(s), and {2} sheet(s)."
+        ).format(
+            analytics.get("placedKeyCount", 0),
+            analytics.get("placedCount", 0),
+            analytics.get("sheetCount", 0)
+        )
+        if analytics.get("orphanKeyCount"):
+            message += " Found {0} placed key(s) that are not in the keynote file.".format(
+                analytics.get("orphanKeyCount")
+            )
+
+        return {
+            "status": "ready",
+            "message": message,
+            "analytics": analytics,
+        }
+    except Exception as exc:
+        try:
+            LOGGER.debug(traceback.format_exc())
+        except:
+            pass
+        return {
+            "status": "error",
+            "message": "Could not collect keynote analytics: {0}".format(safe_str(exc)),
+            "issues": [make_issue("error", safe_str(exc), "", None, "analyticsCollectionFailed")],
+        }
+
+
 def iter_keynote_reference_candidates(target_doc):
     seen = set()
 
@@ -2605,6 +3091,10 @@ class KeynoteManagerEventHandler(IExternalEventHandler):
         self.pending_action = "save"
         self.pending_payload = payload
 
+    def queue_collect_analytics(self):
+        self.pending_action = "collectAnalytics"
+        self.pending_payload = None
+
     def queue_place_user_keynote(self, payload):
         self.pending_action = "placeUserKeynote"
         self.pending_payload = payload
@@ -2638,6 +3128,11 @@ class KeynoteManagerEventHandler(IExternalEventHandler):
             if result.get("payload"):
                 window.set_payload(result.get("payload"))
             window.send_save_result(result)
+            return
+
+        if action == "collectAnalytics":
+            result = collect_keynote_analytics_payload(window.document)
+            window.send_analytics_result(result)
             return
 
         if action == "placeUserKeynote":
@@ -2866,10 +3361,13 @@ class KeynoteManagerWindow(Window):
     def send_save_result(self, result):
         self.call_keynote_app("handleSaveResult", result or {})
 
+    def send_analytics_result(self, result):
+        self.call_keynote_app("handleAnalyticsResult", result or {})
+
     def request_refresh_from_app(self):
         self.call_keynote_app("requestRefresh", {})
 
-    def raise_external_event(self, action_name):
+    def raise_external_event(self, action_name, failure_target="save"):
         try:
             self.external_event.Raise()
         except Exception as exc:
@@ -2878,7 +3376,10 @@ class KeynoteManagerWindow(Window):
                 "status": "error",
                 "message": "Could not raise the Revit {0} event: {1}".format(action_name, exc),
             }
-            self.send_save_result(result)
+            if failure_target == "analytics":
+                self.send_analytics_result(result)
+            else:
+                self.send_save_result(result)
 
     def on_web_message_received(self, sender, args):
         raw_message = ""
@@ -2927,6 +3428,12 @@ class KeynoteManagerWindow(Window):
             self.event_handler.queue_save(message.get("payload") or {})
             self.send_status("warning", "Saving keynote file and reloading Revit...")
             self.raise_external_event("save")
+            return
+
+        if message_type == "collectAnalytics":
+            self.event_handler.queue_collect_analytics()
+            self.send_status("warning", "Collecting keynote analytics from the active Revit document...")
+            self.raise_external_event("collect analytics", "analytics")
             return
 
         if message_type == "placeUserKeynote":

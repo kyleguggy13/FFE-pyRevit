@@ -21,6 +21,8 @@
     localEditClaimSignature: "",
     syncIssues: [],
     operationIssues: [],
+    analyticsCollecting: false,
+    lastAnalyticsResult: null,
     remotePending: false,
     allowNextLoad: false,
     collapsedEntryIds: {},
@@ -1336,6 +1338,7 @@
 
   function renderSaveState() {
     var saveButton = byId("save-data");
+    var analyticsButton = byId("collect-analytics");
     var issues = validateAll();
     var canSave = Boolean(
       state.payload &&
@@ -1349,6 +1352,10 @@
     if (saveButton) {
       saveButton.disabled = !canSave;
       saveButton.textContent = state.saving ? "Saving..." : "Save";
+    }
+    if (analyticsButton) {
+      analyticsButton.disabled = state.analyticsCollecting || !state.payload || !state.payload.libraryKey;
+      analyticsButton.textContent = state.analyticsCollecting ? "Collecting..." : "Collect Analytics";
     }
   }
 
@@ -1452,6 +1459,111 @@
       clientId: text(settings.clientId),
       clientName: text(settings.clientName)
     };
+  }
+
+  function analyticsRowsFromResult(analytics) {
+    return (analytics && (analytics.analyticsRows || analytics.rows)) || [];
+  }
+
+  function analyticsPlacedKeyMap(analytics) {
+    var map = {};
+    if (analytics && analytics.placedKeyMap) {
+      Object.keys(analytics.placedKeyMap).forEach(function (key) {
+        var normalizedKey = trim(key);
+        if (normalizedKey && analytics.placedKeyMap[key]) {
+          map[normalizedKey] = true;
+        }
+      });
+      return map;
+    }
+
+    analyticsRowsFromResult(analytics).forEach(function (row) {
+      var key = trim(row && row.keynoteKey);
+      if (key && row && Number(row.placedCount || 0) > 0) {
+        map[key] = true;
+      }
+    });
+    return map;
+  }
+
+  function analyticsSummary(analytics) {
+    analytics = analytics || {};
+    return {
+      entryCount: Number(analytics.entryCount || 0),
+      analyticsRowCount: Number(analytics.analyticsRowCount || analyticsRowsFromResult(analytics).length || 0),
+      placedKeyCount: Number(analytics.placedKeyCount || 0),
+      placedCount: Number(analytics.placedCount || 0),
+      userKeynoteCount: Number(analytics.userKeynoteCount || 0),
+      genericAnnotationCount: Number(analytics.genericAnnotationCount || 0),
+      sheetCount: Number(analytics.sheetCount || 0),
+      unsheetedCount: Number(analytics.unsheetedCount || 0),
+      orphanKeyCount: Number(analytics.orphanKeyCount || 0),
+      skippedCount: Number(analytics.skippedCount || 0),
+      collectedAt: text(analytics.collectedAt)
+    };
+  }
+
+  function applyAnalyticsResultToUi(analytics) {
+    state.lastAnalyticsResult = analytics || null;
+    state.sheetVisibleKeynotes = analyticsPlacedKeyMap(analytics);
+    renderAll();
+  }
+
+  function analyticsSyncPayload(analytics) {
+    var client = currentClient();
+    analytics = analytics || {};
+    return {
+      libraryKey: analytics.libraryKey || (state.payload && state.payload.libraryKey) || "",
+      documentKey: analytics.documentKey || "",
+      documentTitle: analytics.documentTitle || "",
+      documentPath: analytics.documentPath || "",
+      centralPath: analytics.centralPath || "",
+      documentKeySource: analytics.documentKeySource || "",
+      summary: analyticsSummary(analytics),
+      entries: analyticsRowsFromResult(analytics),
+      clientId: client.clientId,
+      clientName: client.clientName
+    };
+  }
+
+  function ensureLibraryBeforeAnalyticsSync(db, analytics) {
+    var client = currentClient();
+
+    if (!db || typeof db.ensureLibrary !== "function") {
+      return Promise.reject(new Error("The Supabase library API was not available."));
+    }
+
+    return db.ensureLibrary({
+      libraryKey: analytics.libraryKey || (state.payload && state.payload.libraryKey) || "",
+      displayPath: analytics.displayPath || analytics.keynotePath || "",
+      keynotePath: analytics.keynotePath || "",
+      encoding: analytics.encoding || "utf-8",
+      lineEnding: analytics.lineEnding || "\r\n",
+      entries: analytics.entries || [],
+      clientId: client.clientId,
+      clientName: client.clientName
+    });
+  }
+
+  function syncAnalyticsResult(analytics) {
+    var db = dbManager();
+    var payload = analyticsSyncPayload(analytics);
+
+    if (!db || typeof db.syncAnalytics !== "function") {
+      return Promise.reject(new Error("The Supabase analytics API was not available."));
+    }
+
+    if (!payload.libraryKey) {
+      return Promise.reject(new Error("No keynote library key was available for analytics sync."));
+    }
+
+    if (!payload.documentKey) {
+      return Promise.reject(new Error("No Revit document key was available for analytics sync."));
+    }
+
+    return ensureLibraryBeforeAnalyticsSync(db, analytics).then(function () {
+      return db.syncAnalytics(payload);
+    });
   }
 
   function findBaselineEntry(entry) {
@@ -2622,6 +2734,104 @@
     refreshData();
   }
 
+  function collectAnalytics() {
+    var settings = (state.payload && state.payload.supabase) || {};
+    var db = dbManager();
+
+    if (state.analyticsCollecting) {
+      return;
+    }
+
+    if (!state.payload || !state.payload.libraryKey) {
+      setStatus({ status: "error", message: "No keynote library is available for analytics." });
+      return;
+    }
+
+    if (!settings.configured) {
+      setStatus({ status: "warning", message: "Supabase is not configured, so analytics cannot be collected." });
+      return;
+    }
+
+    if (state.dbInitializing) {
+      setStatus({ status: "warning", message: "Supabase is still attaching. Try collecting analytics again in a moment." });
+      return;
+    }
+
+    if (!state.dbReady) {
+      setStatus({ status: "warning", message: "Supabase is not ready. Refresh or configure Supabase before collecting analytics." });
+      return;
+    }
+
+    if (!db || typeof db.syncAnalytics !== "function") {
+      setStatus({ status: "warning", message: "The Supabase analytics API did not load." });
+      return;
+    }
+
+    state.analyticsCollecting = true;
+    renderSaveState();
+    setStatus({ status: "warning", message: "Collecting keynote analytics from Revit..." });
+
+    if (!postWebViewMessage({ type: "collectAnalytics" })) {
+      state.analyticsCollecting = false;
+      renderSaveState();
+    }
+  }
+
+  function handleAnalyticsResult(result) {
+    var analytics;
+
+    result = result || {};
+    analytics = result.analytics || null;
+
+    if ((result.status || "") !== "ready" || !analytics) {
+      state.analyticsCollecting = false;
+      state.operationIssues = (result.issues || []).map(function (issue) {
+        return makeIssue(
+          "warning",
+          issue.message || result.message || "Could not collect keynote analytics.",
+          issue.key || "",
+          issue.code || "analyticsCollectionFailed"
+        );
+      });
+      renderValidation();
+      renderSaveState();
+      setStatus({
+        status: result.status || "error",
+        message: result.message || "Could not collect keynote analytics."
+      });
+      return;
+    }
+
+    applyAnalyticsResultToUi(analytics);
+    setStatus({ status: "syncing", message: "Syncing keynote analytics to Supabase..." });
+
+    syncAnalyticsResult(analytics).then(function (syncResult) {
+      state.analyticsCollecting = false;
+      state.operationIssues = [];
+      renderValidation();
+      renderSaveState();
+      setStatus({
+        status: "ready",
+        message: (result.message || "Collected keynote analytics.") + " Supabase sync complete."
+      });
+      return syncResult;
+    }).catch(function (error) {
+      state.analyticsCollecting = false;
+      state.operationIssues = [makeIssue(
+        "warning",
+        "Collected keynote analytics, but Supabase sync failed: " + (error.message || error),
+        "",
+        "analyticsSyncFailed"
+      )];
+      renderValidation();
+      renderSaveState();
+      setStatus({
+        status: "warning",
+        message: "Collected keynote analytics, but Supabase sync failed."
+      });
+    });
+  }
+
   function saveData() {
     var issues = validateAll();
     var payload;
@@ -2855,6 +3065,7 @@
     bindClick("delete-row", deleteSelected);
     bindClick("configure-supabase", configureSupabase);
     bindClick("refresh-data", refreshData);
+    bindClick("collect-analytics", collectAnalytics);
     bindClick("save-data", saveData);
     bindClick("close-window", closeWindow);
 
@@ -2866,6 +3077,7 @@
     loadData: loadData,
     setStatus: setStatus,
     handleSaveResult: handleSaveResult,
+    handleAnalyticsResult: handleAnalyticsResult,
     requestRefresh: requestRefresh
   };
 

@@ -158,6 +158,22 @@
     });
   }
 
+  function syncAnalytics(payload) {
+    payload = payload || {};
+    return rpc("sync_keynote_analytics", {
+      p_library_key: payload.libraryKey,
+      p_document_key: payload.documentKey,
+      p_document_title: payload.documentTitle || "",
+      p_document_path: payload.documentPath || "",
+      p_central_path: payload.centralPath || "",
+      p_document_key_source: payload.documentKeySource || "",
+      p_summary: payload.summary || {},
+      p_entries: payload.entries || [],
+      p_client_id: payload.clientId || "",
+      p_client_name: payload.clientName || ""
+    }, { raw: true });
+  }
+
   function getEditClaims(libraryKey) {
     return rpc("get_keynote_edit_claims", {
       p_library_key: libraryKey
@@ -279,6 +295,7 @@
     getSnapshot: getSnapshot,
     syncFileSnapshot: syncFileSnapshot,
     saveChanges: saveChanges,
+    syncAnalytics: syncAnalytics,
     getEditClaims: getEditClaims,
     setEditClaims: setEditClaims,
     subscribeLibrary: subscribeLibrary,
