@@ -165,7 +165,7 @@ h2 {
   width: min(100%, 1160px);
   min-height: calc(100vh - 72px);
   margin: 10px auto;
-  padding: 14px;
+  padding: 8px;
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   gap: 12px;
@@ -178,7 +178,7 @@ h2 {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 4px 2px 7px;
+  padding: 1px 12px 7px;
   border: 0;
   border-bottom: 1px solid var(--divider-soft);
   border-radius: 0;
@@ -959,6 +959,7 @@ h2 {
 .note-action-cell {
   padding: 0;
   border-right: 1px solid var(--divider-soft);
+  border-left: 1px solid var(--divider-soft);
   text-align: center;
   vertical-align: middle;
 }
@@ -1101,6 +1102,7 @@ h2 {
 
 .note-text-input {
   min-height: fit-content;
+  border-right: 1px solid var(--divider-soft);
   overflow: hidden;
   line-height: 1.25;
   resize: vertical;
