@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 __title__ = "FFE-Keynotes"
-__version__ = "Version = v0.9"
+__version__ = "Version = v0.10"
 __persistentengine__ = True
 __min_revit_ver__ = 2025
-__doc__ = """Version = v0.9
-Date    = 06.02.2026
+__doc__ = """Version = v0.10
+Date    = 06.03.2026
 __________________________________________________________________
 Description:
 Persistent WebView2 keynote manager for the active Revit document's
@@ -37,6 +37,7 @@ Last update:
 - [05.29.2026] - v0.7 Improved error handling and improved UI
 - [06.02.2026] - v0.8 Added Generic Annotation keynote placement and type synchronization.
 - [06.02.2026] - v0.9 Applied the standard leader arrowhead to Generic Annotation keynote types.
+- [06.03.2026] - v0.10 Added Analyics tracking for keynote manager usage and errors.
 __________________________________________________________________
 Author: Kyle Guggenheim"""
 
