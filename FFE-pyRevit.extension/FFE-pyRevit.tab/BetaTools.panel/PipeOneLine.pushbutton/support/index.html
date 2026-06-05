@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FFE Pipe One-Line Editor</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand__mark" aria-hidden="true"></span>
+          <div>
+            <h1>Pipe One-Line</h1>
+            <p id="system-name">No system loaded</p>
+          </div>
+        </div>
+        <div class="toolbar" role="toolbar" aria-label="Diagram tools">
+          <button id="select-system" class="tool-button" title="Select piping system">Pick</button>
+          <button id="refresh" class="tool-button" title="Reload from active Revit selection">Reload</button>
+          <button id="regenerate" class="tool-button" title="Regenerate schematic layout">Auto</button>
+          <span class="divider" aria-hidden="true"></span>
+          <button id="select-mode" class="tool-button is-active" title="Select and edit">Select</button>
+          <button id="pan-mode" class="tool-button" title="Pan canvas">Pan</button>
+          <button id="zoom-out" class="icon-button" title="Zoom out">-</button>
+          <button id="zoom-in" class="icon-button" title="Zoom in">+</button>
+          <button id="fit-view" class="tool-button" title="Fit diagram">Fit</button>
+          <span class="divider" aria-hidden="true"></span>
+          <button id="add-tee" class="tool-button" title="Add tee">Tee</button>
+          <button id="add-accessory" class="tool-button" title="Add pipe accessory">Accessory</button>
+          <button id="add-equipment" class="tool-button" title="Add equipment">Equipment</button>
+          <button id="add-label" class="tool-button" title="Add label">Label</button>
+          <button id="delete-selected" class="icon-button" title="Delete selected">X</button>
+          <span class="divider" aria-hidden="true"></span>
+          <button id="undo" class="icon-button" title="Undo">Undo</button>
+          <button id="redo" class="icon-button" title="Redo">Redo</button>
+          <button id="save" class="primary-button" title="Save to Revit drafting view">Save</button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="canvas-wrap" aria-label="Pipe one-line canvas">
+          <div id="status" class="status is-info">Ready</div>
+          <svg id="diagram" class="diagram" xmlns="http://www.w3.org/2000/svg" aria-label="Editable one-line diagram">
+            <defs>
+              <pattern id="grid-pattern" width="24" height="24" patternUnits="userSpaceOnUse">
+                <path d="M 24 0 L 0 0 0 24" class="grid-line"></path>
+              </pattern>
+            </defs>
+            <rect id="grid-bg" class="grid-bg" x="0" y="0" width="2400" height="1800"></rect>
+            <g id="viewport">
+              <g id="edges"></g>
+              <g id="symbols"></g>
+              <g id="labels"></g>
+            </g>
+          </svg>
+        </section>
+
+        <aside class="inspector" aria-label="Properties">
+          <div class="panel-header">
+            <h2>Properties</h2>
+            <span id="dirty-pill" class="pill">Clean</span>
+          </div>
+          <div id="warnings" class="warnings" hidden></div>
+          <form id="property-form" class="property-form">
+            <label>
+              <span>Selection</span>
+              <input id="selected-id" type="text" readonly />
+            </label>
+            <label>
+              <span>Type</span>
+              <select id="selected-kind">
+                <option value="branch">Tee</option>
+                <option value="sizeChange">Size Change</option>
+                <option value="accessory">Accessory</option>
+                <option value="valve">Valve</option>
+                <option value="pump">Pump</option>
+                <option value="strainer">Strainer</option>
+                <option value="meter">Meter</option>
+                <option value="equipment">Equipment</option>
+                <option value="label">Label</option>
+              </select>
+            </label>
+            <label>
+              <span>Label</span>
+              <input id="selected-label" type="text" />
+            </label>
+            <label>
+              <span>Diameter</span>
+              <input id="selected-diameter" type="text" />
+            </label>
+            <label>
+              <span>Flow</span>
+              <input id="selected-flow" type="text" />
+            </label>
+            <div class="coord-row">
+              <label>
+                <span>X</span>
+                <input id="selected-x" type="number" step="1" />
+              </label>
+              <label>
+                <span>Y</span>
+                <input id="selected-y" type="number" step="1" />
+              </label>
+            </div>
+          </form>
+          <div class="panel-footer">
+            <button id="close-window" class="secondary-button">Close</button>
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <script src="site.js"></script>
+  </body>
+</html>
