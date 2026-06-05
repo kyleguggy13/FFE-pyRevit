@@ -226,6 +226,45 @@ as $$
   where l.id = p_library_id;
 $$;
 
+create or replace function public.build_keynote_snapshot_metadata(p_library_id uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select jsonb_build_object(
+    'libraryId', l.id::text,
+    'libraryKey', l.library_key,
+    'displayPath', l.display_path,
+    'encoding', l.encoding,
+    'lineEnding', l.line_ending,
+    'fileHash', l.file_hash,
+    'lastWriteUtc', l.last_write_utc,
+    'datasetVersion', l.dataset_version,
+    'entryCount', l.entry_count,
+    'updatedAt', l.updated_at,
+    'lastSavedByClientId', l.last_saved_by_client_id,
+    'lastSavedByClientName', l.last_saved_by_client_name,
+    'entries', coalesce((
+      select jsonb_agg(
+        jsonb_build_object(
+          'id', e.id::text,
+          'dbId', e.id::text,
+          'key', e.keynote_key,
+          'sortOrder', e.sort_order,
+          'rowVersion', e.row_version
+        )
+        order by e.sort_order, e.keynote_key
+      )
+      from public.keynote_entries e
+      where e.library_id = l.id
+    ), '[]'::jsonb)
+  )
+  from public.keynote_libraries l
+  where l.id = p_library_id;
+$$;
+
 create or replace function public.validate_keynote_library(p_library_id uuid)
 returns text[]
 language plpgsql
@@ -288,10 +327,10 @@ returns jsonb
 language plpgsql
 security definer
 set search_path = public
+set statement_timeout = '60s'
 as $$
 declare
   v_library_id uuid;
-  v_entry record;
   v_errors text[];
 begin
   if btrim(coalesce(p_library_key, '')) = '' then
@@ -321,34 +360,25 @@ begin
     )
     returning id into v_library_id;
 
-    for v_entry in
-      select
-        item.value ->> 'key' as key,
-        item.value ->> 'text' as keynote_text,
-        item.value ->> 'parentKey' as parent_key,
-        item.ordinality
-      from jsonb_array_elements(coalesce(p_seed_entries, '[]'::jsonb))
-        with ordinality as item(value, ordinality)
-    loop
-      insert into public.keynote_entries (
-        library_id,
-        keynote_key,
-        keynote_text,
-        parent_key,
-        sort_order,
-        updated_by_client_id,
-        updated_by_client_name
-      )
-      values (
-        v_library_id,
-        btrim(coalesce(v_entry.key, '')),
-        btrim(coalesce(v_entry.keynote_text, '')),
-        btrim(coalesce(v_entry.parent_key, '')),
-        (v_entry.ordinality - 1)::integer,
-        coalesce(p_client_id, ''),
-        coalesce(p_client_name, '')
-      );
-    end loop;
+    insert into public.keynote_entries (
+      library_id,
+      keynote_key,
+      keynote_text,
+      parent_key,
+      sort_order,
+      updated_by_client_id,
+      updated_by_client_name
+    )
+    select
+      v_library_id,
+      btrim(coalesce(item.value ->> 'key', '')),
+      btrim(coalesce(item.value ->> 'text', '')),
+      btrim(coalesce(item.value ->> 'parentKey', '')),
+      (item.ordinality - 1)::integer,
+      coalesce(p_client_id, ''),
+      coalesce(p_client_name, '')
+    from jsonb_array_elements(coalesce(p_seed_entries, '[]'::jsonb))
+      with ordinality as item(value, ordinality);
 
     v_errors := public.validate_keynote_library(v_library_id);
     if array_length(v_errors, 1) is not null then
@@ -364,7 +394,7 @@ begin
     where id = v_library_id;
   end if;
 
-  return public.build_keynote_snapshot(v_library_id)
+  return public.build_keynote_snapshot_metadata(v_library_id)
     || jsonb_build_object('status', 'ready', 'message', 'Loaded keynote library from Supabase.');
 end;
 $$;
@@ -374,6 +404,7 @@ returns jsonb
 language plpgsql
 security definer
 set search_path = public
+set statement_timeout = '60s'
 as $$
 declare
   v_library_id uuid;
@@ -536,11 +567,11 @@ returns jsonb
 language plpgsql
 security definer
 set search_path = public
+set statement_timeout = '60s'
 as $$
 declare
   v_library_id uuid;
   v_existing public.keynote_libraries%rowtype;
-  v_entry record;
   v_errors text[];
 begin
   if btrim(coalesce(p_library_key, '')) = '' then
@@ -553,7 +584,7 @@ begin
   where library_key = p_library_key;
 
   if found and coalesce(p_file_hash, '') <> '' and v_existing.file_hash = coalesce(p_file_hash, '') then
-    return public.build_keynote_snapshot(v_existing.id)
+    return public.build_keynote_snapshot_metadata(v_existing.id)
       || jsonb_build_object('status', 'ready', 'message', 'Shared keynote file snapshot is already mirrored.');
   end if;
 
@@ -590,34 +621,25 @@ begin
   delete from public.keynote_entries
   where library_id = v_library_id;
 
-  for v_entry in
-    select
-      item.value ->> 'key' as key,
-      item.value ->> 'text' as keynote_text,
-      item.value ->> 'parentKey' as parent_key,
-      item.ordinality
-    from jsonb_array_elements(coalesce(p_entries, '[]'::jsonb))
-      with ordinality as item(value, ordinality)
-  loop
-    insert into public.keynote_entries (
-      library_id,
-      keynote_key,
-      keynote_text,
-      parent_key,
-      sort_order,
-      updated_by_client_id,
-      updated_by_client_name
-    )
-    values (
-      v_library_id,
-      btrim(coalesce(v_entry.key, '')),
-      btrim(coalesce(v_entry.keynote_text, '')),
-      btrim(coalesce(v_entry.parent_key, '')),
-      (v_entry.ordinality - 1)::integer,
-      coalesce(p_client_id, ''),
-      coalesce(p_client_name, '')
-    );
-  end loop;
+  insert into public.keynote_entries (
+    library_id,
+    keynote_key,
+    keynote_text,
+    parent_key,
+    sort_order,
+    updated_by_client_id,
+    updated_by_client_name
+  )
+  select
+    v_library_id,
+    btrim(coalesce(item.value ->> 'key', '')),
+    btrim(coalesce(item.value ->> 'text', '')),
+    btrim(coalesce(item.value ->> 'parentKey', '')),
+    (item.ordinality - 1)::integer,
+    coalesce(p_client_id, ''),
+    coalesce(p_client_name, '')
+  from jsonb_array_elements(coalesce(p_entries, '[]'::jsonb))
+    with ordinality as item(value, ordinality);
 
   v_errors := public.validate_keynote_library(v_library_id);
   if array_length(v_errors, 1) is not null then
@@ -635,7 +657,7 @@ begin
       last_saved_by_client_name = coalesce(p_client_name, '')
   where id = v_library_id;
 
-  return public.build_keynote_snapshot(v_library_id)
+  return public.build_keynote_snapshot_metadata(v_library_id)
     || jsonb_build_object('status', 'ready', 'message', 'Mirrored shared keynote file snapshot to Supabase.');
 end;
 $$;
@@ -651,6 +673,7 @@ returns jsonb
 language plpgsql
 security definer
 set search_path = public
+set statement_timeout = '60s'
 as $$
 declare
   v_library public.keynote_libraries%rowtype;
@@ -794,7 +817,7 @@ begin
       'status', 'conflict',
       'message', 'Some keynotes changed in Supabase before your save. Refresh or update the conflicting rows.',
       'conflicts', v_conflicts,
-      'snapshot', public.build_keynote_snapshot(v_library.id)
+      'snapshot', public.build_keynote_snapshot_metadata(v_library.id)
     );
   end if;
 
@@ -888,7 +911,7 @@ begin
       last_saved_by_client_name = coalesce(p_client_name, '')
   where id = v_library.id;
 
-  return public.build_keynote_snapshot(v_library.id)
+  return public.build_keynote_snapshot_metadata(v_library.id)
     || jsonb_build_object(
       'status', 'ready',
       'message', 'Saved keynote changes to Supabase.',
@@ -1178,6 +1201,7 @@ grant select on public.keynote_analytics_run_entries to anon, authenticated;
 grant select on public.keynote_analytics_current to anon, authenticated;
 
 revoke execute on function public.build_keynote_snapshot(uuid) from public;
+revoke execute on function public.build_keynote_snapshot_metadata(uuid) from public;
 revoke execute on function public.build_keynote_edit_claims(uuid) from public;
 revoke execute on function public.validate_keynote_library(uuid) from public;
 revoke execute on function public.ensure_keynote_library(text, text, text, text, jsonb, text, text) from public;
