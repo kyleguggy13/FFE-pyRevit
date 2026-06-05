@@ -1,0 +1,72 @@
+---
+references:
+  - "File:
+    /FFE-pyRevit.extension/FFE-pyRevit.tab/Preflight.panel/SheetDisciplineCount\
+    er.pushbutton/script.py"
+generationTime: 2026-06-05T12:49:07.979Z
+config:
+  theme: default
+---
+flowchart TD
+    Start(["START: Sheet Discipline Counter"]) --> Init["Initialize Revit Application<br/>Load Configuration Parameters"]
+    Init --> ValidateParams{{"Validate Required<br/>Parameters Exist?"}}
+    
+    ValidateParams -->|Missing Parameters| Alert["Display Alert:<br/>Parameters Missing"]
+    Alert --> End1(["STOP: Script Cancelled"])
+    
+    ValidateParams -->|Parameters Found| CollectSheets["Collect All Sheets<br/>from Current Model"]
+    CollectSheets --> FilterPlaceholder{{"EXCLUDE_PLACEHOLDERS<br/>= True?"}}
+    
+    FilterPlaceholder -->|Yes| RemovePlaceholders["Remove Placeholder Sheets"]
+    FilterPlaceholder -->|No| FilterScheduled
+    RemovePlaceholders --> FilterScheduled{{"REQUIRE_APPEARS_IN<br/>SHEET_LIST = True?"}}
+    
+    FilterScheduled -->|Yes| CheckScheduled["Filter: Only Sheets<br/>Appearing in Sheet List"]
+    FilterScheduled -->|No| FilteredSheets["Output: Filtered Sheets"]
+    CheckScheduled --> FilteredSheets
+    
+    FilteredSheets --> GroupByDiscipline["Group Sheets by<br/>FFE_Sheet_Discipline Index"]
+    GroupByDiscipline --> SortLoop["For Each Discipline Group:<br/>Sort Sheets by Sheet Number"]
+    
+    SortLoop --> ParseNumber["Extract Numeric Part<br/>from Sheet Number<br/>Handle Formats: A101, 101A, 1-01"]
+    ParseNumber --> SortKey["Create Sort Key<br/>from Numeric Value"]
+    SortKey --> SortedSheets["Return Sorted Sheets"]
+    
+    SortedSheets --> OrderLoop["For Each Sheet in Order:<br/>Write FFE_Sheet_Order Parameter"]
+    OrderLoop --> WriteParam["Update Sheet Order<br/>Sequence 00..N"]
+    WriteParam --> CheckMoreSheets{{"More Sheets<br/>to Process?"}}
+    
+    CheckMoreSheets -->|Yes| OrderLoop
+    CheckMoreSheets -->|No| PrepareLog["Prepare Log Entry<br/>with Execution Details"]
+    
+    PrepareLog --> CheckLogDir{{"Log Directory<br/>Exists?"}}
+    CheckLogDir -->|No| CreateLogDir["Create Log Directory<br/>& Initialize JSON File"]
+    CheckLogDir -->|Yes| CheckLogFile{{"Log File<br/>Exists?"}}
+    
+    CreateLogDir --> CheckLogFile
+    CheckLogFile -->|No| InitJSON["Initialize JSON Structure:<br/>Create Action Array"]
+    CheckLogFile -->|Yes| ValidateJSON{{"JSON 'action' Key<br/>Exists?"}}
+    
+    InitJSON --> AppendLog["Append Log Entry<br/>to JSON File"]
+    ValidateJSON -->|No| InitAction["Create 'action' Key<br/>in JSON"]
+    ValidateJSON -->|Yes| AppendLog
+    InitAction --> AppendLog
+    
+    AppendLog --> LogSuccess{{"Log Write<br/>Successful?"}}
+    LogSuccess -->|Yes| Success["Set log_status<br/>= Success"]
+    LogSuccess -->|No| LogFailed["Set log_status<br/>= Failed"]
+    
+    Success --> End2(["END: Script Complete<br/>Action Logged"])
+    LogFailed --> End3(["END: Script Complete<br/>Logging Failed"])
+    
+    classDef process fill:#e1f5ff,stroke:#01579b,stroke-width:2px
+    classDef decision fill:#fff9c4,stroke:#f57f17,stroke-width:2px
+    classDef error fill:#ffebee,stroke:#c62828,stroke-width:2px
+    classDef success fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    classDef start fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    
+    class Start,Init,CollectSheets,RemovePlaceholders,CheckScheduled,FilteredSheets,GroupByDiscipline,SortLoop,ParseNumber,SortKey,SortedSheets,OrderLoop,WriteParam,PrepareLog,CreateLogDir,InitJSON,InitAction,AppendLog,Success process
+    class ValidateParams,FilterPlaceholder,FilterScheduled,CheckMoreSheets,CheckLogDir,CheckLogFile,ValidateJSON,LogSuccess decision
+    class Alert,LogFailed error
+    class End2,End3 success
+    class Start,End1 start
