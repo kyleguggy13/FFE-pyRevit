@@ -37,6 +37,7 @@ clr.AddReference("WindowsBase")
 from System import Uri
 from System.Windows import ResizeMode, Thickness, Visibility, Window, WindowStartupLocation
 from System.Windows.Controls import Grid, TextBlock
+from System.Windows.Interop import WindowInteropHelper
 
 
 # ____________________________________________________________________ IMPORTS (AUTODESK)
@@ -629,6 +630,13 @@ class SheetDisciplineOrderWindow(Window):
     def __init__(self, webview_type, creation_properties_type, initial_payload, event_handler, external_event):
         Window.__init__(self)
 
+        # Keep window above Revit main window and show in taskbar
+        try:
+            WindowInteropHelper(self).Owner = __revit__.MainWindowHandle
+            self.ShowInTaskbar = True
+        except:
+            pass
+
         self.initial_payload = initial_payload
         self.event_handler = event_handler
         self.external_event = external_event
@@ -648,6 +656,7 @@ class SheetDisciplineOrderWindow(Window):
         self.status_text.Margin = Thickness(18)
         self.status_text.Text = "Initializing Sheet Discipline Order WebView2..."
 
+        # Configure WebView2 user data folder to avoid conflicts with other WebView2 instances in Revit
         try:
             creation_properties = creation_properties_type()
             creation_properties.UserDataFolder = get_webview_user_data_folder()
@@ -666,6 +675,9 @@ class SheetDisciplineOrderWindow(Window):
         self.browser.NavigationCompleted += self.on_navigation_completed
 
     def on_loaded(self, sender, args):
+        """
+        WebView2 can be slow to initialize, so show a status message while it's loading.
+        """
         self.status_text.Visibility = Visibility.Visible
         self.status_text.Text = "Loading Sheet Discipline Order from:\n{0}".format(self.index_uri.AbsoluteUri)
         try:
@@ -674,6 +686,9 @@ class SheetDisciplineOrderWindow(Window):
             self.status_text.Text = "Could not initialize WebView2:\n{0}".format(exc)
 
     def on_core_webview2_initialized(self, sender, args):
+        """
+        Called when the WebView2 core is initialized.
+        """
         try:
             if args.IsSuccess:
                 self.browser.CoreWebView2.WebMessageReceived += self.on_web_message_received
@@ -689,6 +704,9 @@ class SheetDisciplineOrderWindow(Window):
             self.status_text.Text = "WebView2 initialized but navigation failed:\n{0}".format(traceback.format_exc())
 
     def on_navigation_completed(self, sender, args):
+        """
+        Called when the WebView2 finishes navigating to the index.html page.
+        """
         try:
             if not args.IsSuccess:
                 self.status_text.Visibility = Visibility.Visible
