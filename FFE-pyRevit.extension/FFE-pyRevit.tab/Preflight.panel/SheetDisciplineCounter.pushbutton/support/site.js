@@ -2,6 +2,7 @@
   "use strict";
 
   var refs = null;
+  var sortableList = null;
   var state = {
     documentTitle: "",
     sheets: [],
@@ -18,6 +19,13 @@
       globalScope.chrome &&
       globalScope.chrome.webview &&
       typeof globalScope.chrome.webview.postMessage === "function"
+    );
+  }
+
+  function hasSortableJs() {
+    return !!(
+      globalScope.Sortable &&
+      typeof globalScope.Sortable.create === "function"
     );
   }
 
@@ -81,6 +89,29 @@
   function setBusy(isBusy) {
     state.busy = !!isBusy;
     updateButtons();
+  }
+
+  function destroySortable() {
+    if (!sortableList) {
+      return;
+    }
+
+    try {
+      sortableList.destroy();
+    } catch (error) {
+      // Sortable owns DOM listeners; stale destroy failures should not block rendering.
+    }
+
+    sortableList = null;
+  }
+
+  function updateSortableState() {
+    if (!sortableList || !refs) {
+      return;
+    }
+
+    var selectedSheets = state.selectedDiscipline === null ? [] : getDisplaySheets(state.selectedDiscipline);
+    sortableList.option("disabled", state.busy || selectedSheets.length < 2);
   }
 
   function setStatus(statusOrState, message) {
@@ -257,6 +288,7 @@
     refs.saveButton.disabled = state.busy || dirtyCount === 0;
     refs.refreshButton.disabled = state.busy;
     refs.disciplineSelect.disabled = state.busy || !state.disciplines.length;
+    updateSortableState();
   }
 
   function renderDocumentTitle() {
@@ -306,7 +338,7 @@
   function createSheetRow(sheet, index) {
     var row = document.createElement("li");
     row.className = "sheet-row";
-    row.draggable = true;
+    row.draggable = !hasSortableJs(); // Use native HTML5 drag-and-drop if SortableJS is not available
     row.dataset.sheetId = idKey(sheet.id);
 
     if (sheet.canWriteOrder === false) {
@@ -345,10 +377,32 @@
     row.appendChild(main);
     row.appendChild(meta);
 
-    row.addEventListener("dragstart", onDragStart);
-    row.addEventListener("dragend", onDragEnd);
+    if (!hasSortableJs()) {
+      row.addEventListener("dragstart", onDragStart);
+      row.addEventListener("dragend", onDragEnd);
+    }
 
     return row;
+  }
+
+  function setupSortable() {
+    destroySortable();
+
+    if (!refs || !hasSortableJs()) {
+      return;
+    }
+
+    sortableList = globalScope.Sortable.create(refs.sheetList, {
+      animation: 150,
+      chosenClass: "sortable-chosen",
+      dragClass: "sortable-drag",
+      draggable: ".sheet-row",
+      ghostClass: "sortable-ghost",
+      handle: ".drag-handle",
+      onEnd: updateEditedOrderFromDom
+    });
+
+    updateSortableState();
   }
 
   function renderList() {
@@ -356,6 +410,7 @@
       return;
     }
 
+    destroySortable();
     refs.sheetList.innerHTML = "";
 
     var selectedSheets = state.selectedDiscipline === null ? [] : getDisplaySheets(state.selectedDiscipline);
@@ -365,6 +420,8 @@
     selectedSheets.forEach(function appendSheet(sheet, index) {
       refs.sheetList.appendChild(createSheetRow(sheet, index));
     });
+
+    setupSortable();
   }
 
   function render() {
@@ -406,6 +463,10 @@
   }
 
   function onListDragOver(event) {
+    if (hasSortableJs()) {
+      return;
+    }
+    
     var dragging = refs.sheetList.querySelector(".dragging");
     if (!dragging) {
       return;

@@ -247,6 +247,20 @@ select {
   opacity: 0.86;
 }
 
+.sortable-chosen {
+  border-color: var(--accent);
+}
+
+.sortable-ghost {
+  background: #e9f2fb;
+  border-color: var(--accent);
+  opacity: 0.55;
+}
+
+.sortable-drag {
+  box-shadow: var(--shadow);
+}
+
 .sheet-row.read-only {
   border-style: dashed;
 }
