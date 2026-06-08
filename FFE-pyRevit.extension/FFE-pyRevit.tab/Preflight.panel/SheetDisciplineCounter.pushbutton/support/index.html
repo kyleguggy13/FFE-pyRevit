@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Sheet Discipline Order</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="site.js" defer></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="title-block">
+          <h1>Sheet Discipline Order</h1>
+          <p id="document-title" class="document-title"></p>
+        </div>
+        <div class="actions">
+          <button id="refresh-button" class="button secondary" type="button">Refresh</button>
+          <button id="save-button" class="button primary" type="button" disabled>Save Order</button>
+        </div>
+      </header>
+
+      <section id="status-banner" class="status-banner status-ready" aria-live="polite">
+        <span id="status-text">Ready.</span>
+        <ul id="issue-list" class="issue-list" hidden></ul>
+      </section>
+
+      <section class="toolbar" aria-label="Sheet filters">
+        <label class="field">
+          <span>Discipline</span>
+          <select id="discipline-select"></select>
+        </label>
+        <div class="count-block">
+          <span id="sheet-count" class="sheet-count">0 sheets</span>
+          <span id="dirty-count" class="dirty-count"></span>
+        </div>
+      </section>
+
+      <section class="list-region" aria-label="Sheets">
+        <ol id="sheet-list" class="sheet-list"></ol>
+        <div id="empty-state" class="empty-state" hidden>No sheets found.</div>
+      </section>
+    </main>
+  </body>
+</html>
