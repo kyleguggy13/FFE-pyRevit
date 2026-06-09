@@ -1,26 +1,14 @@
 # -*- coding: utf-8 -*-
 __title__ = "FFE-Keynotes"
-__version__ = "Version = v0.10"
+__version__ = "Version = v0.11"
 __persistentengine__ = True
 __min_revit_ver__ = 2025
-__doc__ = """Version = v0.10
-Date    = 06.03.2026
+__doc__ = """Version = v0.11
+Date    = 06.09.2026
 __________________________________________________________________
 Description:
 Persistent WebView2 keynote manager for the active Revit document's
 external keynote text file.
-
-Key behaviors:
-- Opens a modeless WebView2 window and keeps it alive with pyRevit's
-  persistent engine.
-- Reads and rewrites the keynote file assigned to the current Revit document.
-- Edits structured tab-delimited keynote rows in a WebView.
-- Saves with row-level merge checks, timestamped backups, sidecar file locks,
-  Supabase mirror updates, and an immediate Revit keynote table reload.
-- When a keynote key is renamed, writable placed/model keynote references using
-  the old key are updated to the new key.
-- Places saved rows as either Revit User Keynotes or FFE_Symbol_Keynote Generic
-  Annotations.
 __________________________________________________________________
 How-To:
 - Click the button to open the keynote manager.
@@ -38,11 +26,24 @@ Last update:
 - [06.02.2026] - v0.8 Added Generic Annotation keynote placement and type synchronization.
 - [06.02.2026] - v0.9 Applied the standard leader arrowhead to Generic Annotation keynote types.
 - [06.03.2026] - v0.10 Added Analyics tracking for keynote manager usage and errors.
+- [06.09.2026] - v0.11 Made Place As persist across sessions.
 __________________________________________________________________
 Author: Kyle Guggenheim"""
 
 
 """
+Key behaviors:
+- Opens a modeless WebView2 window and keeps it alive with pyRevit's
+  persistent engine.
+- Reads and rewrites the keynote file assigned to the current Revit document.
+- Edits structured tab-delimited keynote rows in a WebView.
+- Saves with row-level merge checks, timestamped backups, sidecar file locks,
+  Supabase mirror updates, and an immediate Revit keynote table reload.
+- When a keynote key is renamed, writable placed/model keynote references using
+  the old key are updated to the new key.
+- Places saved rows as either Revit User Keynotes or FFE_Symbol_Keynote Generic
+  Annotations.
+
 Revit API notes:
 - Targets Revit 2026.
 - Modeless refresh/save requests are routed through ExternalEvent so
