@@ -11,6 +11,8 @@
     selectedDiscipline: null,
     dirtyDisciplines: Object.create(null),
     editedOrders: Object.create(null),
+    showNonPrintable: false,
+    includeNonPrintableInIndex: false,
     busy: false
   };
 
@@ -44,6 +46,14 @@
       return "";
     }
     return String(value);
+  }
+
+  function toBool(value) {
+    if (value === true || value === 1) {
+      return true;
+    }
+    var text = cleanText(value).trim().toLowerCase();
+    return text === "1" || text === "true" || text === "yes" || text === "on";
   }
 
   function disciplineLabel(value) {
@@ -152,27 +162,29 @@
     return state.sheetsByDiscipline[cleanText(discipline)] || [];
   }
 
-  function getOriginalIds(discipline) {
-    return getOriginalSheets(discipline).map(function mapSheet(sheet) {
-      return sheet.id;
-    });
-  }
-
   function getSheetMap() {
     var byId = createMap();
     state.sheets.forEach(function addSheet(sheet) {
-      byId[idKey(sheet.id)] = sheet;
+      byId[idKey(sheet.key)] = sheet;
     });
     return byId;
   }
 
-  function getDisplaySheets(discipline) {
+  function shouldShowSheet(sheet) {
+    return state.showNonPrintable || !sheet.isNonPrintable;
+  }
+
+  function shouldIndexSheet(sheet) {
+    return state.includeNonPrintableInIndex || !sheet.isNonPrintable;
+  }
+
+  function getOrderedSheets(discipline, predicate) {
     var disciplineValue = cleanText(discipline);
     var editedOrder = state.editedOrders[disciplineValue];
     var originalSheets = getOriginalSheets(disciplineValue);
 
     if (!editedOrder) {
-      return originalSheets.slice();
+      return originalSheets.filter(predicate);
     }
 
     var byId = getSheetMap();
@@ -181,19 +193,54 @@
 
     editedOrder.forEach(function addEdited(id) {
       var sheet = byId[idKey(id)];
-      if (sheet && cleanText(sheet.discipline) === disciplineValue && !used[idKey(sheet.id)]) {
+      if (
+        sheet &&
+        cleanText(sheet.discipline) === disciplineValue &&
+        predicate(sheet) &&
+        !used[idKey(sheet.key)]
+      ) {
         ordered.push(sheet);
-        used[idKey(sheet.id)] = true;
+        used[idKey(sheet.key)] = true;
       }
     });
 
     originalSheets.forEach(function appendMissing(sheet) {
-      if (!used[idKey(sheet.id)]) {
+      if (predicate(sheet) && !used[idKey(sheet.key)]) {
         ordered.push(sheet);
       }
     });
 
     return ordered;
+  }
+
+  function getDisplaySheets(discipline) {
+    return getOrderedSheets(discipline, shouldShowSheet);
+  }
+
+  function getIndexSheets(discipline) {
+    return getOrderedSheets(discipline, shouldIndexSheet);
+  }
+
+  function getOriginalDisplayKeys(discipline) {
+    return getOriginalSheets(discipline).filter(shouldShowSheet).map(function mapSheet(sheet) {
+      return sheet.key;
+    });
+  }
+
+  function getIndexKeys(discipline) {
+    return getIndexSheets(discipline).map(function mapSheet(sheet) {
+      return sheet.key;
+    });
+  }
+
+  function markVisibleDisciplinesDirty() {
+    getVisibleDisciplines().forEach(function markDirty(discipline) {
+      var displayKeys = getDisplaySheets(discipline.value).map(function mapSheet(sheet) {
+        return sheet.key;
+      });
+      state.editedOrders[discipline.value] = displayKeys;
+      state.dirtyDisciplines[discipline.value] = true;
+    });
   }
 
   function groupSheetsByDiscipline(sheets) {
@@ -217,11 +264,20 @@
 
     sheets.forEach(function normalizeSheet(sheet) {
       sheet.id = toId(sheet.id);
+      sheet.key = cleanText(sheet.key || sheet.id);
       sheet.discipline = cleanText(sheet.discipline);
       sheet.disciplineLabel = cleanText(sheet.disciplineLabel) || disciplineLabel(sheet.discipline);
       sheet.sheetNumber = cleanText(sheet.sheetNumber);
       sheet.name = cleanText(sheet.name);
       sheet.orderValue = cleanText(sheet.orderValue);
+      sheet.sourceKey = cleanText(sheet.sourceKey);
+      sheet.sourceLabel = cleanText(sheet.sourceLabel);
+      sheet.isLinked = toBool(sheet.isLinked);
+      sheet.isPlaceholder = toBool(sheet.isPlaceholder);
+      sheet.isScheduled = sheet.isScheduled === undefined ? true : toBool(sheet.isScheduled);
+      sheet.canBePrinted = sheet.canBePrinted === undefined ? true : toBool(sheet.canBePrinted);
+      sheet.isNonPrintable = toBool(sheet.isNonPrintable) || sheet.isLinked || sheet.isPlaceholder || !sheet.isScheduled || !sheet.canBePrinted;
+      sheet.canWriteOrder = sheet.canWriteOrder !== false && !sheet.isLinked;
     });
 
     disciplines.forEach(function normalizeDiscipline(discipline) {
@@ -251,6 +307,32 @@
     };
   }
 
+  function getVisibleDisciplines() {
+    return state.disciplines.map(function countVisible(discipline) {
+      var value = cleanText(discipline.value);
+      var visibleCount = getOriginalSheets(value).filter(shouldShowSheet).length;
+      return {
+        value: value,
+        label: cleanText(discipline.label) || disciplineLabel(value),
+        sheetCount: visibleCount
+      };
+    }).filter(function hasVisibleSheets(discipline) {
+      return discipline.sheetCount > 0;
+    });
+  }
+
+  function ensureSelectedDiscipline(visibleDisciplines) {
+    var values = visibleDisciplines.map(function getValue(discipline) {
+      return discipline.value;
+    });
+
+    if (state.selectedDiscipline !== null && values.indexOf(state.selectedDiscipline) !== -1) {
+      return;
+    }
+
+    state.selectedDiscipline = values.length ? values[0] : null;
+  }
+
   function loadData(payload) {
     var normalized = normalizePayload(payload);
     var previousSelection = state.selectedDiscipline;
@@ -262,21 +344,15 @@
     state.dirtyDisciplines = createMap();
     state.editedOrders = createMap();
 
-    var disciplineValues = state.disciplines.map(function getValue(discipline) {
-      return discipline.value;
-    });
-
-    if (previousSelection !== null && disciplineValues.indexOf(previousSelection) !== -1) {
-      state.selectedDiscipline = previousSelection;
-    } else if (disciplineValues.length) {
-      state.selectedDiscipline = disciplineValues[0];
-    } else {
-      state.selectedDiscipline = null;
-    }
+    state.selectedDiscipline = previousSelection;
+    ensureSelectedDiscipline(getVisibleDisciplines());
 
     setBusy(false);
     render();
-    setStatus("ready", "Loaded " + state.sheets.length + " " + pluralize(state.sheets.length, "sheet", "sheets") + ".");
+    var visibleCount = getVisibleDisciplines().reduce(function sumSheets(total, discipline) {
+      return total + discipline.sheetCount;
+    }, 0);
+    setStatus("ready", "Loaded " + visibleCount + " visible " + pluralize(visibleCount, "sheet", "sheets") + ".");
   }
 
   function updateButtons() {
@@ -287,7 +363,11 @@
     var dirtyCount = countDirtyDisciplines();
     refs.saveButton.disabled = state.busy || dirtyCount === 0;
     refs.refreshButton.disabled = state.busy;
-    refs.disciplineSelect.disabled = state.busy || !state.disciplines.length;
+    refs.disciplineSelect.disabled = state.busy || !getVisibleDisciplines().length;
+    refs.showNonPrintableCheckbox.disabled = state.busy;
+    refs.showNonPrintableCheckbox.checked = state.showNonPrintable;
+    refs.includeNonPrintableCheckbox.disabled = state.busy || !state.showNonPrintable;
+    refs.includeNonPrintableCheckbox.checked = state.includeNonPrintableInIndex && state.showNonPrintable;
     updateSortableState();
   }
 
@@ -306,8 +386,10 @@
     }
 
     refs.disciplineSelect.innerHTML = "";
+    var visibleDisciplines = getVisibleDisciplines();
+    ensureSelectedDiscipline(visibleDisciplines);
 
-    state.disciplines.forEach(function appendDiscipline(discipline) {
+    visibleDisciplines.forEach(function appendDiscipline(discipline) {
       var option = document.createElement("option");
       option.value = discipline.value;
       option.textContent = discipline.label + " (" + discipline.sheetCount + ")";
@@ -339,10 +421,14 @@
     var row = document.createElement("li");
     row.className = "sheet-row";
     row.draggable = !hasSortableJs(); // Use native HTML5 drag-and-drop if SortableJS is not available
-    row.dataset.sheetId = idKey(sheet.id);
+    row.dataset.sheetKey = idKey(sheet.key);
 
     if (sheet.canWriteOrder === false) {
       row.className += " read-only";
+    }
+
+    if (sheet.isNonPrintable) {
+      row.className += " non-printable";
     }
 
     var handle = document.createElement("span");
@@ -370,7 +456,23 @@
 
     var meta = document.createElement("span");
     meta.className = "sheet-meta";
-    meta.textContent = sheet.orderValue ? "Order " + sheet.orderValue : "No order";
+    var metaParts = [sheet.orderValue ? "Order " + sheet.orderValue : "No order"];
+    if (sheet.isLinked) {
+      metaParts.push("Linked: " + (sheet.sourceLabel || "model"));
+    }
+    if (sheet.isPlaceholder) {
+      metaParts.push("Placeholder");
+    }
+    if (sheet.isScheduled === false) {
+      metaParts.push("Not in sheet list");
+    }
+    if (sheet.canBePrinted === false) {
+      metaParts.push("Not printable");
+    }
+    if (sheet.canWriteOrder === false) {
+      metaParts.push("Read-only");
+    }
+    meta.textContent = metaParts.join(" | ");
 
     row.appendChild(handle);
     row.appendChild(position);
@@ -415,7 +517,7 @@
 
     var selectedSheets = state.selectedDiscipline === null ? [] : getDisplaySheets(state.selectedDiscipline);
     refs.emptyState.hidden = selectedSheets.length > 0;
-    refs.emptyState.textContent = state.disciplines.length ? "No sheets in this discipline." : "No sheets found.";
+    refs.emptyState.textContent = getVisibleDisciplines().length ? "No sheets in this discipline." : "No sheets found.";
 
     selectedSheets.forEach(function appendSheet(sheet, index) {
       refs.sheetList.appendChild(createSheetRow(sheet, index));
@@ -454,7 +556,7 @@
 
     event.currentTarget.classList.add("dragging");
     event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", event.currentTarget.dataset.sheetId);
+    event.dataTransfer.setData("text/plain", event.currentTarget.dataset.sheetKey);
   }
 
   function onDragEnd(event) {
@@ -487,16 +589,16 @@
       return;
     }
 
-    var ids = Array.prototype.slice.call(refs.sheetList.querySelectorAll(".sheet-row")).map(function readId(row) {
-      return toId(row.dataset.sheetId);
+    var keys = Array.prototype.slice.call(refs.sheetList.querySelectorAll(".sheet-row")).map(function readKey(row) {
+      return cleanText(row.dataset.sheetKey);
     });
 
-    var originalIds = getOriginalIds(state.selectedDiscipline);
-    if (arraysEqual(ids, originalIds)) {
+    var originalKeys = getOriginalDisplayKeys(state.selectedDiscipline);
+    if (arraysEqual(keys, originalKeys)) {
       delete state.editedOrders[state.selectedDiscipline];
       delete state.dirtyDisciplines[state.selectedDiscipline];
     } else {
-      state.editedOrders[state.selectedDiscipline] = ids;
+      state.editedOrders[state.selectedDiscipline] = keys;
       state.dirtyDisciplines[state.selectedDiscipline] = true;
       setStatus("warning", "Unsaved sheet order changes.");
     }
@@ -515,7 +617,7 @@
     var disciplines = dirtyKeys.map(function buildDisciplinePayload(discipline) {
       return {
         discipline: discipline,
-        sheetIds: state.editedOrders[discipline] || getOriginalIds(discipline)
+        sheetKeys: getIndexKeys(discipline)
       };
     });
 
@@ -525,6 +627,7 @@
     if (!postRevitMessage({
       type: "saveOrder",
       payload: {
+        includeNonPrintableInIndex: state.includeNonPrintableInIndex,
         disciplines: disciplines
       }
     })) {
@@ -562,6 +665,21 @@
       renderToolbar();
     });
 
+    refs.showNonPrintableCheckbox.addEventListener("change", function onShowNonPrintableChanged() {
+      state.showNonPrintable = refs.showNonPrintableCheckbox.checked;
+      if (!state.showNonPrintable) {
+        state.includeNonPrintableInIndex = false;
+      }
+      render();
+    });
+
+    refs.includeNonPrintableCheckbox.addEventListener("change", function onIncludeNonPrintableChanged() {
+      state.includeNonPrintableInIndex = refs.includeNonPrintableCheckbox.checked && state.showNonPrintable;
+      markVisibleDisciplinesDirty();
+      setStatus("warning", "Unsaved sheet order changes.");
+      renderToolbar();
+    });
+
     refs.saveButton.addEventListener("click", saveOrder);
     refs.refreshButton.addEventListener("click", refreshSheets);
     refs.sheetList.addEventListener("dragover", onListDragOver);
@@ -574,6 +692,8 @@
       statusText: document.getElementById("status-text"),
       issueList: document.getElementById("issue-list"),
       disciplineSelect: document.getElementById("discipline-select"),
+      showNonPrintableCheckbox: document.getElementById("show-non-printable-checkbox"),
+      includeNonPrintableCheckbox: document.getElementById("include-non-printable-checkbox"),
       sheetCount: document.getElementById("sheet-count"),
       dirtyCount: document.getElementById("dirty-count"),
       saveButton: document.getElementById("save-button"),

@@ -46,6 +46,7 @@ from Autodesk.Revit.DB import (
     BuiltInParameter,
     ElementId,
     FilteredElementCollector,
+    RevitLinkInstance,
     StorageType,
     Transaction,
     ViewSheet,
@@ -130,6 +131,16 @@ def parse_int_maybe(value):
         return int(match.group(0))
     except:
         return None
+
+
+def parse_bool_maybe(value):
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, int):
+        return value != 0
+
+    return safe_str(value).strip().lower() in ["1", "true", "yes", "on"]
 
 
 def get_revit_install_dir():
@@ -290,7 +301,38 @@ def sheet_sort_key(sheet):
     )
 
 
-def collect_sheets(current_doc):
+def sheet_is_placeholder(sheet):
+    try:
+        return bool(getattr(sheet, "IsPlaceholder", False))
+    except:
+        return False
+
+
+def sheet_is_scheduled(sheet):
+    try:
+        scheduled_param = sheet.get_Parameter(BuiltInParameter.SHEET_SCHEDULED)
+        return scheduled_param is not None and scheduled_param.AsInteger() == 1
+    except:
+        return False
+
+
+def sheet_can_be_printed(sheet):
+    try:
+        return bool(sheet.CanBePrinted)
+    except:
+        return False
+
+
+def sheet_is_non_printable(sheet, is_linked):
+    return bool(
+        is_linked
+        or sheet_is_placeholder(sheet)
+        or not sheet_is_scheduled(sheet)
+        or not sheet_can_be_printed(sheet)
+    )
+
+
+def collect_view_sheets(current_doc):
     collector = (
         FilteredElementCollector(current_doc)
         .OfClass(ViewSheet)
@@ -298,24 +340,155 @@ def collect_sheets(current_doc):
         .ToElements()
     )
 
-    sheets = []
-    for sheet in collector:
-        try:
-            if getattr(sheet, "IsPlaceholder", False):
-                continue
-        except:
-            pass
+    return list(collector)
 
-        try:
-            scheduled_param = sheet.get_Parameter(BuiltInParameter.SHEET_SCHEDULED)
-            if scheduled_param is None or scheduled_param.AsInteger() != 1:
-                continue
-        except:
+
+def collect_sheets(current_doc):
+    """
+    Backwards-compatible default sheet set used for parameter validation.
+    The UI now receives a full sheet catalog, but the default visible set still
+    matches the previous printable/scheduled host-only behavior.
+    """
+    sheets = []
+    for sheet in collect_view_sheets(current_doc):
+        if sheet_is_non_printable(sheet, False):
             continue
 
         sheets.append(sheet)
 
     return sheets
+
+
+def document_source_key(current_doc, is_linked):
+    if not is_linked:
+        return "host"
+
+    try:
+        return "link:{0}".format(safe_str(current_doc.GetHashCode()))
+    except:
+        return "link:{0}".format(safe_str(current_doc.Title))
+
+
+def document_source_label(current_doc, is_linked):
+    label = safe_str(getattr(current_doc, "Title", ""))
+    if label:
+        return label
+    return "Linked Model" if is_linked else "Host Model"
+
+
+def sheet_record_key(sheet, source_key):
+    unique_id = safe_str(getattr(sheet, "UniqueId", ""))
+    if not unique_id:
+        unique_id = safe_str(element_id_value(sheet.Id))
+    return "{0}:{1}".format(source_key, unique_id)
+
+
+def get_loaded_link_documents(host_doc):
+    link_docs = []
+    seen_keys = set()
+
+    try:
+        instances = (
+            FilteredElementCollector(host_doc)
+            .OfClass(RevitLinkInstance)
+            .WhereElementIsNotElementType()
+            .ToElements()
+        )
+    except:
+        instances = []
+
+    for instance in instances:
+        try:
+            link_doc = instance.GetLinkDocument()
+        except:
+            link_doc = None
+
+        if link_doc is None:
+            continue
+
+        source_key = document_source_key(link_doc, True)
+        if source_key in seen_keys:
+            continue
+
+        seen_keys.add(source_key)
+        link_docs.append(link_doc)
+
+    return link_docs
+
+
+def make_sheet_record(sheet, source_doc, is_linked):
+    source_key = document_source_key(source_doc, is_linked)
+    is_placeholder = sheet_is_placeholder(sheet)
+    is_scheduled = sheet_is_scheduled(sheet)
+    can_be_printed = sheet_can_be_printed(sheet)
+    is_non_printable = bool(is_linked or is_placeholder or not is_scheduled or not can_be_printed)
+
+    return {
+        "sheet": sheet,
+        "key": sheet_record_key(sheet, source_key),
+        "sourceKey": source_key,
+        "sourceLabel": document_source_label(source_doc, is_linked),
+        "isLinked": bool(is_linked),
+        "isPlaceholder": bool(is_placeholder),
+        "isScheduled": bool(is_scheduled),
+        "canBePrinted": bool(can_be_printed),
+        "isNonPrintable": bool(is_non_printable),
+        "canWriteOrder": bool((not is_linked) and can_write_order(sheet)),
+    }
+
+
+def collect_sheet_records(current_doc, include_links=True):
+    records = []
+
+    for sheet in collect_view_sheets(current_doc):
+        records.append(make_sheet_record(sheet, current_doc, False))
+
+    if include_links:
+        for link_doc in get_loaded_link_documents(current_doc):
+            for sheet in collect_view_sheets(link_doc):
+                records.append(make_sheet_record(sheet, link_doc, True))
+
+    return records
+
+
+def sheet_record_sort_key(record):
+    sheet = record["sheet"]
+    order_number = get_order_number(sheet)
+    if order_number is None:
+        order_number = 999999
+
+    return (
+        order_number,
+        natural_key(sheet.SheetNumber),
+        safe_str(record.get("sourceLabel")).lower(),
+        safe_str(sheet.Name).lower(),
+        safe_str(record.get("key")),
+    )
+
+
+def sheet_record_payload(record, position):
+    sheet = record["sheet"]
+    return {
+        "key": record["key"],
+        "id": element_id_value(sheet.Id),
+        "uniqueId": safe_str(sheet.UniqueId),
+        "sourceKey": record["sourceKey"],
+        "sourceLabel": record["sourceLabel"],
+        "isLinked": record["isLinked"],
+        "isPlaceholder": record["isPlaceholder"],
+        "isScheduled": record["isScheduled"],
+        "canBePrinted": record["canBePrinted"],
+        "isNonPrintable": record["isNonPrintable"],
+        "discipline": get_discipline_value(sheet),
+        "disciplineLabel": discipline_label(get_discipline_value(sheet)),
+        "sheetNumber": safe_str(sheet.SheetNumber),
+        "name": safe_str(sheet.Name),
+        "displayName": "{0} - {1}".format(safe_str(sheet.SheetNumber), safe_str(sheet.Name)),
+        "orderValue": get_order_display(sheet),
+        "orderNumber": get_order_number(sheet),
+        "position": position,
+        "canWriteOrder": record["canWriteOrder"],
+    }
 
 
 def validate_required_parameters(current_doc):
@@ -348,17 +521,18 @@ def validate_required_parameters(current_doc):
 
 
 def build_sheet_payload(current_doc):
-    sheets = collect_sheets(current_doc)
+    records = collect_sheet_records(current_doc, include_links=True)
     grouped = {}
 
-    for sheet in sheets:
+    for record in records:
+        sheet = record["sheet"]
         discipline = get_discipline_value(sheet)
         if discipline not in grouped:
             grouped[discipline] = []
-        grouped[discipline].append(sheet)
+        grouped[discipline].append(record)
 
     for discipline in grouped:
-        grouped[discipline] = sorted(grouped[discipline], key=sheet_sort_key)
+        grouped[discipline] = sorted(grouped[discipline], key=sheet_record_sort_key)
 
     discipline_values = sorted(grouped.keys(), key=lambda value: natural_key(discipline_label(value)))
     sheet_items = []
@@ -372,20 +546,8 @@ def build_sheet_payload(current_doc):
             "sheetCount": len(group),
         })
 
-        for index, sheet in enumerate(group, start=1):
-            sheet_items.append({
-                "id": element_id_value(sheet.Id),
-                "uniqueId": safe_str(sheet.UniqueId),
-                "discipline": discipline,
-                "disciplineLabel": discipline_label(discipline),
-                "sheetNumber": safe_str(sheet.SheetNumber),
-                "name": safe_str(sheet.Name),
-                "displayName": "{0} - {1}".format(safe_str(sheet.SheetNumber), safe_str(sheet.Name)),
-                "orderValue": get_order_display(sheet),
-                "orderNumber": get_order_number(sheet),
-                "position": index,
-                "canWriteOrder": can_write_order(sheet),
-            })
+        for index, record in enumerate(group, start=1):
+            sheet_items.append(sheet_record_payload(record, index))
 
     return {
         "documentTitle": safe_str(current_doc.Title),
@@ -400,19 +562,20 @@ def build_sheet_payload(current_doc):
 
 def group_current_sheets_by_discipline(current_doc):
     grouped = {}
-    by_id = {}
+    by_key = {}
 
-    for sheet in collect_sheets(current_doc):
+    for record in collect_sheet_records(current_doc, include_links=True):
+        sheet = record["sheet"]
         discipline = get_discipline_value(sheet)
         if discipline not in grouped:
             grouped[discipline] = []
-        grouped[discipline].append(sheet)
-        by_id[element_id_value(sheet.Id)] = sheet
+        grouped[discipline].append(record)
+        by_key[record["key"]] = record
 
     for discipline in grouped:
-        grouped[discipline] = sorted(grouped[discipline], key=sheet_sort_key)
+        grouped[discipline] = sorted(grouped[discipline], key=sheet_record_sort_key)
 
-    return grouped, by_id
+    return grouped, by_key
 
 
 def set_sheet_order(sheet, position, width):
@@ -446,6 +609,7 @@ def set_sheet_order(sheet, position, width):
 def apply_order_payload(current_doc, payload):
     payload = payload or {}
     discipline_payloads = payload.get("disciplines") or []
+    include_non_printable = parse_bool_maybe(payload.get("includeNonPrintableInIndex"))
 
     if not discipline_payloads:
         return {
@@ -456,7 +620,7 @@ def apply_order_payload(current_doc, payload):
             "editedCount": 0,
         }
 
-    grouped, sheet_by_id = group_current_sheets_by_discipline(current_doc)
+    grouped, sheet_by_key = group_current_sheets_by_discipline(current_doc)
     issues = []
     written_count = 0
     edited_count = len(discipline_payloads)
@@ -467,49 +631,56 @@ def apply_order_payload(current_doc, payload):
     try:
         for discipline_payload in discipline_payloads:
             discipline = safe_str(discipline_payload.get("discipline")).strip()
-            submitted_ids = discipline_payload.get("sheetIds") or []
+            submitted_keys = discipline_payload.get("sheetKeys") or []
             current_group = grouped.get(discipline, [])
-            current_ids = set([element_id_value(sheet.Id) for sheet in current_group])
-            ordered_sheets = []
-            seen_ids = set()
+            indexable_group = []
+            current_keys = set()
 
-            for raw_id in submitted_ids:
-                try:
-                    sheet_id = int(raw_id)
-                except:
-                    issues.append("A submitted sheet id could not be read: {0}.".format(safe_str(raw_id)))
+            for record in current_group:
+                if record["isNonPrintable"] and not include_non_printable:
+                    continue
+                indexable_group.append(record)
+                current_keys.add(record["key"])
+
+            ordered_records = []
+            seen_keys = set()
+
+            for raw_key in submitted_keys:
+                sheet_key = safe_str(raw_key)
+                if not sheet_key or sheet_key in seen_keys:
                     continue
 
-                if sheet_id in seen_ids:
+                record = sheet_by_key.get(sheet_key)
+                if record is None:
+                    issues.append("Sheet key {0} no longer exists and was skipped.".format(sheet_key))
                     continue
 
-                sheet = sheet_by_id.get(sheet_id)
-                if sheet is None:
-                    issues.append("Sheet id {0} no longer exists or is no longer in the sheet list.".format(sheet_id))
-                    continue
-
-                if sheet_id not in current_ids:
-                    issues.append("Sheet {0} is no longer in discipline {1} and was skipped.".format(
-                        safe_str(sheet.SheetNumber),
+                if sheet_key not in current_keys:
+                    issues.append("Sheet {0} is no longer indexable in discipline {1} and was skipped.".format(
+                        safe_str(record["sheet"].SheetNumber),
                         discipline_label(discipline)
                     ))
                     continue
 
-                ordered_sheets.append(sheet)
-                seen_ids.add(sheet_id)
+                ordered_records.append(record)
+                seen_keys.add(sheet_key)
 
-            for sheet in current_group:
-                sheet_id = element_id_value(sheet.Id)
-                if sheet_id not in seen_ids:
-                    ordered_sheets.append(sheet)
-                    seen_ids.add(sheet_id)
+            for record in indexable_group:
+                sheet_key = record["key"]
+                if sheet_key not in seen_keys:
+                    ordered_records.append(record)
+                    seen_keys.add(sheet_key)
 
-            if not ordered_sheets:
+            if not ordered_records:
                 issues.append("Discipline {0} has no current sheets to save.".format(discipline_label(discipline)))
                 continue
 
-            width = max(2, len(str(len(ordered_sheets))))
-            for position, sheet in enumerate(ordered_sheets, start=1):
+            width = max(2, len(str(len(ordered_records))))
+            for position, record in enumerate(ordered_records, start=1):
+                if record["isLinked"]:
+                    continue
+
+                sheet = record["sheet"]
                 ok, issue = set_sheet_order(sheet, position, width)
                 if ok:
                     written_count += 1
