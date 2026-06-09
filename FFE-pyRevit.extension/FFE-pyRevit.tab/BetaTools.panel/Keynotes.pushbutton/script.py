@@ -32,6 +32,10 @@ Author: Kyle Guggenheim"""
 
 
 """
+TODO:
+- Select placed keynote icon and display list of sheets/views where it is placed.
+
+
 Key behaviors:
 - Opens a modeless WebView2 window and keeps it alive with pyRevit's
   persistent engine.
