@@ -79,6 +79,10 @@
     return text(value).replace(/^\s+|\s+$/g, "");
   }
 
+  function normalizePlacementMode(value) {
+    return value === "genericAnnotation" ? "genericAnnotation" : "userKeynote";
+  }
+
   function setText(target, value) {
     var element = typeof target === "string" ? byId(target) : target;
     if (element) {
@@ -1003,6 +1007,22 @@
 
   function placementModeLabel() {
     return state.placementMode === "genericAnnotation" ? "Generic Annotation keynote" : "User Keynote";
+  }
+
+  function syncPlacementModeSelect() {
+    var placementModeSelect = byId("placement-mode-select");
+    if (placementModeSelect) {
+      placementModeSelect.value = state.placementMode;
+    }
+  }
+
+  function setPlacementMode(value) {
+    state.placementMode = normalizePlacementMode(value);
+    if (state.payload) {
+      state.payload.preferences = state.payload.preferences || {};
+      state.payload.preferences.placementMode = state.placementMode;
+    }
+    syncPlacementModeSelect();
   }
 
   function entryCanPlaceKeynote(entry) {
@@ -2354,8 +2374,11 @@
     var previousSelection = selectedEntry();
     var previousKey = previousSelection ? previousSelection.key : "";
     var selected = null;
+    var preferences;
 
     state.payload = payload || {};
+    preferences = state.payload.preferences || {};
+    setPlacementMode(preferences.placementMode || state.payload.placementMode || state.placementMode);
     state.entries = (state.payload.entries || []).map(normalizeEntry);
     state.sheetVisibleKeynotes = normalizeSheetVisibleKeynotes(state.payload.sheetVisibleKeynotes || {});
     state.sourceIssues = (state.payload.issues || []).filter(sourceIssueBlocksSave);
@@ -3046,11 +3069,13 @@
     }
 
     if (placementModeSelect) {
-      placementModeSelect.value = state.placementMode;
+      syncPlacementModeSelect();
       placementModeSelect.addEventListener("change", function () {
-        state.placementMode = placementModeSelect.value === "genericAnnotation"
-          ? "genericAnnotation"
-          : "userKeynote";
+        setPlacementMode(placementModeSelect.value);
+        postWebViewMessage({
+          type: "placementModeChanged",
+          placementMode: state.placementMode
+        });
         renderNotes();
       });
     }

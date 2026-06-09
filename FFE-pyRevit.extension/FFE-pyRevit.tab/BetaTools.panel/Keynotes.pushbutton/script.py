@@ -298,6 +298,32 @@ def write_json_file(path, payload):
             pass
 
 
+def read_user_settings():
+    settings = read_json_file(get_settings_path()) or {}
+    if isinstance(settings, dict):
+        return settings
+    return {}
+
+
+def normalize_placement_mode(value):
+    value = safe_str(value).strip()
+    if value == "genericAnnotation":
+        return "genericAnnotation"
+    return "userKeynote"
+
+
+def get_saved_placement_mode():
+    return normalize_placement_mode(read_user_settings().get("placementMode"))
+
+
+def save_placement_mode_setting(value):
+    placement_mode = normalize_placement_mode(value)
+    settings = read_user_settings()
+    settings["placementMode"] = placement_mode
+    write_json_file(get_settings_path(), settings)
+    return placement_mode
+
+
 def ask_for_supabase_value(prompt, default_value=""):
     try:
         value = forms.ask_for_string(
@@ -941,6 +967,9 @@ def build_base_payload(target_doc, status, message):
         "writeMessage": "",
         "generatedAt": get_generated_at(),
         "supabase": load_supabase_settings(prompt_if_missing=True),
+        "preferences": {
+            "placementMode": get_saved_placement_mode(),
+        },
         "status": status,
         "message": message,
         "entries": [],
@@ -3218,7 +3247,7 @@ class KeynoteManagerWindow(Window):
         return "{0} - {1}".format(APP_NAME, doc_title)
 
     def apply_saved_window_state(self):
-        state = read_json_file(get_settings_path()) or {}
+        state = read_user_settings()
         try:
             width = float(state.get("width") or 0)
             height = float(state.get("height") or 0)
@@ -3238,12 +3267,14 @@ class KeynoteManagerWindow(Window):
 
     def save_window_state(self):
         try:
-            write_json_file(get_settings_path(), {
+            state = read_user_settings()
+            state.update({
                 "width": float(self.Width),
                 "height": float(self.Height),
                 "left": float(self.Left),
                 "top": float(self.Top),
             })
+            write_json_file(get_settings_path(), state)
         except:
             pass
 
@@ -3408,6 +3439,16 @@ class KeynoteManagerWindow(Window):
 
         if message_type == "dirtyStateChanged":
             self.has_dirty_edits = bool(message.get("dirty"))
+            return
+
+        if message_type == "placementModeChanged":
+            placement_mode = save_placement_mode_setting(message.get("placementMode"))
+            try:
+                preferences = self.keynote_payload.get("preferences") or {}
+                preferences["placementMode"] = placement_mode
+                self.keynote_payload["preferences"] = preferences
+            except:
+                pass
             return
 
         if message_type == "refreshData":
