@@ -28,6 +28,7 @@
     collapsedEntryIds: {},
     sheetVisibleKeynotes: {},
     placementMode: "userKeynote",
+    placementFilter: "all",
     divisionsCollapsed: false,
     warningSidebarOpen: false,
     nextLocalId: 1
@@ -83,6 +84,10 @@
 
   function normalizePlacementMode(value) {
     return value === "genericAnnotation" ? "genericAnnotation" : "userKeynote";
+  }
+
+  function normalizePlacementFilter(value) {
+    return value === "placed" || value === "unused" ? value : "all";
   }
 
   function setText(target, value) {
@@ -514,6 +519,10 @@
     return trim(byId("search-input") ? byId("search-input").value : "").toLowerCase();
   }
 
+  function currentPlacementFilter() {
+    return normalizePlacementFilter(state.placementFilter);
+  }
+
   function validateAll() {
     var issues = state.sourceIssues.concat(state.operationIssues || [], state.syncIssues || []);
     var keyCounts = {};
@@ -618,6 +627,21 @@
     return entryMatchesQuery(row.entry, query);
   }
 
+  function entryMatchesPlacementFilter(entry, placementFilter) {
+    placementFilter = normalizePlacementFilter(placementFilter);
+    if (placementFilter === "placed") {
+      return keyIsPlaced(entry && entry.key);
+    }
+    if (placementFilter === "unused") {
+      return !keyIsPlaced(entry && entry.key);
+    }
+    return true;
+  }
+
+  function rowMatchesFilters(row, query, placementFilter) {
+    return rowMatchesQuery(row, query) && entryMatchesPlacementFilter(row.entry, placementFilter);
+  }
+
   function divisionMatchesQuery(model, query) {
     var haystack = (model.title + " " + model.text).toLowerCase();
 
@@ -677,11 +701,16 @@
   }
 
   function searchRowsForModel(model, query) {
+    return filteredRowsForModel(model, query, "all");
+  }
+
+  function filteredRowsForModel(model, query, placementFilter) {
     var byKey = entriesByKey();
     var rowIds = {};
     var matchIds = {};
     var contextIds = {};
     var includeIds = {};
+    placementFilter = normalizePlacementFilter(placementFilter);
 
     (model.rows || []).forEach(function (row) {
       rowIds[row.entry.id] = true;
@@ -692,7 +721,7 @@
       var parent;
       var seen = {};
 
-      if (!rowMatchesQuery(row, query)) {
+      if (!rowMatchesFilters(row, query, placementFilter)) {
         return;
       }
 
@@ -767,13 +796,14 @@
   function selectedRows() {
     var model = ensureSelection();
     var query = currentSearchQuery();
+    var placementFilter = currentPlacementFilter();
 
     if (!model) {
       return [];
     }
 
-    if (query) {
-      return searchRowsForModel(model, query);
+    if (query || placementFilter !== "all") {
+      return filteredRowsForModel(model, query, placementFilter);
     }
 
     return expandedRowsForModel(model);
@@ -1018,6 +1048,13 @@
     }
   }
 
+  function syncPlacementFilterSelect() {
+    var placementFilterSelect = byId("placement-filter-select");
+    if (placementFilterSelect) {
+      placementFilterSelect.value = currentPlacementFilter();
+    }
+  }
+
   function setPlacementMode(value) {
     state.placementMode = normalizePlacementMode(value);
     if (state.payload) {
@@ -1025,6 +1062,11 @@
       state.payload.preferences.placementMode = state.placementMode;
     }
     syncPlacementModeSelect();
+  }
+
+  function setPlacementFilter(value) {
+    state.placementFilter = normalizePlacementFilter(value);
+    syncPlacementFilterSelect();
   }
 
   function entryCanPlaceKeynote(entry) {
@@ -1116,6 +1158,7 @@
   function renderNotes() {
     var body = byId("keynote-table-body");
     var rows = selectedRows();
+    var placementFilter = currentPlacementFilter();
 
     if (!body) {
       return;
@@ -1128,7 +1171,15 @@
       var empty = document.createElement("td");
       empty.className = "empty-cell";
       empty.setAttribute("colspan", "3");
-      empty.textContent = state.entries.length ? "No notes in this division." : "No keynote notes loaded.";
+      if (!state.entries.length) {
+        empty.textContent = "No keynote notes loaded.";
+      } else if (placementFilter === "placed") {
+        empty.textContent = "No placed keynotes in this division.";
+      } else if (placementFilter === "unused") {
+        empty.textContent = "No unused keynotes in this division.";
+      } else {
+        empty.textContent = "No notes in this division.";
+      }
       emptyRow.appendChild(empty);
       body.appendChild(emptyRow);
       return;
@@ -3109,6 +3160,7 @@
   function init() {
     var searchInput = byId("search-input");
     var divisionSelectMenu = byId("division-select-menu");
+    var placementFilterSelect = byId("placement-filter-select");
     var placementModeSelect = byId("placement-mode-select");
 
     if (searchInput) {
@@ -3139,6 +3191,14 @@
           placementMode: state.placementMode
         });
         renderNotes();
+      });
+    }
+
+    if (placementFilterSelect) {
+      syncPlacementFilterSelect();
+      placementFilterSelect.addEventListener("change", function () {
+        setPlacementFilter(placementFilterSelect.value);
+        renderAll();
       });
     }
 

@@ -750,7 +750,8 @@ h2 {
   flex-wrap: wrap;
 }
 
-.placement-mode-field {
+.placement-mode-field,
+.placement-filter-field {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
@@ -761,7 +762,8 @@ h2 {
   text-transform: uppercase;
 }
 
-.placement-mode-field select {
+.placement-mode-field select,
+.placement-filter-field select {
   width: auto;
   min-width: 158px;
   min-height: 30px;
@@ -774,7 +776,12 @@ h2 {
   box-shadow: inset 0 0 0 1px var(--divider-soft);
 }
 
-.placement-mode-field select:focus {
+.placement-filter-field select {
+  min-width: 142px;
+}
+
+.placement-mode-field select:focus,
+.placement-filter-field select:focus {
   outline: 2px solid rgba(82, 108, 165, 0.26);
   border-color: var(--accent);
   box-shadow: none;
