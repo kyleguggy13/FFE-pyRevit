@@ -417,7 +417,7 @@ h2 {
 
 .action-button {
   min-height: 32px;
-  padding: 3px 10px;
+  padding: 3px 6px;
   justify-content: center;
   border: 0;
   border-radius: var(--r-sm);
@@ -462,11 +462,12 @@ h2 {
 
 .workspace {
   --division-sidebar-width: minmax(290px, 330px);
+  --workspace-gap: 14px;
   min-width: 0;
   min-height: 0;
   display: grid;
   grid-template-columns: var(--division-sidebar-width) minmax(0, 1fr);
-  gap: 14px;
+  gap: var(--workspace-gap);
   align-items: stretch;
 }
 
@@ -525,6 +526,8 @@ h2 {
   height: 32px;
   min-height: 32px;
   align-self: start;
+  position: relative;
+  z-index: 2;
   display: block;
   grid-template-rows: auto;
   overflow: visible;
@@ -727,6 +730,15 @@ h2 {
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr);
   gap: 12px;
+}
+
+.workspace.is-divisions-collapsed .notes-panel {
+  grid-column: 1 / 3;
+  grid-row: 1;
+}
+
+.workspace.is-divisions-collapsed .notes-panel > .action-row {
+  margin-left: calc(32px + var(--workspace-gap));
 }
 
 .placement-toolbar {
@@ -1326,18 +1338,28 @@ h2 {
   }
 
   .workspace {
-    --division-sidebar-width: minmax(190px, 220px);
-    grid-template-columns: var(--division-sidebar-width) minmax(430px, 1fr);
-    gap: 8px;
+    --workspace-gap: 8px;
+    grid-template-columns: minmax(430px, 1fr);
     overflow-x: auto;
   }
 
   .workspace.has-warning-sidebar {
-    grid-template-columns: var(--division-sidebar-width) minmax(430px, 1fr) minmax(210px, 250px);
+    grid-template-columns: minmax(430px, 1fr) minmax(210px, 250px);
   }
 
-  .workspace.is-divisions-collapsed {
-    --division-sidebar-width: 32px;
+  .division-panel,
+  #toggle-divisions,
+  .workspace.is-divisions-collapsed .division-panel,
+  .workspace.is-divisions-collapsed #toggle-divisions {
+    display: none;
+  }
+
+  .workspace.is-divisions-collapsed .notes-panel {
+    grid-column: auto;
+  }
+
+  .workspace.is-divisions-collapsed .notes-panel > .action-row {
+    margin-left: 0;
   }
 
   .note-table-shell {
