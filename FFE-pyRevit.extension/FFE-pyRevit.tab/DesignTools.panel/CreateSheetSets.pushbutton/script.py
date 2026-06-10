@@ -193,7 +193,7 @@ with revit.Transaction('Created Sheet Set'):
 
 
 #______________________________________________________ LOG ACTION
-action = "Creat Sheet Sets"
+action = "Create Sheet Sets"
 def log_action(action, log_status):
     """Log action to user JSON log file."""
     import os, json, time
