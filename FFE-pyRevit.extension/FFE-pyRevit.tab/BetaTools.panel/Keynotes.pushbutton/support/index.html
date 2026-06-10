@@ -84,10 +84,19 @@
           <strong id="state-title">&lt;Messages&gt;</strong>
           <span id="state-message"></span>
         </div>
-        <div class="warning-pill" data-severity="none" aria-label="Warnings">
+        <button
+          id="warning-pill"
+          class="warning-pill"
+          type="button"
+          data-severity="none"
+          aria-label="Show warnings"
+          aria-controls="validation-panel"
+          aria-expanded="false"
+          aria-pressed="false"
+        >
           <span>Warnings</span>
           <span id="validation-summary" class="warning-count">0</span>
-        </div>
+        </button>
       </section>
 
       <section class="file-strip" aria-label="Keynote file details">
@@ -111,14 +120,20 @@
               <h2 id="division-list-title">DIVISIONS</h2>
               <p id="filter-summary">0 divisions</p>
             </div>
+            <button
+              id="toggle-divisions"
+              class="sidebar-toggle division-sidebar-toggle"
+              type="button"
+              aria-label="Collapse divisions"
+              aria-controls="keynotes-section-body"
+              aria-expanded="true"
+              title="Collapse divisions"
+            >
+              <span aria-hidden="true">&lt;</span>
+            </button>
           </div>
 
           <div id="keynotes-section-body">
-            <label class="search-field" for="search-input">
-              <span>Search</span>
-              <input id="search-input" type="search" placeholder="Key, description, or parent" />
-            </label>
-
             <div class="division-list-wrap">
               <div
                 id="division-list"
@@ -134,6 +149,10 @@
 
         <section class="notes-panel" aria-labelledby="notes-title">
           <div class="placement-toolbar" aria-label="Keynote placement settings">
+            <label class="search-field toolbar-search-field" for="search-input">
+              <span>Search</span>
+              <input id="search-input" type="search" placeholder="Key, description, or parent" />
+            </label>
             <label class="placement-mode-field" for="placement-mode-select">
               <span>Place As</span>
               <select id="placement-mode-select" class="form-select form-select-sm">
@@ -193,18 +212,30 @@
             </table>
           </div>
         </section>
-      </main>
 
-      <section
-        id="validation-panel"
-        class="validation-panel"
-        aria-labelledby="validation-heading"
-      >
-        <h2 id="validation-heading">Warnings</h2>
-        <div id="validation-list" class="validation-list">
-          <div class="empty-state">No validation messages.</div>
-        </div>
-      </section>
+        <aside
+          id="validation-panel"
+          class="validation-panel"
+          aria-labelledby="validation-heading"
+          hidden
+        >
+          <div class="validation-heading">
+            <h2 id="validation-heading">Warnings</h2>
+            <button
+              id="close-validation-sidebar"
+              class="sidebar-toggle validation-close"
+              type="button"
+              aria-label="Close warnings"
+              title="Close warnings"
+            >
+              <span aria-hidden="true">x</span>
+            </button>
+          </div>
+          <div id="validation-list" class="validation-list">
+            <div class="empty-state">No validation messages.</div>
+          </div>
+        </aside>
+      </main>
     </div>
   </body>
 </html>

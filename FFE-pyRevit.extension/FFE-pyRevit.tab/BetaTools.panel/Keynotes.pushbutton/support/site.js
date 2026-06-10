@@ -28,6 +28,8 @@
     collapsedEntryIds: {},
     sheetVisibleKeynotes: {},
     placementMode: "userKeynote",
+    divisionsCollapsed: false,
+    warningSidebarOpen: false,
     nextLocalId: 1
   };
 
@@ -1271,7 +1273,7 @@
 
   function renderValidation() {
     var container = byId("validation-list");
-    var warningPill = document.querySelector(".warning-pill");
+    var warningPill = byId("warning-pill");
     var issues = validateAll();
     var errors = issues.filter(function (issue) {
       return text(issue.severity).toLowerCase() === "error";
@@ -1379,6 +1381,65 @@
     }
   }
 
+  function syncSidebarState() {
+    var workspace = document.querySelector(".workspace");
+    var divisionBody = byId("keynotes-section-body");
+    var divisionToggle = byId("toggle-divisions");
+    var warningPill = byId("warning-pill");
+    var validationPanel = byId("validation-panel");
+    var divisionsExpanded = !state.divisionsCollapsed;
+    var warningsOpen = Boolean(state.warningSidebarOpen);
+    var divisionToggleIcon;
+
+    if (workspace) {
+      workspace.classList.toggle("is-divisions-collapsed", state.divisionsCollapsed);
+      workspace.classList.toggle("has-warning-sidebar", warningsOpen);
+    }
+
+    if (divisionBody) {
+      divisionBody.hidden = !divisionsExpanded;
+    }
+
+    if (divisionToggle) {
+      divisionToggle.setAttribute("aria-expanded", divisionsExpanded ? "true" : "false");
+      divisionToggle.setAttribute("aria-label", divisionsExpanded ? "Collapse divisions" : "Expand divisions");
+      divisionToggle.setAttribute("title", divisionsExpanded ? "Collapse divisions" : "Expand divisions");
+      divisionToggleIcon = divisionToggle.querySelector("[aria-hidden='true']");
+      if (divisionToggleIcon) {
+        divisionToggleIcon.textContent = divisionsExpanded ? "<" : ">";
+      }
+    }
+
+    if (warningPill) {
+      warningPill.setAttribute("aria-expanded", warningsOpen ? "true" : "false");
+      warningPill.setAttribute("aria-pressed", warningsOpen ? "true" : "false");
+      warningPill.setAttribute("aria-label", warningsOpen ? "Hide warnings" : "Show warnings");
+    }
+
+    if (validationPanel) {
+      validationPanel.hidden = !warningsOpen;
+      validationPanel.setAttribute("aria-hidden", warningsOpen ? "false" : "true");
+    }
+  }
+
+  function setDivisionsCollapsed(isCollapsed) {
+    state.divisionsCollapsed = Boolean(isCollapsed);
+    syncSidebarState();
+  }
+
+  function toggleDivisionsSidebar() {
+    setDivisionsCollapsed(!state.divisionsCollapsed);
+  }
+
+  function setWarningSidebarOpen(isOpen) {
+    state.warningSidebarOpen = Boolean(isOpen);
+    syncSidebarState();
+  }
+
+  function toggleWarningSidebar() {
+    setWarningSidebarOpen(!state.warningSidebarOpen);
+  }
+
   function renderAll() {
     ensureSelection();
     renderMeta();
@@ -1389,6 +1450,7 @@
     renderValidation();
     renderSaveState();
     renderRowActions();
+    syncSidebarState();
   }
 
   function deferRenderAllWhenEditingSettles() {
@@ -3088,6 +3150,11 @@
     bindClick("add-sub-note", addSubNote);
     bindClick("duplicate-row", duplicateSelected);
     bindClick("delete-row", deleteSelected);
+    bindClick("toggle-divisions", toggleDivisionsSidebar);
+    bindClick("warning-pill", toggleWarningSidebar);
+    bindClick("close-validation-sidebar", function () {
+      setWarningSidebarOpen(false);
+    });
     bindClick("configure-supabase", configureSupabase);
     bindClick("refresh-data", refreshData);
     bindClick("collect-analytics", collectAnalytics);
