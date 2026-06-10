@@ -167,7 +167,7 @@ h2 {
   margin: 10px auto;
   padding: 8px;
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 12px;
   background: var(--page-3);
 }
@@ -475,7 +475,7 @@ h2 {
 }
 
 .workspace.is-divisions-collapsed {
-  --division-sidebar-width: 44px;
+  --division-sidebar-width: 32px;
 }
 
 .division-panel,
@@ -521,12 +521,25 @@ h2 {
 }
 
 .workspace.is-divisions-collapsed .division-panel {
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  align-self: start;
+  display: block;
   grid-template-rows: auto;
+  overflow: visible;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .workspace.is-divisions-collapsed .division-heading {
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
   justify-content: center;
-  padding: 8px 6px;
+  padding: 0;
+  border-bottom: 0;
 }
 
 .workspace.is-divisions-collapsed .division-heading > div {
@@ -535,6 +548,12 @@ h2 {
 
 .workspace.is-divisions-collapsed #keynotes-section-body {
   display: none;
+}
+
+.workspace.is-divisions-collapsed #toggle-divisions {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
 }
 
 #keynotes-section-body {
@@ -706,7 +725,7 @@ h2 {
 
 .notes-panel {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   gap: 12px;
 }
 
@@ -1318,7 +1337,7 @@ h2 {
   }
 
   .workspace.is-divisions-collapsed {
-    --division-sidebar-width: 42px;
+    --division-sidebar-width: 32px;
   }
 
   .note-table-shell {
