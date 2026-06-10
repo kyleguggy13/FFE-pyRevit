@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 __title__ = "FFE-Keynotes"
-__version__ = "Version = v0.11"
+__version__ = "Version = v0.12"
 __persistentengine__ = True
 __min_revit_ver__ = 2025
-__doc__ = """Version = v0.11
-Date    = 06.09.2026
+__doc__ = """Version = v0.12
+Date    = 06.10.2026
 __________________________________________________________________
 Description:
 Persistent WebView2 keynote manager for the active Revit document's
@@ -27,6 +27,7 @@ Last update:
 - [06.02.2026] - v0.9 Applied the standard leader arrowhead to Generic Annotation keynote types.
 - [06.03.2026] - v0.10 Added Analyics tracking for keynote manager usage and errors.
 - [06.09.2026] - v0.11 Made Place As persist across sessions.
+- [06.10.2026] - v0.12 Added placedment filter and collapsible division panel.
 __________________________________________________________________
 Author: Kyle Guggenheim"""
 
