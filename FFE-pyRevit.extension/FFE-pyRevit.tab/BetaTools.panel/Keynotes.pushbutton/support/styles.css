@@ -1320,7 +1320,7 @@ h2 {
 
 @media (max-width: 900px) {
   .app-shell {
-    width: min(100%, 800px);
+    width: min(100%, 900px);
     margin: 10px auto;
     min-height: calc(100vh - 48px);
   }
