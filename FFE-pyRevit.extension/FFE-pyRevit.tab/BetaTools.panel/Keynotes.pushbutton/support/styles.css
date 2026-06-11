@@ -164,7 +164,7 @@ h2 {
 .app-shell {
   width: min(100%, 1160px);
   min-height: calc(100vh - 72px);
-  margin: 10px auto;
+  margin: 6px 6px;
   padding: 8px;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
