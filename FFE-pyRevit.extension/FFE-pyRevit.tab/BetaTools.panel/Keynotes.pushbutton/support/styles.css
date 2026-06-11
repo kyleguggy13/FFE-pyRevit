@@ -461,7 +461,7 @@ h2 {
 }
 
 .workspace {
-  --division-sidebar-width: minmax(290px, 330px);
+  --division-sidebar-width: minmax(270px, 300px);
   --workspace-gap: 14px;
   min-width: 0;
   min-height: 0;
@@ -989,7 +989,7 @@ h2 {
 }
 
 .note-key-col {
-  width: 170px;
+  width: 150px;
 }
 
 .note-table > :not(caption) > * > * {
@@ -1080,19 +1080,14 @@ h2 {
   border-right: 1px solid var(--divider-soft);
 }
 
-.note-row.is-selected .note-key-cell::before,
-.note-row.is-claimed .note-key-cell::before {
+.note-row.is-claimed:not(.is-selected) .note-key-cell::before {
   content: "";
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   position: absolute;
-  top: 15px;
-  left: 6px;
+  top: 14px;
+  left: 3px;
   border-radius: 50%;
-  background: var(--accent);
-}
-
-.note-row.is-claimed .note-key-cell::before {
   background: var(--warning);
 }
 
@@ -1101,8 +1096,8 @@ h2 {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 3px;
-  padding: 2px 6px 2px calc(16px + (var(--depth, 0) * 16px));
+  gap: 1px;
+  padding: 1px 4px 1px calc(8px + (var(--depth, 0) * 12px));
 }
 
 .note-key-wrap.sheet-marker-anchor {
@@ -1128,8 +1123,8 @@ h2 {
 
 .note-tree-toggle,
 .note-tree-spacer {
-  width: 20px;
-  min-width: 20px;
+  width: 14px;
+  min-width: 14px;
   height: 24px;
   margin-top: 0;
 }
@@ -1207,6 +1202,8 @@ h2 {
 .note-key-input {
   flex: 1 1 auto;
   height: auto;
+  padding-right: 2px;
+  padding-left: 2px;
   text-align: left;
   vertical-align: top;
 }
