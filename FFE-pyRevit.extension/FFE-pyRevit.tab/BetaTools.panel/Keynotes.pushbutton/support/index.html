@@ -26,7 +26,7 @@
       <header class="title-card">
         <div class="brand-copy">
           <p class="eyebrow">FFE-PYREVIT v1.13.1</p>
-          <h1>KEYNOTE MANAGER v0.12</h1>
+          <h1>KEYNOTE MANAGER v0.13</h1>
           <p class="meta-line">
             <span id="doc-title">Waiting for Revit document</span>
             <span id="dirty-state" data-dirty="false">NO CHANGES</span>
@@ -87,25 +87,48 @@
           <strong id="state-title">&lt;Messages&gt;</strong>
           <span id="state-message"></span>
         </div>
-        <button
-          id="warning-pill"
-          class="warning-pill"
-          type="button"
-          data-severity="none"
-          aria-label="Show warnings"
-          aria-controls="validation-panel"
-          aria-expanded="false"
-          aria-pressed="false"
-        >
-          <span>Warnings</span>
-          <span id="validation-summary" class="warning-count">0</span>
-        </button>
+        <div class="message-actions">
+          <button
+            id="warning-pill"
+            class="warning-pill"
+            type="button"
+            data-severity="none"
+            aria-label="Show warnings"
+            aria-controls="validation-panel"
+            aria-expanded="false"
+            aria-pressed="false"
+          >
+            <span>Warnings</span>
+            <span id="validation-summary" class="warning-count">0</span>
+          </button>
+          <button
+            id="model-health-pill"
+            class="warning-pill model-health-pill"
+            type="button"
+            data-severity="none"
+            aria-label="Show model issues"
+            aria-controls="model-issues-panel"
+            aria-expanded="false"
+            aria-pressed="false"
+          >
+            <span>Model Issues</span>
+            <span id="model-health-summary" class="warning-count">0</span>
+          </button>
+        </div>
       </section>
 
       <section class="file-strip" aria-label="Keynote file details">
         <span id="keynote-path">No keynote file loaded</span>
         <span id="encoding-label">-</span>
         <span><strong id="entry-count">0</strong> entries</span>
+      </section>
+
+      <section id="safe-mode-strip" class="safe-mode-strip" hidden>
+        <div>
+          <strong>Safe Mode</strong>
+          <span id="safe-mode-message">Review model issues before editing this keynote file.</span>
+        </div>
+        <button id="review-model-issues" class="utility-button" type="button">Review Model Issues</button>
       </section>
 
       <main class="workspace">
@@ -247,6 +270,47 @@
           </div>
         </aside>
       </main>
+
+      <div id="model-issues-overlay" class="model-issues-overlay" hidden>
+        <button
+          id="model-issues-scrim"
+          class="model-issues-scrim"
+          type="button"
+          aria-label="Close model issues"
+        ></button>
+        <aside
+          id="model-issues-panel"
+          class="model-issues-panel"
+          role="dialog"
+          aria-labelledby="model-issues-heading"
+          aria-modal="false"
+        >
+          <div class="model-issues-heading">
+            <div>
+              <h2 id="model-issues-heading">Model Issues</h2>
+              <p id="model-health-status">Model health has not been scanned.</p>
+            </div>
+            <button
+              id="close-model-issues"
+              class="sidebar-toggle model-issues-close"
+              type="button"
+              aria-label="Close model issues"
+              title="Close model issues"
+            >
+              <span aria-hidden="true">x</span>
+            </button>
+          </div>
+          <div id="model-health-stats" class="model-health-stats"></div>
+          <div id="model-issues-list" class="model-issues-list">
+            <div class="empty-state">No model issues.</div>
+          </div>
+          <div class="model-issues-footer">
+            <button id="acknowledge-model-health" class="save-button" type="button">
+              Reviewed - Unlock Editing
+            </button>
+          </div>
+        </aside>
+      </div>
     </div>
   </body>
 </html>

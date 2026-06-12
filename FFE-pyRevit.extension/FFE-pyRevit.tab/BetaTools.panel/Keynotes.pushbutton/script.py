@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 __title__ = "FFE-Keynotes"
-__version__ = "v0.12"
+__version__ = "v0.13"
 __persistentengine__ = True
 __min_revit_ver__ = 2026
-__doc__ = """Version = v0.12
-Date    = 06.10.2026
+__doc__ = """Version = v0.13
+Date    = 06.12.2026
 __________________________________________________________________
 Description:
 Persistent WebView2 keynote manager for the active Revit document's
@@ -28,6 +28,7 @@ Last update:
 - [06.03.2026] - v0.10 Added Analyics tracking for keynote manager usage and errors.
 - [06.09.2026] - v0.11 Made Place As persist across sessions.
 - [06.10.2026] - v0.12 Added placedment filter and collapsible division panel.
+- [06.12.2026] - v0.13 Added automatic model health scan and Safe Mode.
 __________________________________________________________________
 Author: Kyle Guggenheim"""
 
@@ -126,12 +127,16 @@ PATH_SUPPORT = os.path.join(PATH_SCRIPT, "support")
 PATH_INDEX = os.path.join(PATH_SUPPORT, "index.html")
 
 APP_NAME = "FFE Keynote Manager"
-APP_VERSION = "v0.12"
+APP_VERSION = "v0.13"
 LOCAL_APP_NAME = "KeynoteManager"
 GENERIC_KEYNOTE_FAMILY_NAME = "FFE_Symbol_Keynote (Type)"
 GENERIC_KEYNOTE_NUMBER_PARAMETER = "Number"
 GENERIC_KEYNOTE_TEXT_PARAMETER = "Text"
 GENERIC_KEYNOTE_LEADER_ARROWHEAD_NAME = "Arrow Filled 20 Degree"
+MODEL_HEALTH_SAFE_MODE_MISSING_KEY_COUNT = 5
+MODEL_HEALTH_SAFE_MODE_RATIO = 0.20
+MODEL_HEALTH_SAFE_MODE_RATIO_MIN_MISSING_KEYS = 2
+MODEL_HEALTH_SAFE_MODE_RATIO_MIN_PLACED_KEYS = 5
 
 SHARED_SUPABASE_SETTINGS_PARTS = (
     "FFE Inc",
@@ -961,6 +966,28 @@ def canonicalize_entries(entries, line_ending):
 
 
 # ____________________________________________________________________ PAYLOAD / SAVE HELPERS
+def make_empty_model_health(status="notScanned", message="Model health has not been scanned."):
+    return {
+        "status": status,
+        "message": message,
+        "scannedAt": None,
+        "safeModeRecommended": False,
+        "signature": "",
+        "placedKeyCount": 0,
+        "placedCount": 0,
+        "missingKeyCount": 0,
+        "missingPlacedCount": 0,
+        "missingRatio": 0,
+        "userKeynoteCount": 0,
+        "genericAnnotationCount": 0,
+        "sheetCount": 0,
+        "unsheetedCount": 0,
+        "skippedCount": 0,
+        "placedKeyMap": {},
+        "issues": [],
+    }
+
+
 def build_base_payload(target_doc, status, message):
     return {
         "name": APP_NAME,
@@ -986,10 +1013,11 @@ def build_base_payload(target_doc, status, message):
         "issues": [],
         "entryCount": 0,
         "sheetVisibleKeynotes": {},
+        "modelHealth": make_empty_model_health(),
     }
 
 
-def build_keynote_payload(target_doc):
+def build_keynote_payload(target_doc, include_model_health=True):
     payload = build_base_payload(target_doc, "error", "")
 
     try:
@@ -1017,19 +1045,21 @@ def build_keynote_payload(target_doc):
         issues = validate_entries(entries, parse_issues)
         file_state = get_file_state(keynote_path)
         write_ok, write_message = check_file_write_available(keynote_path)
-        sheet_visible_keynotes = {}
         if not write_ok:
             issues.append(make_issue("warning", write_message, "", None, "writeUnavailable"))
-        try:
-            sheet_visible_keynotes = collect_sheet_visible_keynotes(target_doc)
-        except Exception as scan_exc:
-            issues.append(make_issue(
-                "warning",
-                "Could not scan placed keynote annotations: {0}".format(safe_str(scan_exc)),
-                "",
-                None,
-                "sheetVisibleKeynoteScanFailed"
-            ))
+        model_health = make_empty_model_health()
+        if include_model_health:
+            model_health = build_model_health(target_doc, {
+                "libraryKey": normalize_path(keynote_path),
+                "displayPath": keynote_path,
+                "keynotePath": keynote_path,
+                "encoding": encoding,
+                "lineEnding": line_ending,
+                "fileHash": file_state.get("fileHash"),
+                "lastWriteUtc": file_state.get("lastWriteUtc"),
+                "entries": entries,
+                "entryCount": len(entries),
+            })
 
         payload.update({
             "status": "invalidFormat" if has_error_issues(issues) else "ready",
@@ -1043,7 +1073,8 @@ def build_keynote_payload(target_doc):
             "entries": entries,
             "issues": issues,
             "entryCount": len(entries),
-            "sheetVisibleKeynotes": sheet_visible_keynotes,
+            "sheetVisibleKeynotes": model_health.get("placedKeyMap") or {},
+            "modelHealth": model_health,
         })
 
         if has_error_issues(issues):
@@ -2187,9 +2218,315 @@ def collect_keynote_analytics(target_doc, keynote_payload):
     return analytics
 
 
+def make_model_health_issue(severity, code, key, message, row=None, details="", type_names=None):
+    row = row or {}
+    issue = {
+        "severity": severity or "warning",
+        "code": code or "modelHealthIssue",
+        "key": safe_unicode(key).strip(),
+        "message": safe_unicode(message).strip(),
+        "details": safe_unicode(details).strip(),
+        "placedCount": int(row.get("placedCount") or 0),
+        "userKeynoteCount": int(row.get("userKeynoteCount") or 0),
+        "genericAnnotationCount": int(row.get("genericAnnotationCount") or 0),
+        "sheetCount": int(row.get("sheetCount") or 0),
+        "unsheetedCount": int(row.get("unsheetedCount") or 0),
+        "sheets": row.get("sheets") or [],
+    }
+    if type_names:
+        issue["typeNames"] = [safe_unicode(name).strip() for name in type_names if safe_unicode(name).strip()]
+    return issue
+
+
+def get_symbol_parameter_health_state(symbol, parameter_name):
+    result = {
+        "present": False,
+        "readOnly": False,
+        "value": "",
+    }
+
+    try:
+        parameter = symbol.LookupParameter(parameter_name)
+    except:
+        parameter = None
+
+    if parameter is None:
+        return result
+
+    result["present"] = True
+    result["value"] = get_parameter_text(parameter)
+    try:
+        result["readOnly"] = bool(parameter.IsReadOnly)
+    except:
+        result["readOnly"] = False
+
+    return result
+
+
+def append_generic_annotation_model_health_issues(target_doc, entry_by_key, issues):
+    family = get_generic_annotation_keynote_family(target_doc)
+    if family is None:
+        return
+
+    symbols = get_family_symbols(target_doc, family)
+    if not symbols:
+        issues.append(make_model_health_issue(
+            "warning",
+            "genericAnnotationFamilyHasNoTypes",
+            "",
+            "Generic Annotation family '{0}' does not contain any types.".format(GENERIC_KEYNOTE_FAMILY_NAME)
+        ))
+        return
+
+    if get_leader_arrowhead_type(target_doc) is None:
+        issues.append(make_model_health_issue(
+            "warning",
+            "genericAnnotationLeaderArrowheadMissing",
+            "",
+            "Arrowhead type '{0}' was not found for Generic Annotation keynote types.".format(
+                GENERIC_KEYNOTE_LEADER_ARROWHEAD_NAME
+            )
+        ))
+
+    instances_by_symbol = collect_generic_annotation_instances_by_symbol(target_doc)
+    symbols_by_key = {}
+
+    for symbol in symbols:
+        type_name = get_element_name(symbol)
+        number_state = get_symbol_parameter_health_state(symbol, GENERIC_KEYNOTE_NUMBER_PARAMETER)
+        text_state = get_symbol_parameter_health_state(symbol, GENERIC_KEYNOTE_TEXT_PARAMETER)
+        symbol_key = safe_unicode(number_state.get("value")).strip() or type_name
+        instance_count = len(instances_by_symbol.get(get_element_id_key(symbol)) or [])
+        row = {
+            "placedCount": instance_count,
+            "genericAnnotationCount": instance_count,
+        }
+
+        if symbol_key:
+            if symbol_key not in symbols_by_key:
+                symbols_by_key[symbol_key] = []
+            symbols_by_key[symbol_key].append(symbol)
+
+        if not number_state.get("present"):
+            issues.append(make_model_health_issue(
+                "warning",
+                "genericAnnotationMissingNumberParameter",
+                symbol_key,
+                "Generic Annotation type '{0}' is missing the '{1}' parameter.".format(
+                    type_name,
+                    GENERIC_KEYNOTE_NUMBER_PARAMETER
+                ),
+                row
+            ))
+        elif number_state.get("readOnly"):
+            issues.append(make_model_health_issue(
+                "warning",
+                "genericAnnotationReadOnlyNumberParameter",
+                symbol_key,
+                "Generic Annotation type '{0}' has a read-only '{1}' parameter.".format(
+                    type_name,
+                    GENERIC_KEYNOTE_NUMBER_PARAMETER
+                ),
+                row
+            ))
+
+        if not text_state.get("present"):
+            issues.append(make_model_health_issue(
+                "warning",
+                "genericAnnotationMissingTextParameter",
+                symbol_key,
+                "Generic Annotation type '{0}' is missing the '{1}' parameter.".format(
+                    type_name,
+                    GENERIC_KEYNOTE_TEXT_PARAMETER
+                ),
+                row
+            ))
+        elif text_state.get("readOnly"):
+            issues.append(make_model_health_issue(
+                "warning",
+                "genericAnnotationReadOnlyTextParameter",
+                symbol_key,
+                "Generic Annotation type '{0}' has a read-only '{1}' parameter.".format(
+                    type_name,
+                    GENERIC_KEYNOTE_TEXT_PARAMETER
+                ),
+                row
+            ))
+
+        if number_state.get("value") and type_name and number_state.get("value") != type_name:
+            issues.append(make_model_health_issue(
+                "warning",
+                "genericAnnotationTypeNameMismatch",
+                symbol_key,
+                "Generic Annotation type '{0}' has Number '{1}'.".format(
+                    type_name,
+                    number_state.get("value")
+                ),
+                row,
+                "The type name and Number parameter should match the keynote key."
+            ))
+
+        if symbol_key in entry_by_key and text_state.get("present"):
+            expected_text = safe_unicode(entry_by_key[symbol_key].get("text")).strip()
+            current_text = safe_unicode(text_state.get("value")).strip()
+            if expected_text != current_text:
+                issues.append(make_model_health_issue(
+                    "warning",
+                    "genericAnnotationTextMismatch",
+                    symbol_key,
+                    "Generic Annotation type '{0}' text does not match the keynote file.".format(type_name),
+                    row,
+                    "Model text: {0} | File text: {1}".format(current_text, expected_text)
+                ))
+
+    for symbol_key, key_symbols in symbols_by_key.items():
+        if len(key_symbols) < 2:
+            continue
+        type_names = [get_element_name(symbol) for symbol in key_symbols]
+        issues.append(make_model_health_issue(
+            "warning",
+            "genericAnnotationDuplicateTypes",
+            symbol_key,
+            "{0} Generic Annotation types match keynote key '{1}'.".format(len(key_symbols), symbol_key),
+            {
+                "placedCount": sum([len(instances_by_symbol.get(get_element_id_key(symbol)) or []) for symbol in key_symbols]),
+                "genericAnnotationCount": sum([len(instances_by_symbol.get(get_element_id_key(symbol)) or []) for symbol in key_symbols]),
+            },
+            "Types: {0}".format(", ".join(type_names)),
+            type_names
+        ))
+
+
+def model_health_issue_sort_key(issue):
+    severity = safe_unicode(issue.get("severity")).lower()
+    severity_rank = severity == "error" and "0" or "1"
+    return "{0}|{1}|{2}".format(
+        severity_rank,
+        safe_unicode(issue.get("code")).lower(),
+        safe_unicode(issue.get("key")).lower()
+    )
+
+
+def make_model_health_signature(analytics, issues, keynote_payload):
+    signature_rows = []
+    for issue in issues or []:
+        signature_rows.append({
+            "severity": issue.get("severity") or "",
+            "code": issue.get("code") or "",
+            "key": issue.get("key") or "",
+            "placedCount": issue.get("placedCount") or 0,
+            "genericAnnotationCount": issue.get("genericAnnotationCount") or 0,
+            "typeNames": issue.get("typeNames") or [],
+        })
+
+    source = json.dumps({
+        "documentKey": analytics.get("documentKey") or "",
+        "libraryKey": keynote_payload.get("libraryKey") or analytics.get("libraryKey") or "",
+        "fileHash": keynote_payload.get("fileHash") or analytics.get("fileHash") or "",
+        "placedKeyCount": analytics.get("placedKeyCount") or 0,
+        "orphanKeyCount": analytics.get("orphanKeyCount") or 0,
+        "issues": signature_rows,
+    }, ensure_ascii=True, sort_keys=True)
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()
+
+
+def build_model_health_from_analytics(target_doc, keynote_payload, analytics):
+    keynote_payload = keynote_payload or {}
+    analytics = analytics or {}
+    issues = []
+    entry_by_key = {}
+
+    for entry in keynote_payload.get("entries") or []:
+        key = safe_unicode(entry.get("key")).strip()
+        if key:
+            entry_by_key[key] = entry
+
+    missing_key_count = 0
+    missing_placed_count = 0
+    for row in analytics.get("analyticsRows") or []:
+        if not row.get("placed") or row.get("inLibrary"):
+            continue
+        missing_key_count += 1
+        missing_placed_count += int(row.get("placedCount") or 0)
+        issues.append(make_model_health_issue(
+            "error",
+            "placedKeyMissingFromLibrary",
+            row.get("keynoteKey"),
+            "Placed keynote key '{0}' was not found in the active keynote file.".format(
+                safe_unicode(row.get("keynoteKey")).strip()
+            ),
+            row
+        ))
+
+    append_generic_annotation_model_health_issues(target_doc, entry_by_key, issues)
+    issues = sorted(issues, key=model_health_issue_sort_key)
+
+    placed_key_count = int(analytics.get("placedKeyCount") or 0)
+    missing_ratio = placed_key_count and (float(missing_key_count) / float(placed_key_count)) or 0
+    safe_mode_recommended = (
+        missing_key_count >= MODEL_HEALTH_SAFE_MODE_MISSING_KEY_COUNT or
+        (
+            missing_key_count >= MODEL_HEALTH_SAFE_MODE_RATIO_MIN_MISSING_KEYS and
+            placed_key_count >= MODEL_HEALTH_SAFE_MODE_RATIO_MIN_PLACED_KEYS and
+            missing_ratio >= MODEL_HEALTH_SAFE_MODE_RATIO
+        )
+    )
+    status = safe_mode_recommended and "safeMode" or (issues and "issues" or "ready")
+    message = "Model health scan found no model/keynote mismatches."
+    if issues:
+        message = "Model health scan found {0} issue(s).".format(len(issues))
+    if safe_mode_recommended:
+        message = "Safe Mode recommended: {0} placed keynote key(s) are missing from the active keynote file.".format(
+            missing_key_count
+        )
+
+    health = make_empty_model_health(status, message)
+    health.update({
+        "scannedAt": analytics.get("collectedAt") or get_generated_at(),
+        "safeModeRecommended": bool(safe_mode_recommended),
+        "placedKeyCount": placed_key_count,
+        "placedCount": int(analytics.get("placedCount") or 0),
+        "missingKeyCount": missing_key_count,
+        "missingPlacedCount": missing_placed_count,
+        "missingRatio": missing_ratio,
+        "userKeynoteCount": int(analytics.get("userKeynoteCount") or 0),
+        "genericAnnotationCount": int(analytics.get("genericAnnotationCount") or 0),
+        "sheetCount": int(analytics.get("sheetCount") or 0),
+        "unsheetedCount": int(analytics.get("unsheetedCount") or 0),
+        "skippedCount": int(analytics.get("skippedCount") or 0),
+        "placedKeyMap": analytics.get("placedKeyMap") or {},
+        "issues": issues,
+    })
+    health["signature"] = make_model_health_signature(analytics, issues, keynote_payload)
+    return health
+
+
+def build_model_health(target_doc, keynote_payload, analytics=None):
+    try:
+        analytics = analytics or collect_keynote_analytics(target_doc, keynote_payload)
+        return build_model_health_from_analytics(target_doc, keynote_payload, analytics)
+    except Exception as exc:
+        try:
+            LOGGER.debug(traceback.format_exc())
+        except:
+            pass
+        health = make_empty_model_health(
+            "error",
+            "Could not scan model health: {0}".format(safe_str(exc))
+        )
+        health["issues"] = [make_model_health_issue(
+            "warning",
+            "modelHealthScanFailed",
+            "",
+            health["message"]
+        )]
+        health["signature"] = hashlib.sha256(health["message"].encode("utf-8")).hexdigest()
+        return health
+
+
 def collect_keynote_analytics_payload(target_doc):
     try:
-        keynote_payload = build_keynote_payload(target_doc)
+        keynote_payload = build_keynote_payload(target_doc, include_model_health=False)
         if not keynote_payload.get("libraryKey"):
             return {
                 "status": "error",
@@ -2217,10 +2554,13 @@ def collect_keynote_analytics_payload(target_doc):
                 analytics.get("orphanKeyCount")
             )
 
+        model_health = build_model_health(target_doc, keynote_payload, analytics)
+
         return {
             "status": "ready",
             "message": message,
             "analytics": analytics,
+            "modelHealth": model_health,
         }
     except Exception as exc:
         try:

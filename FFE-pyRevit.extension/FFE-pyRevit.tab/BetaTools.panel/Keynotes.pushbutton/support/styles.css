@@ -318,6 +318,13 @@ h2 {
   white-space: nowrap;
 }
 
+.message-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .message-strip[data-tone="ready"]::before {
   background: var(--positive);
 }
@@ -370,6 +377,10 @@ h2 {
   background: var(--negative);
 }
 
+.model-health-pill[data-severity="error"] {
+  color: var(--negative);
+}
+
 .warning-pill[aria-pressed="true"] {
   background: var(--accent-wash);
   box-shadow: inset 0 0 0 1px rgba(45, 82, 120, 0.2);
@@ -406,6 +417,46 @@ h2 {
 
 .file-strip {
   display: none;
+}
+
+.safe-mode-strip {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: rgba(139, 42, 42, 0.09);
+  color: var(--ink-1);
+  box-shadow: inset 0 0 0 1px rgba(139, 42, 42, 0.22);
+}
+
+.safe-mode-strip[hidden] {
+  display: none;
+}
+
+.safe-mode-strip > div {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.safe-mode-strip strong {
+  flex: 0 0 auto;
+  color: var(--negative);
+  font-size: var(--t-em-sm);
+}
+
+.safe-mode-strip span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: var(--t-em-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .action-row {
@@ -1329,13 +1380,15 @@ h2 {
 }
 
 .validation-item strong,
+.model-issue-item strong,
 .validation-detail {
   min-width: 0;
   overflow-wrap: anywhere;
   white-space: normal;
 }
 
-.validation-item strong {
+.validation-item strong,
+.model-issue-item strong {
   color: var(--ink-1);
   font-size: var(--t-em-sm);
   font-weight: var(--w-medium);
@@ -1358,6 +1411,161 @@ h2 {
   border-radius: var(--r-md);
   color: var(--ink-2);
   text-align: center;
+}
+
+.model-issues-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  justify-items: end;
+  background: transparent;
+}
+
+.model-issues-overlay[hidden] {
+  display: none;
+}
+
+.model-issues-scrim {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(4, 26, 51, 0.10);
+}
+
+.model-issues-panel {
+  position: relative;
+  z-index: 1;
+  width: min(420px, calc(100vw - 32px));
+  max-width: 100%;
+  height: calc(100vh - 28px);
+  margin: 14px;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border-radius: var(--r-md);
+  background: var(--page-3);
+  box-shadow: 0 18px 40px rgba(4, 26, 51, 0.22);
+}
+
+.model-issues-heading {
+  min-width: 0;
+  min-height: 58px;
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border-bottom: 1px solid var(--divider-soft);
+}
+
+.model-issues-heading h2 {
+  margin: 0;
+  color: var(--ink-1);
+  font-size: var(--t-em-md);
+}
+
+.model-issues-heading p {
+  margin: 2px 0 0;
+  color: var(--ink-2);
+  font-size: var(--t-em-xs);
+  line-height: 1.3;
+}
+
+.model-health-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--divider-soft);
+}
+
+.model-health-stats > div {
+  min-width: 0;
+  padding: 8px;
+  border-radius: var(--r-sm);
+  background: var(--page-2);
+}
+
+.model-health-stats strong,
+.model-health-stats span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-health-stats strong {
+  color: var(--ink-1);
+  font-size: var(--t-em-lg);
+  line-height: 1.1;
+}
+
+.model-health-stats span {
+  margin-top: 2px;
+  color: var(--ink-2);
+  font-size: var(--t-em-xs);
+}
+
+.model-issues-list {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  overflow: auto;
+  padding: 10px 12px;
+}
+
+.model-issue-group {
+  margin: 4px 0 0;
+  color: var(--ink-2);
+  font-size: var(--t-em-xs);
+  font-weight: var(--w-semibold);
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.model-issue-item {
+  appearance: none;
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: var(--r-md);
+  background: var(--page-3);
+  color: var(--ink-1);
+  text-align: left;
+}
+
+.model-issue-item[data-severity="error"] {
+  border-color: var(--negative);
+}
+
+.model-issue-item[data-severity="warning"] {
+  border-color: var(--warning);
+}
+
+.model-issue-item:disabled {
+  cursor: default;
+  color: var(--ink-1);
+  opacity: 1;
+}
+
+.model-issues-footer {
+  display: flex;
+  justify-content: end;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--divider-soft);
+  background: var(--page-3);
+}
+
+.model-issues-footer .save-button:disabled {
+  opacity: 0.55;
 }
 
 

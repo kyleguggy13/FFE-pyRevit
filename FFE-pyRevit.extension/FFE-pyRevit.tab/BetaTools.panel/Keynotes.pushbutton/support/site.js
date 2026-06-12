@@ -23,6 +23,9 @@
     operationIssues: [],
     analyticsCollecting: false,
     lastAnalyticsResult: null,
+    modelHealth: null,
+    modelIssuesOpen: false,
+    reviewedModelHealthSignature: "",
     remotePending: false,
     allowNextLoad: false,
     collapsedEntryIds: {},
@@ -145,6 +148,100 @@
       }
     });
     return result;
+  }
+
+  function normalizeModelHealth(value) {
+    value = value || {};
+    return {
+      status: text(value.status || "notScanned"),
+      message: text(value.message || "Model health has not been scanned."),
+      scannedAt: text(value.scannedAt),
+      safeModeRecommended: Boolean(value.safeModeRecommended),
+      signature: text(value.signature),
+      placedKeyCount: Number(value.placedKeyCount || 0),
+      placedCount: Number(value.placedCount || 0),
+      missingKeyCount: Number(value.missingKeyCount || 0),
+      missingPlacedCount: Number(value.missingPlacedCount || 0),
+      missingRatio: Number(value.missingRatio || 0),
+      userKeynoteCount: Number(value.userKeynoteCount || 0),
+      genericAnnotationCount: Number(value.genericAnnotationCount || 0),
+      sheetCount: Number(value.sheetCount || 0),
+      unsheetedCount: Number(value.unsheetedCount || 0),
+      skippedCount: Number(value.skippedCount || 0),
+      placedKeyMap: normalizeSheetVisibleKeynotes(value.placedKeyMap || {}),
+      issues: (value.issues || []).map(function (issue) {
+        return {
+          severity: text(issue.severity || "warning"),
+          code: text(issue.code),
+          key: trim(issue.key),
+          message: text(issue.message),
+          details: text(issue.details),
+          placedCount: Number(issue.placedCount || 0),
+          userKeynoteCount: Number(issue.userKeynoteCount || 0),
+          genericAnnotationCount: Number(issue.genericAnnotationCount || 0),
+          sheetCount: Number(issue.sheetCount || 0),
+          unsheetedCount: Number(issue.unsheetedCount || 0),
+          sheets: issue.sheets || [],
+          typeNames: issue.typeNames || []
+        };
+      })
+    };
+  }
+
+  function currentModelHealth() {
+    return state.modelHealth || normalizeModelHealth(null);
+  }
+
+  function modelHealthSignature() {
+    var health = currentModelHealth();
+    if (health.signature) {
+      return health.signature;
+    }
+    return [
+      health.status,
+      health.safeModeRecommended ? "safe" : "ok",
+      health.placedKeyCount,
+      health.missingKeyCount,
+      health.issues.map(function (issue) {
+        return [issue.severity, issue.code, issue.key, issue.placedCount].join(":");
+      }).join("|")
+    ].join("|");
+  }
+
+  function modelIssueCount() {
+    return currentModelHealth().issues.length;
+  }
+
+  function isModelSafeModeActive() {
+    var health = currentModelHealth();
+    var signature = modelHealthSignature();
+    return Boolean(
+      health.safeModeRecommended &&
+      signature &&
+      state.reviewedModelHealthSignature !== signature
+    );
+  }
+
+  function modelSafeModeMessage() {
+    var health = currentModelHealth();
+    if (!health.safeModeRecommended) {
+      return "";
+    }
+    return "Review " + formatNumber(health.missingKeyCount) +
+      " missing placed keynote key(s) before editing or saving.";
+  }
+
+  function blockForSafeMode(actionLabel) {
+    if (!isModelSafeModeActive()) {
+      return false;
+    }
+    setModelIssuesOpen(true);
+    setStatus({
+      status: "warning",
+      message: (actionLabel || "This action") + " is paused until model issues are reviewed."
+    });
+    renderAll();
+    return true;
   }
 
   function keyIsPlaced(key) {
@@ -969,6 +1066,7 @@
     var textInput = byId("division-text-input");
     var hasEntry = Boolean(model && model.entry);
     var claimTitle = hasEntry ? editClaimTitle(model.entry) : "";
+    var safeMode = isModelSafeModeActive();
     var card = document.querySelector(".selected-division-card");
     var keyField = document.querySelector(".division-key-field");
     var existingBadge = keyField ? keyField.querySelector(".sheet-visible-marker") : null;
@@ -986,18 +1084,18 @@
     }
 
     if (keyInput) {
-      keyInput.disabled = !hasEntry || Boolean(claimTitle);
+      keyInput.disabled = safeMode || !hasEntry || Boolean(claimTitle);
       lockKeyInput(keyInput);
       keyInput.value = hasEntry ? model.entry.key : "UNGROUPED";
-      keyInput.setAttribute("title", claimTitle || "Double-click to edit division key");
+      keyInput.setAttribute("title", safeMode ? "Review model issues before editing." : (claimTitle || "Double-click to edit division key"));
     }
     if (keyField && hasEntry) {
       appendPlacedKeyBadge(keyField, model.entry.key);
     }
     if (textInput) {
-      textInput.disabled = !hasEntry || Boolean(claimTitle);
+      textInput.disabled = safeMode || !hasEntry || Boolean(claimTitle);
       textInput.value = hasEntry ? model.entry.text : "Keynotes without a root division";
-      textInput.setAttribute("title", claimTitle || "");
+      textInput.setAttribute("title", safeMode ? "Review model issues before editing." : (claimTitle || ""));
     }
   }
 
@@ -1090,6 +1188,10 @@
     }
 
     selectNote(entry.id, false);
+
+    if (blockForSafeMode("Placement")) {
+      return;
+    }
 
     if (!key) {
       setStatus({
@@ -1201,9 +1303,13 @@
       var claimTitle = editClaimTitle(entry);
       var canPlaceKeynote = entryCanPlaceKeynote(entry);
       var placementLabel = placementModeLabel();
+      var safeMode = isModelSafeModeActive();
       var placeTitle = canPlaceKeynote
         ? "Place " + placementLabel + " " + (entry.key || "")
         : "Save this keynote before placing it in Revit";
+      if (safeMode) {
+        placeTitle = "Review model issues before placing keynotes.";
+      }
 
       item.className = "note-row" +
         (row.hasChildren ? " is-parent-row" : "") +
@@ -1228,9 +1334,10 @@
       keyWrap.style.setProperty("--depth", row.depth);
 
       placeButton.type = "button";
-      placeButton.className = "note-place-button" + (canPlaceKeynote ? "" : " needs-save");
+      placeButton.className = "note-place-button" + (canPlaceKeynote && !safeMode ? "" : " needs-save");
       placeButton.setAttribute("aria-label", "Place " + placementLabel + " " + (entry.key || "new keynote"));
       placeButton.setAttribute("title", placeTitle);
+      placeButton.disabled = safeMode;
       placeButton.appendChild(createPlaceKeynoteIcon());
       placeButton.addEventListener("click", function (event) {
         event.preventDefault();
@@ -1263,16 +1370,16 @@
       keyInput.className = "form-control form-control-sm note-input note-key-input";
       keyInput.value = entry.key;
       keyInput.setAttribute("aria-label", "Key for " + (entry.key || "new keynote"));
-      keyInput.disabled = Boolean(claimTitle);
+      keyInput.disabled = safeMode || Boolean(claimTitle);
       lockKeyInput(keyInput);
-      keyInput.setAttribute("title", claimTitle || "Double-click to edit key");
+      keyInput.setAttribute("title", safeMode ? "Review model issues before editing." : (claimTitle || "Double-click to edit key"));
 
       textInput.className = "form-control form-control-sm note-input note-text-input";
       textInput.rows = 2;
       textInput.value = entry.text;
       textInput.setAttribute("aria-label", "Description for " + (entry.key || "new keynote"));
-      textInput.disabled = Boolean(claimTitle);
-      textInput.setAttribute("title", claimTitle || "");
+      textInput.disabled = safeMode || Boolean(claimTitle);
+      textInput.setAttribute("title", safeMode ? "Review model issues before editing." : (claimTitle || ""));
 
       [keyInput, textInput].forEach(function (input) {
         input.addEventListener("focus", function () {
@@ -1385,10 +1492,222 @@
     });
   }
 
+  function formatPercent(value) {
+    var number = Number(value || 0) * 100;
+    if (!isFinite(number)) {
+      number = 0;
+    }
+    return number.toFixed(number >= 10 ? 0 : 1) + "%";
+  }
+
+  function modelIssueDetail(issue) {
+    var parts = [];
+    var sheetLabels = [];
+
+    if (issue.key) {
+      parts.push("Key: " + issue.key);
+    }
+    if (issue.placedCount) {
+      parts.push(formatNumber(issue.placedCount) + " placed");
+    }
+    if (issue.userKeynoteCount) {
+      parts.push(formatNumber(issue.userKeynoteCount) + " user keynote");
+    }
+    if (issue.genericAnnotationCount) {
+      parts.push(formatNumber(issue.genericAnnotationCount) + " generic annotation");
+    }
+    if (issue.sheetCount) {
+      parts.push(formatNumber(issue.sheetCount) + " sheet(s)");
+    }
+    if (issue.unsheetedCount) {
+      parts.push(formatNumber(issue.unsheetedCount) + " unsheeted");
+    }
+    (issue.sheets || []).slice(0, 4).forEach(function (sheet) {
+      var number = trim(sheet && sheet.number);
+      var name = trim(sheet && sheet.name);
+      if (number || name) {
+        sheetLabels.push(trim(number + " " + name));
+      }
+    });
+    if (sheetLabels.length) {
+      parts.push("Sheets: " + sheetLabels.join(", "));
+    }
+    if ((issue.sheets || []).length > sheetLabels.length) {
+      parts.push("+" + formatNumber((issue.sheets || []).length - sheetLabels.length) + " more sheet(s)");
+    }
+    if ((issue.typeNames || []).length) {
+      parts.push("Types: " + issue.typeNames.join(", "));
+    }
+    if (issue.details) {
+      parts.push(issue.details);
+    }
+
+    return parts.join(" | ");
+  }
+
+  function createModelHealthStat(label, value) {
+    var item = document.createElement("div");
+    var strong = document.createElement("strong");
+    var span = document.createElement("span");
+
+    strong.textContent = value;
+    span.textContent = label;
+    item.appendChild(strong);
+    item.appendChild(span);
+    return item;
+  }
+
+  function modelIssueGroupTitle(issue) {
+    var code = text(issue && issue.code);
+    if (code === "placedKeyMissingFromLibrary") {
+      return "Missing Placed Keys";
+    }
+    if (code === "genericAnnotationTextMismatch") {
+      return "Generic Annotation Text";
+    }
+    if (code === "genericAnnotationDuplicateTypes") {
+      return "Duplicate Generic Annotation Types";
+    }
+    if (code.indexOf("genericAnnotation") === 0) {
+      return "Generic Annotation Setup";
+    }
+    return "Model Health";
+  }
+
+  function renderModelHealth() {
+    var health = currentModelHealth();
+    var issueCount = modelIssueCount();
+    var isSafeMode = isModelSafeModeActive();
+    var pill = byId("model-health-pill");
+    var summary = byId("model-health-summary");
+    var safeStrip = byId("safe-mode-strip");
+    var safeMessage = byId("safe-mode-message");
+    var overlay = byId("model-issues-overlay");
+    var status = byId("model-health-status");
+    var stats = byId("model-health-stats");
+    var list = byId("model-issues-list");
+    var acknowledge = byId("acknowledge-model-health");
+    var severity = isSafeMode ? "error" : (issueCount ? "warning" : "none");
+
+    if (summary) {
+      summary.textContent = formatNumber(issueCount);
+    }
+    if (pill) {
+      pill.setAttribute("data-severity", severity);
+      pill.setAttribute("aria-expanded", state.modelIssuesOpen ? "true" : "false");
+      pill.setAttribute("aria-pressed", state.modelIssuesOpen ? "true" : "false");
+      pill.setAttribute("title", health.message || "Show model issues");
+    }
+
+    if (safeStrip) {
+      safeStrip.hidden = !isSafeMode;
+    }
+    if (safeMessage) {
+      safeMessage.textContent = modelSafeModeMessage();
+    }
+
+    if (overlay) {
+      overlay.hidden = !state.modelIssuesOpen;
+    }
+    if (status) {
+      status.textContent = health.message || "Model health has not been scanned.";
+    }
+
+    if (stats) {
+      clearElement(stats);
+      stats.appendChild(createModelHealthStat("Placed keys", formatNumber(health.placedKeyCount)));
+      stats.appendChild(createModelHealthStat("Missing keys", formatNumber(health.missingKeyCount)));
+      stats.appendChild(createModelHealthStat("Missing ratio", formatPercent(health.missingRatio)));
+      stats.appendChild(createModelHealthStat("Sheets", formatNumber(health.sheetCount)));
+    }
+
+    if (list) {
+      clearElement(list);
+      if (!issueCount) {
+        var empty = document.createElement("div");
+        empty.className = "empty-state";
+        empty.textContent = "No model issues.";
+        list.appendChild(empty);
+      } else {
+        var lastGroupTitle = "";
+        health.issues.forEach(function (issue) {
+          var item = document.createElement("button");
+          var label = document.createElement("span");
+          var message = document.createElement("strong");
+          var detail = document.createElement("span");
+          var canJump = Boolean(issue.key && entriesByKey()[issue.key]);
+          var groupTitle = modelIssueGroupTitle(issue);
+
+          if (groupTitle !== lastGroupTitle) {
+            var group = document.createElement("h3");
+            group.className = "model-issue-group";
+            group.textContent = groupTitle;
+            list.appendChild(group);
+            lastGroupTitle = groupTitle;
+          }
+
+          item.type = "button";
+          item.className = "model-issue-item";
+          item.setAttribute("data-severity", issue.severity || "warning");
+          item.disabled = !canJump;
+          item.setAttribute(
+            "title",
+            canJump ? "Jump to keynote " + issue.key : "This issue is not tied to a row in the keynote file."
+          );
+
+          label.className = "validation-label";
+          label.textContent = text(issue.severity || "warning").toUpperCase();
+          message.textContent = issue.message || "";
+          detail.className = "validation-detail";
+          detail.textContent = modelIssueDetail(issue);
+
+          item.appendChild(label);
+          item.appendChild(message);
+          item.appendChild(detail);
+
+          if (canJump) {
+            item.addEventListener("click", function () {
+              setModelIssuesOpen(false);
+              selectEntryByKey(issue.key, true);
+            });
+          }
+
+          list.appendChild(item);
+        });
+      }
+    }
+
+    if (acknowledge) {
+      acknowledge.disabled = !health.safeModeRecommended;
+      acknowledge.textContent = isSafeMode ? "Reviewed - Unlock Editing" : "Reviewed";
+    }
+  }
+
+  function setModelIssuesOpen(isOpen) {
+    state.modelIssuesOpen = Boolean(isOpen);
+    renderModelHealth();
+    syncSidebarState();
+  }
+
+  function acknowledgeModelHealthReview() {
+    if (!currentModelHealth().safeModeRecommended) {
+      setModelIssuesOpen(false);
+      return;
+    }
+    state.reviewedModelHealthSignature = modelHealthSignature();
+    setModelIssuesOpen(false);
+    setStatus({
+      status: "ready",
+      message: "Model issues reviewed. Editing is unlocked for this scan."
+    });
+    renderAll();
+  }
+
   function renderRowActions() {
     var selectedNote = selectedNoteEntry();
     var target = selectedNote || selectedDivisionEntry();
     var sequenceParent = selectedSequenceParentEntry();
+    var addRootButton = byId("add-root");
     var deleteButton = byId("delete-row");
     var addSequenceButton = byId("add-sequence");
     var addSubNoteButton = byId("add-sub-note");
@@ -1396,18 +1715,22 @@
     var targetClaimed = target && isEntryRemotelyClaimed(target);
     var sequenceParentClaimed = sequenceParent && isEntryRemotelyClaimed(sequenceParent);
     var subNoteParentClaimed = selectedNote && isEntryRemotelyClaimed(selectedNote);
+    var safeMode = isModelSafeModeActive();
 
+    if (addRootButton) {
+      addRootButton.disabled = safeMode;
+    }
     if (addSequenceButton) {
-      addSequenceButton.disabled = !sequenceParent || sequenceParentClaimed;
+      addSequenceButton.disabled = safeMode || !sequenceParent || sequenceParentClaimed;
     }
     if (addSubNoteButton) {
-      addSubNoteButton.disabled = !selectedNote || subNoteParentClaimed;
+      addSubNoteButton.disabled = safeMode || !selectedNote || subNoteParentClaimed;
     }
     if (duplicateButton) {
-      duplicateButton.disabled = !target || targetClaimed;
+      duplicateButton.disabled = safeMode || !target || targetClaimed;
     }
     if (deleteButton) {
-      deleteButton.disabled = !target || targetClaimed;
+      deleteButton.disabled = safeMode || !target || targetClaimed;
     }
   }
 
@@ -1415,11 +1738,13 @@
     var saveButton = byId("save-data");
     var analyticsButton = byId("collect-analytics");
     var issues = validateAll();
+    var safeMode = isModelSafeModeActive();
     var canSave = Boolean(
       state.payload &&
       state.payload.keynotePath &&
       state.dirty &&
       !state.saving &&
+      !safeMode &&
       !hasBlockingSourceIssue() &&
       !hasErrorIssues(issues)
     );
@@ -1427,6 +1752,10 @@
     if (saveButton) {
       saveButton.disabled = !canSave;
       saveButton.textContent = state.saving ? "Saving..." : "Save";
+      saveButton.setAttribute(
+        "title",
+        safeMode ? "Review model issues before saving." : "Save data to Keynote file"
+      );
     }
     if (analyticsButton) {
       analyticsButton.disabled = state.analyticsCollecting || !state.payload || !state.payload.libraryKey;
@@ -1439,6 +1768,8 @@
     var divisionBody = byId("keynotes-section-body");
     var divisionToggle = byId("toggle-divisions");
     var warningPill = byId("warning-pill");
+    var modelHealthPill = byId("model-health-pill");
+    var modelIssuesOverlay = byId("model-issues-overlay");
     var validationPanel = byId("validation-panel");
     var divisionsExpanded = !state.divisionsCollapsed;
     var warningsOpen = Boolean(state.warningSidebarOpen);
@@ -1467,6 +1798,16 @@
       warningPill.setAttribute("aria-expanded", warningsOpen ? "true" : "false");
       warningPill.setAttribute("aria-pressed", warningsOpen ? "true" : "false");
       warningPill.setAttribute("aria-label", warningsOpen ? "Hide warnings" : "Show warnings");
+    }
+
+    if (modelHealthPill) {
+      modelHealthPill.setAttribute("aria-expanded", state.modelIssuesOpen ? "true" : "false");
+      modelHealthPill.setAttribute("aria-pressed", state.modelIssuesOpen ? "true" : "false");
+      modelHealthPill.setAttribute("aria-label", state.modelIssuesOpen ? "Hide model issues" : "Show model issues");
+    }
+
+    if (modelIssuesOverlay) {
+      modelIssuesOverlay.hidden = !state.modelIssuesOpen;
     }
 
     if (validationPanel) {
@@ -1501,6 +1842,7 @@
     renderDivisionHeader();
     renderNotes();
     renderValidation();
+    renderModelHealth();
     renderSaveState();
     renderRowActions();
     syncSidebarState();
@@ -1638,9 +1980,15 @@
     };
   }
 
-  function applyAnalyticsResultToUi(analytics) {
+  function applyAnalyticsResultToUi(analytics, modelHealth) {
     state.lastAnalyticsResult = analytics || null;
+    if (modelHealth) {
+      state.modelHealth = normalizeModelHealth(modelHealth);
+    }
     state.sheetVisibleKeynotes = analyticsPlacedKeyMap(analytics);
+    if (state.modelHealth && Object.keys(state.modelHealth.placedKeyMap || {}).length) {
+      state.sheetVisibleKeynotes = state.modelHealth.placedKeyMap;
+    }
     renderAll();
   }
 
@@ -2495,7 +2843,10 @@
     preferences = state.payload.preferences || {};
     setPlacementMode(preferences.placementMode || state.payload.placementMode || state.placementMode);
     state.entries = (state.payload.entries || []).map(normalizeEntry);
-    state.sheetVisibleKeynotes = normalizeSheetVisibleKeynotes(state.payload.sheetVisibleKeynotes || {});
+    state.modelHealth = normalizeModelHealth(state.payload.modelHealth || {});
+    state.sheetVisibleKeynotes = Object.keys(state.modelHealth.placedKeyMap || {}).length
+      ? state.modelHealth.placedKeyMap
+      : normalizeSheetVisibleKeynotes(state.payload.sheetVisibleKeynotes || {});
     state.sourceIssues = (state.payload.issues || []).filter(sourceIssueBlocksSave);
     state.operationIssues = [];
     state.collapsedEntryIds = {};
@@ -2549,6 +2900,9 @@
     var oldKey;
 
     if (!entry) {
+      return;
+    }
+    if (blockForSafeMode("Editing")) {
       return;
     }
     if (isEntryRemotelyClaimed(entry)) {
@@ -2701,6 +3055,10 @@
   }
 
   function addRoot() {
+    if (blockForSafeMode("Adding keynotes")) {
+      return;
+    }
+
     var entry = {
       id: makeLocalId(),
       key: makeRootKey(),
@@ -2731,6 +3089,10 @@
 
   function addNoteUnderParent(parent, missingParentMessage) {
     var entry;
+
+    if (blockForSafeMode("Adding keynotes")) {
+      return;
+    }
 
     if (!parent) {
       setStatus({
@@ -2793,6 +3155,9 @@
     if (!entry) {
       return;
     }
+    if (blockForSafeMode("Duplicating keynotes")) {
+      return;
+    }
     if (isEntryRemotelyClaimed(entry)) {
       setStatus({ status: "warning", message: editClaimTitle(entry) || "This keynote is being edited by another user." });
       renderAll();
@@ -2817,6 +3182,9 @@
     var entry = actionTargetEntry();
 
     if (!entry) {
+      return;
+    }
+    if (blockForSafeMode("Deleting keynotes")) {
       return;
     }
     if (isEntryRemotelyClaimed(entry)) {
@@ -2940,7 +3308,7 @@
       return;
     }
 
-    applyAnalyticsResultToUi(analytics);
+    applyAnalyticsResultToUi(analytics, result.modelHealth || (analytics && analytics.modelHealth));
     setStatus({ status: "syncing", message: "Syncing keynote analytics to Supabase..." });
 
     syncAnalyticsResult(analytics).then(function (syncResult) {
@@ -2975,6 +3343,10 @@
     var payload;
 
     renderValidation();
+
+    if (blockForSafeMode("Save")) {
+      return;
+    }
 
     if (hasErrorIssues(issues)) {
       setStatus({ status: "error", message: "Fix validation errors before saving." });
@@ -3214,6 +3586,19 @@
     bindClick("delete-row", deleteSelected);
     bindClick("toggle-divisions", toggleDivisionsSidebar);
     bindClick("warning-pill", toggleWarningSidebar);
+    bindClick("model-health-pill", function () {
+      setModelIssuesOpen(!state.modelIssuesOpen);
+    });
+    bindClick("review-model-issues", function () {
+      setModelIssuesOpen(true);
+    });
+    bindClick("close-model-issues", function () {
+      setModelIssuesOpen(false);
+    });
+    bindClick("model-issues-scrim", function () {
+      setModelIssuesOpen(false);
+    });
+    bindClick("acknowledge-model-health", acknowledgeModelHealthReview);
     bindClick("close-validation-sidebar", function () {
       setWarningSidebarOpen(false);
     });
