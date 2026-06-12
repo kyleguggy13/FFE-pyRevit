@@ -855,13 +855,20 @@ h2 {
   text-transform: uppercase;
 }
 
-.division-key-field input:focus,
 .division-text-field input:focus,
 .search-field input:focus,
-.note-input:focus {
+.note-text-input:focus,
+.division-key-field input.is-key-editing:focus,
+.note-key-input.is-key-editing:focus {
   outline: 2px solid rgba(82, 108, 165, 0.26);
   border-color: var(--accent);
   background: var(--page-3);
+  box-shadow: none;
+}
+
+.division-key-field input:focus,
+.note-key-input:focus {
+  outline: none;
   box-shadow: none;
 }
 

@@ -1008,6 +1008,7 @@
 
     input.readOnly = true;
     input.setAttribute("aria-readonly", "true");
+    input.classList.remove("is-key-editing");
   }
 
   function unlockKeyInput(input) {
@@ -1017,6 +1018,7 @@
 
     input.readOnly = false;
     input.setAttribute("aria-readonly", "false");
+    input.classList.add("is-key-editing");
     input.focus();
     if (typeof input.select === "function") {
       input.select();
