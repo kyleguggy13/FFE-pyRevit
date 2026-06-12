@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 __title__ = "FFE-Keynotes"
-__version__ = "Version = v0.12"
+__version__ = "v0.12"
 __persistentengine__ = True
-__min_revit_ver__ = 2025
+__min_revit_ver__ = 2026
 __doc__ = """Version = v0.12
 Date    = 06.10.2026
 __________________________________________________________________
@@ -126,7 +126,7 @@ PATH_SUPPORT = os.path.join(PATH_SCRIPT, "support")
 PATH_INDEX = os.path.join(PATH_SUPPORT, "index.html")
 
 APP_NAME = "FFE Keynote Manager"
-APP_VERSION = "v0.9"
+APP_VERSION = "v0.12"
 LOCAL_APP_NAME = "KeynoteManager"
 GENERIC_KEYNOTE_FAMILY_NAME = "FFE_Symbol_Keynote (Type)"
 GENERIC_KEYNOTE_NUMBER_PARAMETER = "Number"
@@ -480,6 +480,10 @@ def load_supabase_settings(prompt_if_missing=True, force_prompt=False):
 
 # ____________________________________________________________________ WEBVIEW HELPERS
 def get_revit_install_dir():
+    """
+    Get the Revit installation directory, which is needed to load the bundled WebView2 assemblies. 
+    This function tries multiple methods to find the path in case of different Revit versions or configurations.
+    """
     try:
         app_path = revit_app.ApplicationPath
         if app_path and os.path.exists(app_path):
