@@ -94,33 +94,6 @@ create table if not exists public.keynote_analytics_runs (
 create index if not exists keynote_analytics_runs_library_document_idx
   on public.keynote_analytics_runs (library_id, document_key, created_at desc);
 
-create table if not exists public.keynote_analytics_run_entries (
-  id uuid primary key default gen_random_uuid(),
-  run_id uuid not null references public.keynote_analytics_runs(id) on delete cascade,
-  library_id uuid not null references public.keynote_libraries(id) on delete cascade,
-  document_key text not null,
-  keynote_key text not null,
-  keynote_text text not null default '',
-  parent_key text not null default '',
-  in_library boolean not null default false,
-  placed boolean not null default false,
-  placed_count integer not null default 0,
-  user_keynote_count integer not null default 0,
-  generic_annotation_count integer not null default 0,
-  sheet_count integer not null default 0,
-  unsheeted_count integer not null default 0,
-  sheets jsonb not null default '[]'::jsonb,
-  created_at timestamptz not null default now(),
-  constraint keynote_analytics_run_entries_key_not_empty check (btrim(keynote_key) <> ''),
-  constraint keynote_analytics_run_entries_document_key_not_empty check (btrim(document_key) <> '')
-);
-
-create index if not exists keynote_analytics_run_entries_run_idx
-  on public.keynote_analytics_run_entries (run_id, keynote_key);
-
-create index if not exists keynote_analytics_run_entries_library_document_idx
-  on public.keynote_analytics_run_entries (library_id, document_key, keynote_key);
-
 create table if not exists public.keynote_analytics_current (
   id uuid primary key default gen_random_uuid(),
   library_id uuid not null references public.keynote_libraries(id) on delete cascade,
@@ -1046,39 +1019,6 @@ begin
       v_sheets := '[]'::jsonb;
     end if;
 
-    insert into public.keynote_analytics_run_entries (
-      run_id,
-      library_id,
-      document_key,
-      keynote_key,
-      keynote_text,
-      parent_key,
-      in_library,
-      placed,
-      placed_count,
-      user_keynote_count,
-      generic_annotation_count,
-      sheet_count,
-      unsheeted_count,
-      sheets
-    )
-    values (
-      v_run_id,
-      v_library_id,
-      btrim(coalesce(p_document_key, '')),
-      v_key,
-      v_keynote_text,
-      v_parent_key,
-      v_in_library,
-      v_placed,
-      v_placed_count,
-      v_user_keynote_count,
-      v_generic_annotation_count,
-      v_sheet_count,
-      v_unsheeted_count,
-      v_sheets
-    );
-
     insert into public.keynote_analytics_current (
       library_id,
       document_key,
@@ -1142,7 +1082,6 @@ alter table public.keynote_libraries enable row level security;
 alter table public.keynote_entries enable row level security;
 alter table public.keynote_edit_claims enable row level security;
 alter table public.keynote_analytics_runs enable row level security;
-alter table public.keynote_analytics_run_entries enable row level security;
 alter table public.keynote_analytics_current enable row level security;
 
 drop policy if exists "anon can read keynote libraries" on public.keynote_libraries;
@@ -1173,13 +1112,6 @@ for select
 to anon, authenticated
 using (true);
 
-drop policy if exists "anon can read keynote analytics run entries" on public.keynote_analytics_run_entries;
-create policy "anon can read keynote analytics run entries"
-on public.keynote_analytics_run_entries
-for select
-to anon, authenticated
-using (true);
-
 drop policy if exists "anon can read keynote analytics current" on public.keynote_analytics_current;
 create policy "anon can read keynote analytics current"
 on public.keynote_analytics_current
@@ -1191,13 +1123,11 @@ revoke all on public.keynote_libraries from anon, authenticated;
 revoke all on public.keynote_entries from anon, authenticated;
 revoke all on public.keynote_edit_claims from anon, authenticated;
 revoke all on public.keynote_analytics_runs from anon, authenticated;
-revoke all on public.keynote_analytics_run_entries from anon, authenticated;
 revoke all on public.keynote_analytics_current from anon, authenticated;
 grant select on public.keynote_libraries to anon, authenticated;
 grant select on public.keynote_entries to anon, authenticated;
 grant select on public.keynote_edit_claims to anon, authenticated;
 grant select on public.keynote_analytics_runs to anon, authenticated;
-grant select on public.keynote_analytics_run_entries to anon, authenticated;
 grant select on public.keynote_analytics_current to anon, authenticated;
 
 revoke execute on function public.build_keynote_snapshot(uuid) from public;
