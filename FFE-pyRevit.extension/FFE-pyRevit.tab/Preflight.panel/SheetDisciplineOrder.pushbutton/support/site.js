@@ -2,7 +2,14 @@
   "use strict";
 
   var refs = null;
-  var sortableList = null;
+  var dragAndDropModules = null;
+  var dragAndDropLoadPromise = null;
+  var dragAndDropCleanups = [];
+  var activeDragSheetKey = null;
+  var pendingDropIntent = null;
+  var dropIndicatorElement = null;
+  var SHEET_DRAG_TYPE = "sheet-order-row";
+  var SHEET_DROP_TARGET_TYPE = "sheet-order-drop-target";
   var state = {
     documentTitle: "",
     sheets: [],
@@ -24,13 +31,6 @@
     );
   }
 
-  function hasSortableJs() {
-    return !!(
-      globalScope.Sortable &&
-      typeof globalScope.Sortable.create === "function"
-    );
-  }
-
   function postRevitMessage(message) {
     if (!hasBridge()) {
       setStatus("error", "Revit bridge is not available.");
@@ -39,6 +39,45 @@
 
     globalScope.chrome.webview.postMessage(JSON.stringify(message));
     return true;
+  }
+
+  function loadDragAndDropModules() {
+    if (dragAndDropModules) {
+      return Promise.resolve(dragAndDropModules);
+    }
+
+    if (dragAndDropLoadPromise) {
+      return dragAndDropLoadPromise;
+    }
+
+    dragAndDropLoadPromise = Promise.all([
+      import("@atlaskit/pragmatic-drag-and-drop/element/adapter"),
+      import("@atlaskit/pragmatic-drag-and-drop-auto-scroll/element"),
+      import("@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge")
+    ]).then(function storeModules(modules) {
+      var adapter = modules[0];
+      var autoScroll = modules[1];
+      var closestEdge = modules[2];
+      dragAndDropModules = {
+        draggable: adapter.draggable,
+        dropTargetForElements: adapter.dropTargetForElements,
+        monitorForElements: adapter.monitorForElements,
+        autoScrollForElements: autoScroll.autoScrollForElements,
+        attachClosestEdge: closestEdge.attachClosestEdge,
+        extractClosestEdge: closestEdge.extractClosestEdge
+      };
+      setupDragOrdering();
+      return dragAndDropModules;
+    }).catch(function handleModuleError(error) {
+      dragAndDropLoadPromise = null;
+      if (globalScope.console && typeof globalScope.console.error === "function") {
+        globalScope.console.error("Unable to load Atlassian drag-and-drop modules.", error);
+      }
+      setStatus("warning", "Drag ordering is unavailable because Atlassian drag-and-drop libraries could not load.");
+      return null;
+    });
+
+    return dragAndDropLoadPromise;
   }
 
   function cleanText(value) {
@@ -101,27 +140,185 @@
     updateButtons();
   }
 
-  function destroySortable() {
-    if (!sortableList) {
-      return;
+  function getSheetRowByKey(sheetKey) {
+    if (!refs || !refs.sheetList) {
+      return null;
     }
 
-    try {
-      sortableList.destroy();
-    } catch (error) {
-      // Sortable owns DOM listeners; stale destroy failures should not block rendering.
+    var rows = refs.sheetList.querySelectorAll(".sheet-row");
+    for (var index = 0; index < rows.length; index += 1) {
+      if (cleanText(rows[index].dataset.sheetKey) === cleanText(sheetKey)) {
+        return rows[index];
+      }
     }
 
-    sortableList = null;
+    return null;
   }
 
-  function updateSortableState() {
-    if (!sortableList || !refs) {
+  function createDropIntent(sheetKey, edge) {
+    var cleanKey = cleanText(sheetKey);
+    if (!cleanKey || cleanKey === activeDragSheetKey || (edge !== "top" && edge !== "bottom")) {
+      return null;
+    }
+
+    return {
+      sheetKey: cleanKey,
+      edge: edge
+    };
+  }
+
+  function clearDropIndicator() {
+    if (dropIndicatorElement && dropIndicatorElement.parentNode) {
+      dropIndicatorElement.parentNode.removeChild(dropIndicatorElement);
+    }
+
+    dropIndicatorElement = null;
+  }
+
+  function showDropIndicator(row, edge) {
+    if (!row || (edge !== "top" && edge !== "bottom")) {
+      clearDropIndicator();
       return;
     }
 
-    var selectedSheets = state.selectedDiscipline === null ? [] : getDisplaySheets(state.selectedDiscipline);
-    sortableList.option("disabled", state.busy || selectedSheets.length < 2);
+    if (!dropIndicatorElement) {
+      dropIndicatorElement = document.createElement("span");
+      dropIndicatorElement.setAttribute("aria-hidden", "true");
+    }
+
+    dropIndicatorElement.className = "drop-indicator drop-indicator-" + edge;
+    row.appendChild(dropIndicatorElement);
+  }
+
+  function getLastDropIndicatorRow() {
+    if (!refs || !refs.sheetList) {
+      return null;
+    }
+
+    var rows = refs.sheetList.querySelectorAll(".sheet-row:not(.dragging)");
+    return rows.length ? rows[rows.length - 1] : null;
+  }
+
+  function getSheetDropTarget(location) {
+    var targets = location && location.current ? location.current.dropTargets : [];
+    for (var index = 0; index < targets.length; index += 1) {
+      if (targets[index].data && targets[index].data.type === SHEET_DROP_TARGET_TYPE) {
+        return targets[index];
+      }
+    }
+
+    return null;
+  }
+
+  function getDropIntentFromTarget(target) {
+    if (target && dragAndDropModules && dragAndDropModules.extractClosestEdge) {
+      var targetKey = cleanText(target.data.sheetKey);
+      var closestEdge = dragAndDropModules.extractClosestEdge(target.data);
+      return createDropIntent(targetKey, closestEdge);
+    }
+
+    return null;
+  }
+
+  function getDropIntentFromPoint(fallbackClientY) {
+    var afterElement = getDragAfterElement(refs.sheetList, fallbackClientY);
+    if (afterElement === null) {
+      var lastRow = getLastDropIndicatorRow();
+      return lastRow ? createDropIntent(lastRow.dataset.sheetKey, "bottom") : null;
+    }
+
+    return createDropIntent(afterElement.dataset.sheetKey, "top");
+  }
+
+  function getDropIntentFromLocation(args) {
+    var targetIntent = getDropIntentFromTarget(getSheetDropTarget(args.location));
+    if (targetIntent) {
+      return targetIntent;
+    }
+
+    return getDropIntentFromPoint(args.location.current.input.clientY);
+  }
+
+  function showDropIndicatorForIntent(intent) {
+    pendingDropIntent = intent;
+    if (!intent) {
+      clearDropIndicator();
+      return;
+    }
+
+    showDropIndicator(getSheetRowByKey(intent.sheetKey), intent.edge);
+  }
+
+  function updateDropIndicatorFromLocation(args) {
+    activeDragSheetKey = cleanText(args.source.data.sheetKey);
+    showDropIndicatorForIntent(getDropIntentFromLocation(args));
+  }
+
+  function applyDropIntent(sheetKey, intent) {
+    var dragging = getSheetRowByKey(sheetKey);
+    var targetRow = intent ? getSheetRowByKey(intent.sheetKey) : null;
+    if (!dragging || !targetRow || dragging === targetRow) {
+      return false;
+    }
+
+    var referenceNode = intent.edge === "top" ? targetRow : targetRow.nextSibling;
+    if (referenceNode === dragging) {
+      return true;
+    }
+
+    refs.sheetList.insertBefore(dragging, referenceNode);
+    return true;
+  }
+
+  function destroyDragOrdering() {
+    dragAndDropCleanups.forEach(function cleanupDragBinding(cleanup) {
+      try {
+        cleanup();
+      } catch (error) {
+        // Drag bindings can outlive DOM rows across renders; stale cleanup should not block rendering.
+      }
+    });
+    dragAndDropCleanups = [];
+    activeDragSheetKey = null;
+    pendingDropIntent = null;
+    clearDropIndicator();
+  }
+
+  function isSheetOrderSource(source) {
+    return !!(
+      source &&
+      source.data &&
+      source.data.type === SHEET_DRAG_TYPE
+    );
+  }
+
+  function canDragSheetRows() {
+    if (state.busy || state.selectedDiscipline === null) {
+      return false;
+    }
+
+    return getDisplaySheets(state.selectedDiscipline).length > 1;
+  }
+
+  function finishDragOrdering(args) {
+    var sheetKey = activeDragSheetKey;
+    var dropIntent = args && isSheetOrderSource(args.source)
+      ? getDropIntentFromLocation(args) || pendingDropIntent
+      : pendingDropIntent;
+    var dragging = refs ? refs.sheetList.querySelector(".sheet-row.dragging") : null;
+
+    if (sheetKey && dropIntent) {
+      applyDropIntent(sheetKey, dropIntent);
+    }
+
+    if (dragging) {
+      dragging.classList.remove("dragging");
+    }
+
+    activeDragSheetKey = null;
+    pendingDropIntent = null;
+    clearDropIndicator();
+    updateEditedOrderFromDom();
   }
 
   function setStatus(statusOrState, message) {
@@ -368,7 +565,6 @@
     refs.showNonPrintableCheckbox.checked = state.showNonPrintable;
     refs.includeNonPrintableCheckbox.disabled = state.busy || !state.showNonPrintable;
     refs.includeNonPrintableCheckbox.checked = state.includeNonPrintableInIndex && state.showNonPrintable;
-    updateSortableState();
   }
 
   function renderDocumentTitle() {
@@ -420,7 +616,6 @@
   function createSheetRow(sheet, index) {
     var row = document.createElement("li");
     row.className = "sheet-row";
-    row.draggable = !hasSortableJs(); // Use native HTML5 drag-and-drop if SortableJS is not available
     row.dataset.sheetKey = idKey(sheet.key);
 
     if (sheet.canWriteOrder === false) {
@@ -479,32 +674,96 @@
     row.appendChild(main);
     row.appendChild(meta);
 
-    if (!hasSortableJs()) {
-      row.addEventListener("dragstart", onDragStart);
-      row.addEventListener("dragend", onDragEnd);
-    }
-
     return row;
   }
 
-  function setupSortable() {
-    destroySortable();
+  function setupDragOrdering() {
+    destroyDragOrdering();
 
-    if (!refs || !hasSortableJs()) {
+    if (!refs || !refs.sheetList) {
       return;
     }
 
-    sortableList = globalScope.Sortable.create(refs.sheetList, {
-      animation: 150,
-      chosenClass: "sortable-chosen",
-      dragClass: "sortable-drag",
-      draggable: ".sheet-row",
-      ghostClass: "sortable-ghost",
-      handle: ".drag-handle",
-      onEnd: updateEditedOrderFromDom
+    if (!dragAndDropModules) {
+      loadDragAndDropModules();
+      return;
+    }
+
+    var scrollElement = refs.listRegion || refs.sheetList;
+    dragAndDropCleanups.push(dragAndDropModules.dropTargetForElements({
+      element: scrollElement,
+      canDrop: function canDropSheetOrder(args) {
+        return isSheetOrderSource(args.source);
+      }
+    }));
+
+    if (refs.listRegion) {
+      dragAndDropCleanups.push(dragAndDropModules.autoScrollForElements({
+        element: refs.listRegion,
+        canScroll: function canScrollSheetOrder(args) {
+          return isSheetOrderSource(args.source);
+        },
+        getAllowedAxis: function getAllowedAxis() {
+          return "vertical";
+        },
+        getConfiguration: function getConfiguration() {
+          return { maxScrollSpeed: "standard" };
+        }
+      }));
+    }
+
+    Array.prototype.slice.call(refs.sheetList.querySelectorAll(".sheet-row")).forEach(function registerRow(row) {
+      var handle = row.querySelector(".drag-handle");
+      dragAndDropCleanups.push(dragAndDropModules.dropTargetForElements({
+        element: row,
+        canDrop: function canDropOnSheetRow(args) {
+          return isSheetOrderSource(args.source) && cleanText(args.source.data.sheetKey) !== cleanText(row.dataset.sheetKey);
+        },
+        getData: function getDropTargetData(args) {
+          return dragAndDropModules.attachClosestEdge({
+            type: SHEET_DROP_TARGET_TYPE,
+            sheetKey: cleanText(row.dataset.sheetKey)
+          }, {
+            element: args.element,
+            input: args.input,
+            allowedEdges: ["top", "bottom"]
+          });
+        },
+        getIsSticky: function getIsSticky() {
+          return true;
+        }
+      }));
+
+      dragAndDropCleanups.push(dragAndDropModules.draggable({
+        element: row,
+        dragHandle: handle || row,
+        canDrag: canDragSheetRows,
+        getInitialData: function getInitialData() {
+          return {
+            type: SHEET_DRAG_TYPE,
+            sheetKey: cleanText(row.dataset.sheetKey)
+          };
+        },
+        onDragStart: function onDragStart(args) {
+          activeDragSheetKey = cleanText(args.source.data.sheetKey);
+          row.classList.add("dragging");
+          updateDropIndicatorFromLocation(args);
+        }
+      }));
     });
 
-    updateSortableState();
+    dragAndDropCleanups.push(dragAndDropModules.monitorForElements({
+      canMonitor: function canMonitorSheetOrder(args) {
+        return isSheetOrderSource(args.source);
+      },
+      onDrag: function onDrag(args) {
+        updateDropIndicatorFromLocation(args);
+      },
+      onDropTargetChange: function onDropTargetChange(args) {
+        updateDropIndicatorFromLocation(args);
+      },
+      onDrop: finishDragOrdering
+    }));
   }
 
   function renderList() {
@@ -512,7 +771,7 @@
       return;
     }
 
-    destroySortable();
+    destroyDragOrdering();
     refs.sheetList.innerHTML = "";
 
     var selectedSheets = state.selectedDiscipline === null ? [] : getDisplaySheets(state.selectedDiscipline);
@@ -523,7 +782,7 @@
       refs.sheetList.appendChild(createSheetRow(sheet, index));
     });
 
-    setupSortable();
+    setupDragOrdering();
   }
 
   function render() {
@@ -546,42 +805,6 @@
 
       return closest;
     }, { offset: Number.NEGATIVE_INFINITY, element: null }).element;
-  }
-
-  function onDragStart(event) {
-    if (state.busy) {
-      event.preventDefault();
-      return;
-    }
-
-    event.currentTarget.classList.add("dragging");
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", event.currentTarget.dataset.sheetKey);
-  }
-
-  function onDragEnd(event) {
-    event.currentTarget.classList.remove("dragging");
-    updateEditedOrderFromDom();
-  }
-
-  function onListDragOver(event) {
-    if (hasSortableJs()) {
-      return;
-    }
-    
-    var dragging = refs.sheetList.querySelector(".dragging");
-    if (!dragging) {
-      return;
-    }
-
-    event.preventDefault();
-    var afterElement = getDragAfterElement(refs.sheetList, event.clientY);
-
-    if (afterElement === null) {
-      refs.sheetList.appendChild(dragging);
-    } else {
-      refs.sheetList.insertBefore(dragging, afterElement);
-    }
   }
 
   function updateEditedOrderFromDom() {
@@ -682,10 +905,11 @@
 
     refs.saveButton.addEventListener("click", saveOrder);
     refs.refreshButton.addEventListener("click", refreshSheets);
-    refs.sheetList.addEventListener("dragover", onListDragOver);
   }
 
   function init() {
+    var sheetList = document.getElementById("sheet-list");
+
     refs = {
       documentTitle: document.getElementById("document-title"),
       statusBanner: document.getElementById("status-banner"),
@@ -698,7 +922,8 @@
       dirtyCount: document.getElementById("dirty-count"),
       saveButton: document.getElementById("save-button"),
       refreshButton: document.getElementById("refresh-button"),
-      sheetList: document.getElementById("sheet-list"),
+      sheetList: sheetList,
+      listRegion: sheetList ? sheetList.closest(".list-region") : null,
       emptyState: document.getElementById("empty-state")
     };
 
