@@ -47,6 +47,8 @@ create index if not exists keynote_entries_library_order_idx
 create index if not exists keynote_entries_library_parent_idx
   on public.keynote_entries (library_id, parent_key);
 
+alter table public.keynote_entries replica identity full;
+
 create table if not exists public.keynote_edit_claims (
   id uuid primary key default gen_random_uuid(),
   library_id uuid not null references public.keynote_libraries(id) on delete cascade,
@@ -450,6 +452,10 @@ begin
     );
   end if;
 
+  delete from public.keynote_edit_claims
+  where library_id = v_library_id
+    and updated_at < now() - interval '10 minutes';
+
   return public.build_keynote_edit_claims(v_library_id)
     || jsonb_build_object('status', 'ready', 'message', 'Loaded keynote edit claims.');
 end;
@@ -485,6 +491,10 @@ begin
       'claims', '[]'::jsonb
     );
   end if;
+
+  delete from public.keynote_edit_claims
+  where library_id = v_library_id
+    and updated_at < now() - interval '10 minutes';
 
   delete from public.keynote_edit_claims
   where library_id = v_library_id
@@ -590,6 +600,11 @@ begin
       last_saved_by_client_id = excluded.last_saved_by_client_id,
       last_saved_by_client_name = excluded.last_saved_by_client_name
   returning id into v_library_id;
+
+  update public.keynote_entries
+  set updated_by_client_id = coalesce(p_client_id, ''),
+      updated_by_client_name = coalesce(p_client_name, '')
+  where library_id = v_library_id;
 
   delete from public.keynote_entries
   where library_id = v_library_id;
@@ -799,6 +814,15 @@ begin
     from jsonb_to_recordset(coalesce(p_changes -> 'deletes', '[]'::jsonb))
       as item("dbId" text, key text, "baseVersion" bigint)
   loop
+    update public.keynote_entries
+    set updated_by_client_id = coalesce(p_client_id, ''),
+        updated_by_client_name = coalesce(p_client_name, '')
+    where library_id = v_library.id
+      and (
+        (coalesce(v_item."dbId", '') <> '' and id = v_item."dbId"::uuid)
+        or (coalesce(v_item."dbId", '') = '' and keynote_key = coalesce(v_item.key, ''))
+      );
+
     delete from public.keynote_entries
     where library_id = v_library.id
       and (
@@ -1160,6 +1184,16 @@ begin
       and tablename = 'keynote_libraries'
   ) then
     alter publication supabase_realtime add table public.keynote_libraries;
+  end if;
+
+  if not exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'keynote_entries'
+  ) then
+    alter publication supabase_realtime add table public.keynote_entries;
   end if;
 
   if not exists (

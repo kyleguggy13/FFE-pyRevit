@@ -2,6 +2,8 @@
   "use strict";
 
   var UNGROUPED_ID = "__ungrouped__";
+  var REMOTE_ENTRY_REFRESH_DELAY_MS = 600;
+  var EDIT_CLAIM_HEARTBEAT_MS = 60000;
 
   var state = {
     payload: null,
@@ -18,7 +20,11 @@
     baselineEntries: [],
     pendingDbChanges: null,
     remoteEditClaims: {},
+    remoteEntrySnapshot: null,
+    remoteEntriesPending: false,
+    remoteEntriesTimer: null,
     localEditClaimSignature: "",
+    localEditClaimHeartbeat: null,
     syncIssues: [],
     operationIssues: [],
     analyticsCollecting: false,
@@ -302,6 +308,24 @@
       key: key || "",
       code: code || ""
     };
+  }
+
+  function issueHasCode(issue, code) {
+    return text(issue && issue.code) === code;
+  }
+
+  function clearSyncIssueCode(code) {
+    state.syncIssues = (state.syncIssues || []).filter(function (issue) {
+      return !issueHasCode(issue, code);
+    });
+  }
+
+  function upsertSyncIssue(issue) {
+    if (!issue || !issue.code) {
+      return;
+    }
+    clearSyncIssueCode(issue.code);
+    state.syncIssues.push(issue);
   }
 
   function findEntryById(id) {
@@ -620,6 +644,79 @@
     return normalizePlacementFilter(state.placementFilter);
   }
 
+  function currentRemoteEntrySnapshot() {
+    if (!state.remoteEntriesPending || !state.remoteEntrySnapshot) {
+      return null;
+    }
+    return state.remoteEntrySnapshot;
+  }
+
+  function remoteClaimForKey(key) {
+    return state.remoteEditClaims["key:" + trim(key)] || null;
+  }
+
+  function localEntryNeedsKeyReservationCheck(entry) {
+    var baselineEntry = findBaselineEntry(entry);
+    var key = trim(entry && entry.key);
+
+    if (!key) {
+      return false;
+    }
+    return !baselineEntry || key !== trim(baselineEntry.key);
+  }
+
+  function localEntryMatchesRemoteSavedEntry(entry, remoteEntry) {
+    var baselineEntry = findBaselineEntry(entry);
+    var baselineDbId = text(baselineEntry && baselineEntry.dbId);
+    var remoteDbId = text(remoteEntry && (remoteEntry.dbId || remoteEntry.id));
+
+    if (baselineDbId && remoteDbId) {
+      return baselineDbId === remoteDbId;
+    }
+    return Boolean(
+      baselineEntry &&
+      trim(baselineEntry.key) === trim(remoteEntry && remoteEntry.key) &&
+      trim(entry && entry.key) === trim(remoteEntry && remoteEntry.key)
+    );
+  }
+
+  function appendRealtimeConflictIssues(issues) {
+    var remoteSnapshot = currentRemoteEntrySnapshot();
+    var remoteByKey = remoteSnapshot ? indexEntriesByKey(remoteSnapshot.entries) : {};
+
+    state.entries.forEach(function (entry) {
+      var key = trim(entry.key);
+      var claim;
+      var remoteEntry;
+      var clientName;
+
+      if (!localEntryNeedsKeyReservationCheck(entry)) {
+        return;
+      }
+
+      claim = remoteClaimForKey(key);
+      if (claim) {
+        clientName = trim(claim.clientName) || "another user";
+        issues.push(makeIssue(
+          "error",
+          "Key '" + key + "' is currently reserved by " + clientName + ". Choose another key or wait for them to save/close.",
+          key,
+          "remoteReservedKey"
+        ));
+      }
+
+      remoteEntry = remoteByKey[key];
+      if (remoteEntry && !localEntryMatchesRemoteSavedEntry(entry, remoteEntry)) {
+        issues.push(makeIssue(
+          "error",
+          "Key '" + key + "' was added by another user. Refresh before saving or choose another key.",
+          key,
+          "remoteSavedKey"
+        ));
+      }
+    });
+  }
+
   function validateAll() {
     var issues = state.sourceIssues.concat(state.operationIssues || [], state.syncIssues || []);
     var keyCounts = {};
@@ -667,6 +764,8 @@
         issues.push(makeIssue("error", "Duplicate keynote key: " + key, key, "duplicateKey"));
       }
     });
+
+    appendRealtimeConflictIssues(issues);
 
     state.entries.forEach(function (entry) {
       if (entry.parentKey && !keyMap[entry.parentKey]) {
@@ -1173,7 +1272,45 @@
     var baselineEntry = findBaselineEntry(entry);
     var key = trim(entry && entry.key);
 
-    return Boolean(key && baselineEntry && entryFieldsEqual(entry, baselineEntry));
+    return Boolean(
+      key &&
+      baselineEntry &&
+      entryFieldsEqual(entry, baselineEntry) &&
+      remoteSnapshotAllowsPlacement(entry)
+    );
+  }
+
+  function remoteSnapshotAllowsPlacement(entry) {
+    var remoteSnapshot = currentRemoteEntrySnapshot();
+    var key = trim(entry && entry.key);
+    var dbId = text(entry && entry.dbId);
+    var remoteEntry;
+
+    if (!key) {
+      return true;
+    }
+    if (state.remoteEntriesPending && !remoteSnapshot) {
+      return false;
+    }
+    if (!remoteSnapshot) {
+      return true;
+    }
+
+    if (dbId) {
+      remoteEntry = indexEntriesByDbId(remoteSnapshot.entries)[dbId];
+      return Boolean(remoteEntry && trim(remoteEntry.key) === key);
+    }
+
+    return Boolean(indexEntriesByKey(remoteSnapshot.entries)[key]);
+  }
+
+  function placementBlockedByRemoteDelete(entry) {
+    return Boolean(
+      state.remoteEntriesPending &&
+      entry &&
+      trim(entry.key) &&
+      !remoteSnapshotAllowsPlacement(entry)
+    );
   }
 
   function placeKeynote(entry) {
@@ -1202,6 +1339,13 @@
     }
 
     if (!entryCanPlaceKeynote(entry)) {
+      if (placementBlockedByRemoteDelete(entry)) {
+        setStatus({
+          status: "warning",
+          message: "Refresh before placing this keynote. It may have been deleted by another user."
+        });
+        return;
+      }
       setStatus({
         status: "warning",
         message: "Save this keynote before placing it in Revit."
@@ -2084,11 +2228,12 @@
 
     if (dbId) {
       keys.push("db:" + dbId);
-    }
-    if (baseKey) {
+    } else if (baseKey) {
       keys.push("key:" + baseKey);
     }
-    if (currentKey && currentKey !== baseKey) {
+    if (!baselineEntry && currentKey) {
+      keys.push("key:" + currentKey);
+    } else if (currentKey && currentKey !== baseKey) {
       keys.push("key:" + currentKey);
     }
     return keys;
@@ -2162,31 +2307,45 @@
   }
 
   function entryHasClaimableEdit(entry, baselineEntry) {
-    return Boolean(
-      entry &&
-      baselineEntry &&
-      (
-        trim(entry.key) !== trim(baselineEntry.key) ||
-        trim(entry.text) !== trim(baselineEntry.text)
-      )
+    if (!entry) {
+      return false;
+    }
+    if (!baselineEntry) {
+      return Boolean(trim(entry.key));
+    }
+    return (
+      trim(entry.key) !== trim(baselineEntry.key) ||
+      trim(entry.text) !== trim(baselineEntry.text)
     );
   }
 
   function buildLocalEditClaims() {
     var claims = [];
+    var seen = {};
 
     state.entries.forEach(function (entry) {
       var baselineEntry = findBaselineEntry(entry);
-      var claimKey = claimKeyForEntry(entry, baselineEntry);
+      var dbId = text((baselineEntry && baselineEntry.dbId) || entry.dbId || "");
 
-      if (!claimKey || !entryHasClaimableEdit(entry, baselineEntry)) {
+      if (!entryHasClaimableEdit(entry, baselineEntry)) {
         return;
       }
 
-      claims.push({
-        claimKey: claimKey,
-        dbId: text((baselineEntry && baselineEntry.dbId) || entry.dbId || ""),
-        key: trim(baselineEntry.key)
+      claimKeysForEntry(entry).forEach(function (claimKey) {
+        var key = trim((baselineEntry && baselineEntry.key) || entry.key);
+
+        if (!claimKey || seen[claimKey]) {
+          return;
+        }
+        seen[claimKey] = true;
+        if (claimKey.indexOf("key:") === 0) {
+          key = claimKey.slice(4);
+        }
+        claims.push({
+          claimKey: claimKey,
+          dbId: claimKey.indexOf("db:") === 0 ? dbId : "",
+          key: key
+        });
       });
     });
 
@@ -2212,18 +2371,48 @@
     );
   }
 
-  function syncLocalEditClaims() {
+  function stopLocalEditClaimHeartbeat() {
+    if (state.localEditClaimHeartbeat) {
+      globalScope.clearInterval(state.localEditClaimHeartbeat);
+      state.localEditClaimHeartbeat = null;
+    }
+  }
+
+  function updateLocalEditClaimHeartbeat() {
+    if (!state.localEditClaimSignature || !claimsAreConfigured()) {
+      stopLocalEditClaimHeartbeat();
+      return;
+    }
+    if (state.localEditClaimHeartbeat) {
+      return;
+    }
+    state.localEditClaimHeartbeat = globalScope.setInterval(function () {
+      if (!state.localEditClaimSignature) {
+        stopLocalEditClaimHeartbeat();
+        return;
+      }
+      syncLocalEditClaims({ force: true });
+    }, EDIT_CLAIM_HEARTBEAT_MS);
+  }
+
+  function syncLocalEditClaims(options) {
     var db = dbManager();
     var client = currentClient();
     var claims = buildLocalEditClaims();
     var signature = editClaimSignature(claims);
     var previousSignature = state.localEditClaimSignature;
 
-    if (signature === state.localEditClaimSignature) {
+    options = options || {};
+
+    if (signature === state.localEditClaimSignature && !options.force) {
+      updateLocalEditClaimHeartbeat();
       return Promise.resolve(null);
     }
 
     if (!claimsAreConfigured()) {
+      if (!signature) {
+        stopLocalEditClaimHeartbeat();
+      }
       return Promise.resolve(null);
     }
     state.localEditClaimSignature = signature;
@@ -2234,23 +2423,23 @@
       clientName: client.clientName,
       claims: claims
     }).then(function (data) {
-      state.syncIssues = (state.syncIssues || []).filter(function (issue) {
-        return text(issue.code) !== "editClaimUpdateFailed";
-      });
+      clearSyncIssueCode("editClaimUpdateFailed");
       applyEditClaimsData(data);
       renderValidation();
       renderSaveState();
+      updateLocalEditClaimHeartbeat();
       return data;
     }).catch(function (error) {
       state.localEditClaimSignature = previousSignature;
-      state.syncIssues = [makeIssue(
+      upsertSyncIssue(makeIssue(
         "warning",
         "Could not update unsaved edit locks: " + (error.message || error),
         "",
         "editClaimUpdateFailed"
-      )];
+      ));
       renderValidation();
       renderSaveState();
+      updateLocalEditClaimHeartbeat();
       return null;
     });
   }
@@ -2261,9 +2450,13 @@
     var shouldClearRemote = state.localEditClaimSignature;
 
     if (!claimsAreConfigured() || !shouldClearRemote) {
+      if (!shouldClearRemote) {
+        stopLocalEditClaimHeartbeat();
+      }
       return Promise.resolve(null);
     }
     state.localEditClaimSignature = "";
+    stopLocalEditClaimHeartbeat();
 
     return db.setEditClaims({
       libraryKey: state.payload.libraryKey,
@@ -2275,6 +2468,7 @@
       return data;
     }).catch(function () {
       state.localEditClaimSignature = shouldClearRemote;
+      updateLocalEditClaimHeartbeat();
       return null;
     });
   }
@@ -2329,6 +2523,17 @@
       var key = trim(entry.key);
       if (key && !map[key]) {
         map[key] = entry;
+      }
+    });
+    return map;
+  }
+
+  function indexEntriesByDbId(entries) {
+    var map = {};
+    (entries || []).forEach(function (entry) {
+      var dbId = text(entry.dbId || entry.id);
+      if (dbId && !map[dbId]) {
+        map[dbId] = entry;
       }
     });
     return map;
@@ -2465,6 +2670,22 @@
     renderAll();
   }
 
+  function clearRemoteEntryTimer() {
+    if (state.remoteEntriesTimer) {
+      globalScope.clearTimeout(state.remoteEntriesTimer);
+      state.remoteEntriesTimer = null;
+    }
+  }
+
+  function clearRemoteEntryState() {
+    clearRemoteEntryTimer();
+    state.remoteEntrySnapshot = null;
+    state.remoteEntriesPending = false;
+    state.remotePending = false;
+    clearSyncIssueCode("remoteEntriesPending");
+    clearSyncIssueCode("remoteEntrySnapshotFailed");
+  }
+
   function rememberBaseline() {
     state.baselineEntries = state.entries.map(function (entry) {
       return {
@@ -2480,6 +2701,94 @@
     });
   }
 
+  function markRemoteEntriesPending() {
+    state.remotePending = true;
+    state.remoteEntriesPending = true;
+    upsertSyncIssue(makeIssue(
+      "warning",
+      "Remote keynote add/delete changes are available. Save will check conflicts; Refresh discards local edits and loads the latest data.",
+      "",
+      "remoteEntriesPending"
+    ));
+  }
+
+  function fetchRemoteEntrySnapshotForDirtyWindow() {
+    var db = dbManager();
+
+    if (
+      !state.payload ||
+      !state.payload.libraryKey ||
+      !db ||
+      typeof db.getSnapshot !== "function"
+    ) {
+      markRemoteEntriesPending();
+      setStatus({
+        status: "warning",
+        message: "Remote keynote add/delete changes are available while you have unsaved edits."
+      });
+      renderValidation();
+      renderSaveState();
+      return Promise.resolve(null);
+    }
+
+    return db.getSnapshot(state.payload.libraryKey).then(function (snapshot) {
+      state.remoteEntrySnapshot = snapshot;
+      clearSyncIssueCode("remoteEntrySnapshotFailed");
+      markRemoteEntriesPending();
+      setStatus({
+        status: "warning",
+        message: "Remote keynote add/delete changes are available while you have unsaved edits."
+      });
+      renderValidation();
+      renderSaveState();
+      return snapshot;
+    }).catch(function (error) {
+      markRemoteEntriesPending();
+      upsertSyncIssue(makeIssue(
+        "warning",
+        "Remote keynote changes are available, but the latest Supabase snapshot could not be loaded: " + (error.message || error),
+        "",
+        "remoteEntrySnapshotFailed"
+      ));
+      setStatus({
+        status: "warning",
+        message: "Remote keynote changes are available, but the latest Supabase snapshot could not be loaded."
+      });
+      renderValidation();
+      renderSaveState();
+      return null;
+    });
+  }
+
+  function processRemoteEntryChange() {
+    state.remoteEntriesTimer = null;
+
+    if (state.saving || state.pendingDbChanges) {
+      return;
+    }
+
+    if (state.dirty) {
+      fetchRemoteEntrySnapshotForDirtyWindow();
+      return;
+    }
+
+    clearRemoteEntryState();
+    state.allowNextLoad = false;
+    postWebViewMessage({ type: "refreshData" });
+  }
+
+  function scheduleRemoteEntryChange() {
+    if (state.saving || state.pendingDbChanges) {
+      return;
+    }
+
+    clearRemoteEntryTimer();
+    state.remoteEntriesTimer = globalScope.setTimeout(
+      processRemoteEntryChange,
+      REMOTE_ENTRY_REFRESH_DELAY_MS
+    );
+  }
+
   function subscribeToLibrary(snapshot) {
     var db = dbManager();
     var client = currentClient();
@@ -2492,12 +2801,12 @@
       onRemoteChange: function () {
         if (state.dirty) {
           state.remotePending = true;
-          state.syncIssues = [makeIssue(
+          upsertSyncIssue(makeIssue(
             "warning",
             "Remote Supabase changes are available. Save will check row conflicts; Refresh discards local edits and loads the latest data.",
             "",
             "remotePending"
-          )];
+          ));
           setStatus({
             status: "warning",
             message: "Remote Supabase changes are available while you have unsaved edits."
@@ -2513,6 +2822,21 @@
         if (status === "SUBSCRIBED" && !state.dirty) {
           setStatus({ status: "ready", message: "Listening for shared keynote updates." });
         }
+      }
+    });
+  }
+
+  function subscribeToEntries(snapshot) {
+    var db = dbManager();
+    var client = currentClient();
+
+    if (!db || !snapshot || !snapshot.libraryId || typeof db.subscribeEntries !== "function") {
+      return;
+    }
+
+    db.subscribeEntries(snapshot.libraryId, client.clientId, {
+      onEntriesChanged: function () {
+        scheduleRemoteEntryChange();
       }
     });
   }
@@ -2575,6 +2899,7 @@
       state.syncIssues = [];
       applySnapshotMetadata(snapshot);
       subscribeToLibrary(snapshot);
+      subscribeToEntries(snapshot);
       subscribeToEditClaims(snapshot);
       refreshEditClaims();
       syncLocalEditClaims();
@@ -2642,8 +2967,10 @@
     state.pendingDbChanges = null;
     state.dbReady = true;
     state.syncIssues = [];
+    clearRemoteEntryState();
     applySnapshotMetadata(result);
     subscribeToLibrary(result);
+    subscribeToEntries(result);
     subscribeToEditClaims(result);
     refreshEditClaims();
     syncLocalEditClaims();
@@ -2851,6 +3178,7 @@
     state.operationIssues = [];
     state.collapsedEntryIds = {};
     state.saving = false;
+    clearRemoteEntryState();
 
     if (previousKey) {
       selected = state.entries.filter(function (entry) {
@@ -2889,6 +3217,8 @@
     state.syncIssues = [];
     state.operationIssues = [];
     state.remotePending = false;
+    state.remoteEntrySnapshot = null;
+    state.remoteEntriesPending = false;
     state.remoteEditClaims = {};
     applyData(payload);
     rememberBaseline();
@@ -2944,6 +3274,28 @@
     syncSelectionClasses();
   }
 
+  function addRemoteReservedKeys(map) {
+    var remoteSnapshot = currentRemoteEntrySnapshot();
+
+    Object.keys(state.remoteEditClaims || {}).forEach(function (claimKey) {
+      var key;
+      if (claimKey.indexOf("key:") !== 0) {
+        return;
+      }
+      key = trim(claimKey.slice(4));
+      if (key) {
+        map[key] = true;
+      }
+    });
+
+    ((remoteSnapshot && remoteSnapshot.entries) || []).forEach(function (entry) {
+      var key = trim(entry.key);
+      if (key) {
+        map[key] = true;
+      }
+    });
+  }
+
   function makeUniqueKey(baseKey) {
     var base = trim(baseKey) || "NEW";
     var existing = {};
@@ -2953,6 +3305,7 @@
     state.entries.forEach(function (entry) {
       existing[entry.key] = true;
     });
+    addRemoteReservedKeys(existing);
 
     while (existing[candidate]) {
       candidate = base + "-" + index;
@@ -3041,6 +3394,7 @@
         width = match[2].length;
       }
     });
+    addRemoteReservedKeys(existing);
 
     nextNumber = max + 1;
     while (nextNumber < 10000) {
@@ -3072,6 +3426,7 @@
     state.selectedNoteId = null;
     state.selectedId = entry.id;
     markDirty();
+    syncLocalEditClaims();
     renderAll();
   }
 
@@ -3118,6 +3473,7 @@
     state.entries.push(entry);
     setSelectionForEntry(entry);
     markDirty();
+    syncLocalEditClaims();
     renderAll();
   }
 
@@ -3175,6 +3531,7 @@
     state.entries.push(copy);
     setSelectionForEntry(copy);
     markDirty();
+    syncLocalEditClaims();
     renderAll();
   }
 

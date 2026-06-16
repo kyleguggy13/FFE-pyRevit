@@ -4,7 +4,7 @@ __version__ = "v0.13"
 __persistentengine__ = True
 __min_revit_ver__ = 2026
 __doc__ = """Version = v0.13
-Date    = 06.12.2026
+Date    = 06.16.2026
 __________________________________________________________________
 Description:
 Persistent WebView2 keynote manager for the active Revit document's
@@ -25,9 +25,9 @@ Last update:
 - [05.29.2026] - v0.7 Improved error handling and improved UI
 - [06.02.2026] - v0.8 Added Generic Annotation keynote placement and type synchronization.
 - [06.02.2026] - v0.9 Applied the standard leader arrowhead to Generic Annotation keynote types.
-- [06.03.2026] - v0.10 Added Analyics tracking for keynote manager usage and errors.
+- [06.03.2026] - v0.10 Added Analytics tracking for keynote manager usage and errors.
 - [06.09.2026] - v0.11 Made Place As persist across sessions.
-- [06.10.2026] - v0.12 Added placedment filter and collapsible division panel.
+- [06.10.2026] - v0.12 Added placement filter and collapsible division panel.
 - [06.12.2026] - v0.13 Added automatic model health scan and Safe Mode.
 __________________________________________________________________
 Author: Kyle Guggenheim"""
@@ -36,6 +36,7 @@ Author: Kyle Guggenheim"""
 """
 TODO:
 - Select placed keynote icon and display list of sheets/views where it is placed.
+- Add realtime updates when a keynote is added or removed.
 
 
 Key behaviors:
@@ -3144,17 +3145,20 @@ def save_keynote_payload(target_doc, save_payload):
 def get_keynote_payload_entry(keynote_payload, entry_id, key):
     entry_id = safe_str(entry_id).strip()
     key = safe_unicode(key).strip()
+    matched_by_key = None
     if not key:
         return None
 
     for entry in (keynote_payload or {}).get("entries") or []:
         entry_key = safe_unicode(entry.get("key")).strip()
+        if entry_key == key and matched_by_key is None:
+            matched_by_key = entry
         if entry_id:
-            if safe_str(entry.get("id")).strip() == entry_id:
-                return entry_key == key and entry or None
+            if safe_str(entry.get("id")).strip() == entry_id and entry_key == key:
+                return entry
         elif entry_key == key:
             return entry
-    return None
+    return matched_by_key
 
 
 def keynote_payload_has_entry_key(keynote_payload, entry_id, key):
@@ -3205,7 +3209,7 @@ def place_user_keynote(uiapp, target_doc, place_payload, keynote_payload):
     if not keynote_payload_has_entry_key(keynote_payload, entry_id, key):
         return {
             "status": "warning",
-            "message": "Save this keynote before placing it in Revit.",
+            "message": "This keynote is no longer available in the shared keynote file. Refresh before placing it in Revit.",
         }
 
     clipboard_copied, clipboard_error = copy_text_to_clipboard(key)
@@ -3225,6 +3229,14 @@ def place_user_keynote(uiapp, target_doc, place_payload, keynote_payload):
         return {
             "status": "warning",
             "message": "No default Keynote Tag type is loaded in this project.",
+        }
+
+    try:
+        reload_revit_keynotes(target_doc)
+    except Exception as exc:
+        return {
+            "status": "warning",
+            "message": "Could not reload the current keynote table before placement: {0}".format(safe_str(exc)),
         }
 
     try:
@@ -3396,7 +3408,7 @@ def place_generic_annotation_keynote(uiapp, target_doc, place_payload, keynote_p
     if entry is None:
         return {
             "status": "warning",
-            "message": "Save this keynote before placing it in Revit.",
+            "message": "This keynote is no longer available in the shared keynote file. Refresh before placing it in Revit.",
         }
 
     uidoc, active_document_error = get_active_uidocument(uiapp, target_doc)
@@ -3516,12 +3528,14 @@ class KeynoteManagerEventHandler(IExternalEventHandler):
             return
 
         if action == "placeUserKeynote":
-            result = place_user_keynote(uiapp, window.document, payload, window.keynote_payload)
+            keynote_payload = build_keynote_payload(window.document)
+            result = place_user_keynote(uiapp, window.document, payload, keynote_payload)
             window.send_status(result.get("status"), result.get("message"))
             return
 
         if action == "placeGenericAnnotation":
-            result = place_generic_annotation_keynote(uiapp, window.document, payload, window.keynote_payload)
+            keynote_payload = build_keynote_payload(window.document)
+            result = place_generic_annotation_keynote(uiapp, window.document, payload, keynote_payload)
             window.send_status(result.get("status"), result.get("message"))
             return
 

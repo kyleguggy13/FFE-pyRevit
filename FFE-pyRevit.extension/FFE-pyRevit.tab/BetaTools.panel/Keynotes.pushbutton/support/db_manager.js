@@ -4,6 +4,8 @@
   var supabaseClient = null;
   var activeChannel = null;
   var currentLibraryId = "";
+  var activeEntriesChannel = null;
+  var currentEntriesLibraryId = "";
   var activeClaimsChannel = null;
   var currentClaimsLibraryId = "";
 
@@ -198,13 +200,17 @@
 
   function unsubscribe() {
     var channel = activeChannel;
+    var entriesChannel = activeEntriesChannel;
     var claimsChannel = activeClaimsChannel;
     activeChannel = null;
+    activeEntriesChannel = null;
     activeClaimsChannel = null;
     currentLibraryId = "";
+    currentEntriesLibraryId = "";
     currentClaimsLibraryId = "";
 
     removeChannel(channel);
+    removeChannel(entriesChannel);
     removeChannel(claimsChannel);
   }
 
@@ -249,6 +255,65 @@
       });
 
     return activeChannel;
+  }
+
+  function subscribeEntries(libraryId, clientId, handlers) {
+    var handleEntryChange;
+
+    handlers = handlers || {};
+    libraryId = text(libraryId);
+    clientId = text(clientId);
+
+    if (!supabaseClient || !libraryId) {
+      return null;
+    }
+    if (currentEntriesLibraryId === libraryId && activeEntriesChannel) {
+      return activeEntriesChannel;
+    }
+
+    handleEntryChange = function (payload) {
+      var row = (payload && (payload.new || payload.old)) || {};
+      var nextClientId = text(row.updated_by_client_id);
+
+      if (clientId && nextClientId === clientId) {
+        return;
+      }
+      if (typeof handlers.onEntriesChanged === "function") {
+        handlers.onEntriesChanged(payload || {});
+      }
+    };
+
+    removeChannel(activeEntriesChannel);
+    activeEntriesChannel = null;
+    currentEntriesLibraryId = libraryId;
+    activeEntriesChannel = supabaseClient.channel("keynote-entries-" + libraryId)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "keynote_entries",
+          filter: "library_id=eq." + libraryId
+        },
+        handleEntryChange
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "keynote_entries",
+          filter: "library_id=eq." + libraryId
+        },
+        handleEntryChange
+      )
+      .subscribe(function (status) {
+        if (typeof handlers.onStatus === "function") {
+          handlers.onStatus(status);
+        }
+      });
+
+    return activeEntriesChannel;
   }
 
   function subscribeEditClaims(libraryId, clientId, handlers) {
@@ -299,6 +364,7 @@
     getEditClaims: getEditClaims,
     setEditClaims: setEditClaims,
     subscribeLibrary: subscribeLibrary,
+    subscribeEntries: subscribeEntries,
     subscribeEditClaims: subscribeEditClaims,
     unsubscribe: unsubscribe
   };
