@@ -132,23 +132,12 @@
       </section>
 
       <main class="workspace">
-        <aside class="division-panel" aria-labelledby="division-list-title">
+        <aside id="division-panel" class="division-panel" aria-labelledby="division-list-title">
           <div class="division-heading">
             <div>
               <h2 id="division-list-title">DIVISIONS</h2>
               <p id="filter-summary">0 divisions</p>
             </div>
-            <button
-              id="toggle-divisions"
-              class="sidebar-toggle division-sidebar-toggle"
-              type="button"
-              aria-label="Collapse divisions"
-              aria-controls="keynotes-section-body"
-              aria-expanded="true"
-              title="Collapse divisions"
-            >
-              <span aria-hidden="true">&lt;</span>
-            </button>
           </div>
 
           <div id="keynotes-section-body">
@@ -165,7 +154,21 @@
           </div>
         </aside>
 
-        <section class="notes-panel" aria-labelledby="notes-title">
+        <div class="workspace-action-bar" role="group" aria-label="Keynote workspace actions">
+          <div class="division-toggle-wrap">
+            <button
+              id="toggle-divisions"
+              class="sidebar-toggle division-sidebar-toggle"
+              type="button"
+              aria-label="Collapse divisions"
+              aria-controls="division-panel"
+              aria-expanded="true"
+              title="Collapse divisions"
+            >
+              <span aria-hidden="true">&lt;</span>
+            </button>
+          </div>
+
           <div class="action-row" aria-label="Keynote row actions">
             <button id="add-root" class="btn btn-outline-dark action-button" type="button">Add Parent</button>
             <button id="add-sequence" class="btn btn-outline-dark action-button" type="button" disabled>Add Note in Sequence</button>
@@ -173,7 +176,9 @@
             <button id="duplicate-row" class="btn btn-primary action-button" type="button" disabled>Duplicate</button>
             <button id="delete-row" class="btn btn-danger action-button" type="button" disabled>Delete</button>
           </div>
+        </div>
 
+        <section class="notes-panel" aria-labelledby="notes-title">
           <div class="placement-toolbar" aria-label="Keynote placement settings">
             <label class="search-field toolbar-search-field" for="search-input">
               <span>Search</span>

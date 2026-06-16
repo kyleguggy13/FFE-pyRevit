@@ -1909,6 +1909,7 @@
 
   function syncSidebarState() {
     var workspace = document.querySelector(".workspace");
+    var divisionPanel = byId("division-panel");
     var divisionBody = byId("keynotes-section-body");
     var divisionToggle = byId("toggle-divisions");
     var warningPill = byId("warning-pill");
@@ -1922,6 +1923,11 @@
     if (workspace) {
       workspace.classList.toggle("is-divisions-collapsed", state.divisionsCollapsed);
       workspace.classList.toggle("has-warning-sidebar", warningsOpen);
+    }
+
+    if (divisionPanel) {
+      divisionPanel.hidden = !divisionsExpanded;
+      divisionPanel.setAttribute("aria-hidden", divisionsExpanded ? "false" : "true");
     }
 
     if (divisionBody) {
