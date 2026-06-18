@@ -37,6 +37,7 @@ Author: Kyle Guggenheim"""
 TODO:
 - Select placed keynote icon and display list of sheets/views where it is placed.
 - Add realtime updates when a keynote is added or removed.
+- Figure out how to work around Keynote's workset.
 
 
 Key behaviors:
