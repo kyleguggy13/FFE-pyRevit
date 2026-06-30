@@ -572,11 +572,11 @@ class LineageViewerWindow(Window):
     def __init__(self, webview_type, creation_properties_type, lineage_payload):
         Window.__init__(self)
 
-        try:
-            WindowInteropHelper(self).Owner = __revit__.MainWindowHandle
-            self.ShowInTaskbar = True
-        except:
-            pass
+        # try:
+        #     WindowInteropHelper(self).Owner = __revit__.MainWindowHandle
+        #     self.ShowInTaskbar = True
+        # except:
+        #     pass
 
         self.lineage_payload = lineage_payload
         self.has_sent_lineage_payload = False
