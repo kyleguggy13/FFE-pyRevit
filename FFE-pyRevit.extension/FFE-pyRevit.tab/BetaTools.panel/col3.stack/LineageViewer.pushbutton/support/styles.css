@@ -219,7 +219,7 @@ h1 {
 
 .detail-kind {
   color: var(--teal);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
 }
@@ -227,7 +227,7 @@ h1 {
 .details-heading h2 {
   margin: 6px 0 0;
   color: var(--text);
-  font-size: 18px;
+  font-size: 14px;
   line-height: 1.25;
   font-weight: 700;
   overflow-wrap: anywhere;
@@ -246,7 +246,7 @@ h1 {
 .detail-row dt {
   margin: 0 0 5px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
 }
@@ -260,6 +260,7 @@ h1 {
 
 .graph-node {
   cursor: pointer;
+  font-size: 10px;
 }
 
 .graph-node .node-box {

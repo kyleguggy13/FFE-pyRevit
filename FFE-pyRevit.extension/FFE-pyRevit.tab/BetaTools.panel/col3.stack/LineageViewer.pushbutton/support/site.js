@@ -3,7 +3,7 @@
 
   var SVG_NS = "http://www.w3.org/2000/svg";
 
-  var NODE_WIDTH = 370;
+  var NODE_WIDTH = 400;
   var NODE_HEIGHT = 96;
   var X_GAP = 130;
   var Y_GAP = 24;
@@ -430,7 +430,7 @@
 
     addText(group, position.x + 27, position.y + 32, style.icon, {
       "font-family": "Segoe UI, Arial",
-      "font-size": "14",
+      "font-size": "12",
       "font-weight": "700",
       "text-anchor": "middle",
       fill: style.iconStroke
@@ -438,27 +438,27 @@
 
     addText(group, position.x + 52, position.y + 28, shorten(node.label, 42), {
       "font-family": "Segoe UI, Arial",
-      "font-size": "14",
+      "font-size": "12",
       "font-weight": "700",
       fill: "#2f3438"
     });
 
     addText(group, position.x + 52, position.y + 50, style.tag, {
       "font-family": "Segoe UI, Arial",
-      "font-size": "12",
+      "font-size": "10",
       fill: "#676e75"
     });
 
     addText(group, position.x + 52, position.y + 71, shorten(node.sublabel, 48), {
       "font-family": "Segoe UI, Arial",
-      "font-size": "12",
+      "font-size": "10",
       fill: "#80878e"
     });
 
     if (node.status) {
       addText(group, position.x + 52, position.y + 88, shorten(node.status, 50), {
         "font-family": "Segoe UI, Arial",
-        "font-size": "12",
+        "font-size": "10",
         fill: "#7b8288"
       });
     }
