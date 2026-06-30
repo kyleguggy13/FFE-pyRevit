@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lineage Viewer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="app-header">
+      <div class="title-block">
+        <div class="eyebrow">FFE-pyRevit</div>
+        <h1>Lineage Viewer</h1>
+        <div id="modelMeta" class="model-meta">Waiting for model data...</div>
+      </div>
+      <button id="closeButton" class="icon-button" type="button" title="Close" aria-label="Close">&times;</button>
+    </header>
+
+    <main class="content">
+      <section class="summary-band" aria-label="Linked item counts">
+        <div class="count-item">
+          <span class="count-label">Revit Links</span>
+          <span id="countRevit" class="count-value">0</span>
+        </div>
+        <div class="count-item">
+          <span class="count-label">CAD Links</span>
+          <span id="countCadLink" class="count-value">0</span>
+        </div>
+        <div class="count-item">
+          <span class="count-label">CAD Imports</span>
+          <span id="countCadImport" class="count-value">0</span>
+        </div>
+        <div class="count-item">
+          <span class="count-label">Images</span>
+          <span id="countImage" class="count-value">0</span>
+        </div>
+        <div class="count-item">
+          <span class="count-label">PDFs</span>
+          <span id="countPdf" class="count-value">0</span>
+        </div>
+        <div class="count-item">
+          <span class="count-label">Point Clouds</span>
+          <span id="countPointCloud" class="count-value">0</span>
+        </div>
+      </section>
+
+      <div class="viewer-workspace">
+        <section id="graphViewport" class="graph-section" aria-label="Lineage graph" tabindex="0">
+          <div class="graph-toolbar" aria-label="Graph controls">
+            <button id="zoomInButton" class="tool-button" type="button" title="Zoom in" aria-label="Zoom in">+</button>
+            <button id="zoomOutButton" class="tool-button" type="button" title="Zoom out" aria-label="Zoom out">-</button>
+            <button id="fitButton" class="tool-button" type="button" title="Fit graph" aria-label="Fit graph">[]</button>
+            <button id="resetButton" class="tool-button" type="button" title="Reset zoom" aria-label="Reset zoom">1:1</button>
+          </div>
+          <div id="emptyState" class="empty-state" hidden>No linked items to display.</div>
+          <svg id="graphSvg" class="graph-svg" role="img" aria-label="Linked item relationship graph"></svg>
+        </section>
+
+        <aside class="details-panel" aria-label="Selected item details">
+          <div class="details-heading">
+            <div id="detailKind" class="detail-kind">Selected Item</div>
+            <h2 id="detailTitle">No selection</h2>
+          </div>
+          <dl class="detail-list">
+            <div class="detail-row">
+              <dt>Type</dt>
+              <dd id="detailType">-</dd>
+            </div>
+            <div class="detail-row">
+              <dt>Status</dt>
+              <dd id="detailStatus">-</dd>
+            </div>
+            <div class="detail-row">
+              <dt>Depth</dt>
+              <dd id="detailDepth">-</dd>
+            </div>
+            <div class="detail-row">
+              <dt>Parent</dt>
+              <dd id="detailParent">-</dd>
+            </div>
+            <div class="detail-row">
+              <dt>Reference</dt>
+              <dd id="detailReference">-</dd>
+            </div>
+          </dl>
+        </aside>
+      </div>
+    </main>
+  </div>
+
+  <script src="site.js"></script>
+</body>
+</html>
