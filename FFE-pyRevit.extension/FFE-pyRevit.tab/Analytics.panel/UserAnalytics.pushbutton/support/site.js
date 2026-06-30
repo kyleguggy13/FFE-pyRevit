@@ -5,10 +5,12 @@
     payload: null,
     entries: [],
     filteredEntries: [],
-    selectedContributionYear: null,
+    selectedContributionRange: null,
     activityChart: null,
     resizeTimer: null
   };
+
+  var CONTRIBUTION_ROLLING_YEAR = "rollingYear";
 
   var STATUS_TITLES = {
     ready: "Log Loaded",
@@ -124,6 +126,16 @@
 
   function calendarDayDiff(startDate, endDate) {
     return localDayNumber(endDate) - localDayNumber(startDate);
+  }
+
+  function localDateOnly(date) {
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  }
+
+  function addDays(date, days) {
+    var next = localDateOnly(date);
+    next.setDate(next.getDate() + days);
+    return next;
   }
 
   function monthKey(date) {
@@ -781,23 +793,23 @@
     return result;
   }
 
-  function getDefaultContributionYear(years) {
+  function getDefaultContributionRange(years) {
     var generatedDate = state.payload ? parseLocalDate(state.payload.generatedAt) : null;
     var generatedYear = generatedDate ? generatedDate.getFullYear() : null;
 
-    if (!years.length) {
-      return null;
+    if (state.selectedContributionRange === CONTRIBUTION_ROLLING_YEAR) {
+      return CONTRIBUTION_ROLLING_YEAR;
     }
 
-    if (state.selectedContributionYear && years.indexOf(state.selectedContributionYear) !== -1) {
-      return state.selectedContributionYear;
+    if (state.selectedContributionRange && years.indexOf(state.selectedContributionRange) !== -1) {
+      return state.selectedContributionRange;
     }
 
     if (generatedYear && years.indexOf(generatedYear) !== -1) {
       return generatedYear;
     }
 
-    return years[0];
+    return years.length ? years[0] : CONTRIBUTION_ROLLING_YEAR;
   }
 
   function contributionText(count) {
@@ -828,9 +840,11 @@
     return 4;
   }
 
-  function getContributionDateWindow(year) {
-    var start = new Date(year, 0, 1);
-    var end = new Date(year, 11, 31);
+  function makeContributionDateWindow(activeStart, activeEnd) {
+    var start = localDateOnly(activeStart);
+    var end = localDateOnly(activeEnd);
+    var activeStartDate = localDateOnly(activeStart);
+    var activeEndDate = localDateOnly(activeEnd);
 
     start.setDate(start.getDate() - start.getDay());
     end.setDate(end.getDate() + (6 - end.getDay()));
@@ -838,21 +852,49 @@
     return {
       start: start,
       end: end,
+      activeStart: activeStartDate,
+      activeEnd: activeEndDate,
       weeks: Math.floor(calendarDayDiff(start, end) / 7) + 1
     };
   }
 
-  function buildContributionData(entries, year) {
+  function getContributionDateWindow(selection) {
+    var baseDate;
+    var activeEnd;
+    var activeStart;
+
+    if (selection === CONTRIBUTION_ROLLING_YEAR) {
+      baseDate = getBaseDate();
+      activeEnd = localDateOnly(baseDate);
+      activeStart = addDays(activeEnd, -364);
+      return makeContributionDateWindow(activeStart, activeEnd);
+    }
+
+    return makeContributionDateWindow(
+      new Date(selection, 0, 1),
+      new Date(selection, 11, 31)
+    );
+  }
+
+  function buildContributionData(entries, dateWindow) {
     var counts = {};
     var total = 0;
     var maxCount = 0;
     var firstActivity = null;
     var lastActivity = null;
+    var activeStartDay = localDayNumber(dateWindow.activeStart);
+    var activeEndDay = localDayNumber(dateWindow.activeEnd);
 
     entries.forEach(function (entry) {
+      var entryDay;
       var key;
 
-      if (!entry.date || entry.date.getFullYear() !== year) {
+      if (!entry.date) {
+        return;
+      }
+
+      entryDay = localDayNumber(entry.date);
+      if (entryDay < activeStartDay || entryDay > activeEndDay) {
         return;
       }
 
@@ -878,7 +920,26 @@
     };
   }
 
-  function renderContributionYears(years, selectedYear) {
+  function appendContributionRangeButton(container, label, value, selectedRange, title) {
+    var button = document.createElement("button");
+
+    button.type = "button";
+    button.className = "contribution-year-button";
+    if (value === selectedRange) {
+      button.className += " is-active";
+    }
+    button.textContent = label;
+    if (title) {
+      button.title = title;
+    }
+    button.addEventListener("click", function () {
+      state.selectedContributionRange = value;
+      renderContributionGraph();
+    });
+    container.appendChild(button);
+  }
+
+  function renderContributionYears(years, selectedRange) {
     var container = byId("contribution-years");
 
     if (!container) {
@@ -887,60 +948,60 @@
 
     clearElement(container);
 
-    if (!years.length) {
-      var empty = document.createElement("div");
-      empty.className = "empty-state";
-      empty.textContent = "No years";
-      container.appendChild(empty);
-      return;
-    }
+    appendContributionRangeButton(
+      container,
+      "1 Year",
+      CONTRIBUTION_ROLLING_YEAR,
+      selectedRange,
+      "Show the last 365 days from the current date"
+    );
 
     years.forEach(function (year) {
-      var button = document.createElement("button");
-      button.type = "button";
-      button.className = "contribution-year-button";
-      if (year === selectedYear) {
-        button.className += " is-active";
-      }
-      button.textContent = year;
-      button.addEventListener("click", function () {
-        state.selectedContributionYear = year;
-        renderContributionGraph();
-      });
-      container.appendChild(button);
+      appendContributionRangeButton(container, year, year, selectedRange);
     });
   }
 
-  function renderContributionMonthLabels(grid, year, dateWindow) {
+  function renderContributionMonthLabels(grid, dateWindow) {
     var months = document.createElement("div");
-    var monthIndex;
+    var cursor = new Date(dateWindow.activeStart.getFullYear(), dateWindow.activeStart.getMonth(), 1);
+    var endMonth = new Date(dateWindow.activeEnd.getFullYear(), dateWindow.activeEnd.getMonth(), 1);
 
     months.className = "contribution-months";
     months.style.gridTemplateColumns = "repeat(" + dateWindow.weeks + ", 12px)";
 
-    for (monthIndex = 0; monthIndex < 12; monthIndex += 1) {
-      var monthStart = new Date(year, monthIndex, 1);
-      var nextMonthStart = monthIndex === 11 ? new Date(year + 1, 0, 1) : new Date(year, monthIndex + 1, 1);
+    while (cursor <= endMonth) {
+      var monthStart = localDayNumber(cursor) < localDayNumber(dateWindow.activeStart)
+        ? dateWindow.activeStart
+        : cursor;
+      var nextMonthStart = cursor.getMonth() === 11
+        ? new Date(cursor.getFullYear() + 1, 0, 1)
+        : new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+      var monthEnd = localDayNumber(nextMonthStart) > localDayNumber(addDays(dateWindow.activeEnd, 1))
+        ? addDays(dateWindow.activeEnd, 1)
+        : nextMonthStart;
       var startWeek = Math.floor(calendarDayDiff(dateWindow.start, monthStart) / 7) + 1;
-      var endWeek = Math.floor(calendarDayDiff(dateWindow.start, nextMonthStart) / 7) + 1;
+      var endWeek = Math.floor(calendarDayDiff(dateWindow.start, monthEnd) / 7) + 1;
       var span = Math.max(1, Math.min(dateWindow.weeks + 1, endWeek) - startWeek);
       var label = document.createElement("span");
 
       label.className = "contribution-month-label";
       label.style.gridColumn = startWeek + " / span " + span;
-      label.textContent = shortMonthLabel(monthStart);
+      label.textContent = shortMonthLabel(cursor);
       months.appendChild(label);
+      cursor = nextMonthStart;
     }
 
     grid.appendChild(months);
   }
 
-  function renderContributionCells(grid, year, dateWindow, contributionData) {
+  function renderContributionCells(grid, dateWindow, contributionData) {
     var body = document.createElement("div");
     var weekdays = document.createElement("div");
     var cells = document.createElement("div");
     var weekdayLabels = ["", "Mon", "", "Wed", "", "Fri", ""];
     var cursor = new Date(dateWindow.start.getFullYear(), dateWindow.start.getMonth(), dateWindow.start.getDate());
+    var activeStartDay = localDayNumber(dateWindow.activeStart);
+    var activeEndDay = localDayNumber(dateWindow.activeEnd);
 
     body.className = "contribution-body";
     weekdays.className = "contribution-weekdays";
@@ -959,17 +1020,18 @@
       var week = Math.floor(calendarDayDiff(dateWindow.start, cursor) / 7) + 1;
       var day = cursor.getDay() + 1;
       var square = document.createElement("span");
-      var inSelectedYear = cursor.getFullYear() === year;
-      var level = inSelectedYear ? getContributionLevel(count, contributionData.maxCount) : 0;
+      var cursorDay = localDayNumber(cursor);
+      var inSelectedRange = cursorDay >= activeStartDay && cursorDay <= activeEndDay;
+      var level = inSelectedRange ? getContributionLevel(count, contributionData.maxCount) : 0;
 
       square.className = "contribution-square";
       square.setAttribute("data-level", level);
       square.style.gridColumn = week;
       square.style.gridRow = day;
-      square.title = inSelectedYear
+      square.title = inSelectedRange
         ? contributionText(count) + " on " + formatShortDate(cursor)
         : "";
-      square.setAttribute("aria-label", square.title || "Outside selected year");
+      square.setAttribute("aria-label", square.title || "Outside selected range");
       cells.appendChild(square);
       cursor.setDate(cursor.getDate() + 1);
     }
@@ -982,13 +1044,16 @@
   function renderContributionGraph() {
     var grid = byId("contribution-grid");
     var years = getContributionYears(state.entries);
-    var selectedYear = getDefaultContributionYear(years);
+    var selectedRange = getDefaultContributionRange(years);
+    var isRollingYear = selectedRange === CONTRIBUTION_ROLLING_YEAR;
     var contributionData;
     var dateWindow;
+    var summarySuffix;
+    var emptyRangeLabel;
     var rangeText;
 
-    state.selectedContributionYear = selectedYear;
-    renderContributionYears(years, selectedYear);
+    state.selectedContributionRange = selectedRange;
+    renderContributionYears(years, selectedRange);
 
     if (!grid) {
       return;
@@ -996,19 +1061,21 @@
 
     clearElement(grid);
 
-    if (!selectedYear) {
+    if (!selectedRange) {
       setText("contribution-summary", "0 contributions");
       setText("contribution-range", "No activity yet");
       grid.appendChild(makeEmptyState("No contribution data"));
       return;
     }
 
-    contributionData = buildContributionData(state.entries, selectedYear);
-    dateWindow = getContributionDateWindow(selectedYear);
+    dateWindow = getContributionDateWindow(selectedRange);
+    contributionData = buildContributionData(state.entries, dateWindow);
+    summarySuffix = isRollingYear ? "in the past year" : "in " + selectedRange;
+    emptyRangeLabel = isRollingYear ? "the past year" : String(selectedRange);
 
     setText(
       "contribution-summary",
-      contributionText(contributionData.total) + " in " + selectedYear
+      contributionText(contributionData.total) + " " + summarySuffix
     );
 
     if (contributionData.firstActivity && contributionData.lastActivity) {
@@ -1016,12 +1083,12 @@
         " - " +
         formatShortDate(contributionData.lastActivity);
     } else {
-      rangeText = "No contributions in " + selectedYear;
+      rangeText = "No contributions in " + emptyRangeLabel;
     }
     setText("contribution-range", rangeText);
 
-    renderContributionMonthLabels(grid, selectedYear, dateWindow);
-    renderContributionCells(grid, selectedYear, dateWindow, contributionData);
+    renderContributionMonthLabels(grid, dateWindow);
+    renderContributionCells(grid, dateWindow, contributionData);
   }
 
   function statusTone(status) {

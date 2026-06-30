@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 __title__ = "User\nAnalytics"
-__version__ = "Version = v1.0"
+__version__ = "Version = v1.1"
 __persistentengine__ = True
-__doc__ = """Version = v1.0
-Date    = 05.15.2026
+__doc__ = """Version = v1.1
+Date    = 06.30.2026
 __________________________________________________________________
 Description:
 Shows a read-only WebView2 dashboard for the current Revit user's
@@ -15,6 +15,7 @@ __________________________________________________________________
 Last update:
 - [10.22.2025] - v0.1 Beta Release
 - [05.15.2026] - v1.0 Added WebView2 user analytics dashboard
+- [06.30.2026] - v1.1 Added an option to the contribution graph to show 1 year from current date.
 __________________________________________________________________
 Author: Kyle Guggenheim"""
 
