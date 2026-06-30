@@ -53,3 +53,12 @@
 
 ### v1.13.1 - 05.15.2026
 - CopyViewFilters v1.3: Fixed User cancelling view selection causing error
+
+### v1.14.0 - 05.29.2026 
+- Added FFE-Keynotes to Beta tab.
+
+### v1.14.1 - 06.30.2026 
+- Updated UserAnalytics v1.1: Updated Activity Over Time graph and Contribution Graph.
+
+### v1.14.2 - 06.30.2026
+- LineageViewer v0.2: Added WebView2 viewer.

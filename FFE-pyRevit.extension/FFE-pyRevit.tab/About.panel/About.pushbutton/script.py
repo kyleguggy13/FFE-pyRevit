@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-__title__   = "FFE-pyRevit \nv1.13.1"
-__version__ = "Version = v1.13.1"
+__title__   = "FFE-pyRevit \nv1.14.2"
+__version__ = "Version = v1.14.2"
 __persistentengine__ = True
-__doc__ = """Version = v1.13.1
-Date    = 05.15.2026
+__doc__ = """Version = v1.14.2
+Date    = 06.30.2026
 __________________________________________________________________
 Description:
 pyRevit About Form
@@ -30,7 +30,10 @@ Last update:
 - [02.11.2026] - v1.11.0 Added Sheets_Counter tool.
 - [02.17.2026] - v1.12.0 Added transferred-project-standards hook.
 - [05.11.2026] - v1.13.0 Added Ductulator web app integration to MEPTools.
-- [05.15.2026] - v1.13.1 CopyViewFilters v1.3: Fixed User cancelling view selection causing error
+- [05.15.2026] - v1.13.1 CopyViewFilters v1.3: Fixed User cancelling view selection causing error.
+- [05.29.2026] - v1.14.0 Added FFE-Keynotes to Beta tab.
+- [06.30.2026] - v1.14.1 Updated UserAnalytics v1.1: Updated Activity Over Time graph and Contribution Graph.
+- [06.30.2026] - v1.14.2 LineageViewer v0.2: Added WebView2 viewer.
 __________________________________________________________________
 Author: Kyle Guggenheim from FFE Inc."""
 
@@ -62,7 +65,7 @@ PATH_SUPPORT = os.path.join(PATH_SCRIPT, "support")
 PATH_INDEX = os.path.join(PATH_SUPPORT, "index.html")
 
 ABOUT_NAME = "FFE-pyRevit"
-ABOUT_VERSION = "v1.13.1"
+ABOUT_VERSION = "v1.14.2"
 ABOUT_YEAR = "2026"
 
 try:
