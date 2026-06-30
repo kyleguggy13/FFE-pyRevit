@@ -174,16 +174,183 @@ def make_file_uri(path):
     return Uri("file:///" + absolute_path.replace(" ", "%20"))
 
 
-def try_get_external_path(owner_doc, element_id):
+EMPTY_GUID = "00000000-0000-0000-0000-000000000000"
+
+
+def normalize_guid(value):
+    text = safe_str(value).strip().strip("{}").lower()
+    if not text or text == EMPTY_GUID:
+        return ""
+    return text
+
+
+def call_optional_member(target, member_names):
+    if target is None:
+        return None
+
+    for member_name in member_names:
+        try:
+            member = getattr(target, member_name)
+            value = member() if callable(member) else member
+            if value:
+                return value
+        except:
+            pass
+    return None
+
+
+def model_path_to_user_visible(model_path):
+    if not model_path:
+        return ""
+
+    try:
+        return safe_str(ModelPathUtils.ConvertModelPathToUserVisiblePath(model_path)).strip()
+    except:
+        return ""
+
+
+def normalize_identity_path(path_value):
+    text = safe_str(path_value).strip()
+    if not text:
+        return ""
+    try:
+        text = os.path.normcase(os.path.normpath(text))
+    except:
+        pass
+    return text.lower()
+
+
+def element_id_key(element_id):
+    if not element_id:
+        return ""
+
+    for attr_name in ["IntegerValue", "Value"]:
+        try:
+            value = getattr(element_id, attr_name)
+            if value is not None:
+                return safe_str(value)
+        except:
+            pass
+
+    return safe_str(element_id)
+
+
+def try_get_external_model_path(owner_doc, element_id):
     try:
         ext_ref = ExternalFileUtils.GetExternalFileReference(owner_doc, element_id)
         if ext_ref:
-            model_path = ext_ref.GetAbsolutePath()
-            if model_path:
-                return ModelPathUtils.ConvertModelPathToUserVisiblePath(model_path)
+            return call_optional_member(ext_ref, ["GetAbsolutePath", "GetPath"])
     except:
         pass
+    return None
+
+
+def try_get_external_path(owner_doc, element_id):
+    model_path = try_get_external_model_path(owner_doc, element_id)
+    if model_path:
+        return model_path_to_user_visible(model_path)
     return ""
+
+
+def get_document_path(target_doc):
+    if target_doc is None:
+        return ""
+
+    try:
+        return safe_str(target_doc.PathName).strip()
+    except:
+        return ""
+
+
+def get_document_central_path(target_doc):
+    model_path = call_optional_member(target_doc, ["GetWorksharingCentralModelPath"])
+    return model_path_to_user_visible(model_path)
+
+
+def get_model_guid_from_model_path(model_path):
+    guid_value = call_optional_member(
+        model_path,
+        ["GetModelGUID", "GetModelGuid", "ModelGUID", "ModelGuid"]
+    )
+    return normalize_guid(guid_value)
+
+
+def get_model_guid_from_document(target_doc):
+    guid_value = call_optional_member(
+        target_doc,
+        ["WorksharingCentralGUID", "WorksharingCentralGuid", "ModelGUID", "ModelGuid"]
+    )
+    guid_text = normalize_guid(guid_value)
+    if guid_text:
+        return guid_text, "Model GUID"
+
+    cloud_model_path = call_optional_member(target_doc, ["GetCloudModelPath"])
+    guid_text = get_model_guid_from_model_path(cloud_model_path)
+    if guid_text:
+        return guid_text, "Cloud Model GUID"
+
+    return "", ""
+
+
+def get_model_identity(target_doc=None, model_path=None, path_value="", fallback_label=""):
+    model_guid = ""
+    guid_source = ""
+
+    path_text = safe_str(path_value).strip()
+    if not path_text and model_path:
+        path_text = model_path_to_user_visible(model_path)
+    if not path_text and target_doc is not None:
+        path_text = get_document_central_path(target_doc) or get_document_path(target_doc)
+
+    if target_doc is not None:
+        model_guid, guid_source = get_model_guid_from_document(target_doc)
+
+    if not model_guid and model_path:
+        model_guid = get_model_guid_from_model_path(model_path)
+        if model_guid:
+            guid_source = "Link ModelPath GUID"
+
+    normalized_path = normalize_identity_path(path_text)
+    if normalized_path:
+        return {
+            "modelGuid": model_guid,
+            "identityKey": "path:{0}".format(normalized_path),
+            "identitySource": "Model path",
+            "path": path_text,
+            "guidSource": guid_source,
+        }
+
+    if model_guid:
+        return {
+            "modelGuid": model_guid,
+            "identityKey": "guid:{0}".format(model_guid),
+            "identitySource": "Fallback Model GUID (missing model path)",
+            "path": "",
+            "guidSource": guid_source,
+        }
+
+    fallback_text = safe_str(fallback_label).strip()
+    if fallback_text:
+        return {
+            "modelGuid": "",
+            "identityKey": "name:{0}".format(fallback_text.lower()),
+            "identitySource": "Fallback name (missing model path)",
+            "path": "",
+            "guidSource": "",
+        }
+
+    try:
+        fallback_text = "DOCID:{0}".format(target_doc.GetHashCode())
+    except:
+        fallback_text = "DOC:{0}".format(id(target_doc)) if target_doc else "UNKNOWN"
+
+    return {
+        "modelGuid": "",
+        "identityKey": fallback_text,
+        "identitySource": "Fallback document id (missing model path)",
+        "path": "",
+        "guidSource": "",
+    }
 
 
 def safe_get_link_status(link_type):
@@ -259,19 +426,6 @@ def get_pointcloud_path(pointcloud_type):
     return ""
 
 
-def doc_key(current_doc):
-    try:
-        if current_doc.PathName:
-            return current_doc.PathName
-    except:
-        pass
-
-    try:
-        return "DOCID:{0}".format(current_doc.GetHashCode())
-    except:
-        return "DOC:{0}".format(id(current_doc))
-
-
 def focus_existing_window():
     for window in list(WINDOW_REFS):
         try:
@@ -288,7 +442,20 @@ def focus_existing_window():
 
 # ____________________________________________________________________ GRAPH DATA
 class GraphNode(object):
-    def __init__(self, node_id, label, sublabel, kind, depth, parent_id=None, status=""):
+    def __init__(
+        self,
+        node_id,
+        label,
+        sublabel,
+        kind,
+        depth,
+        parent_id=None,
+        status="",
+        model_guid="",
+        identity_key="",
+        identity_source="",
+        identity_path=""
+    ):
         self.id = node_id
         self.label = label
         self.sublabel = sublabel
@@ -296,20 +463,72 @@ class GraphNode(object):
         self.depth = depth
         self.parent_id = parent_id
         self.status = status
+        self.model_guid = model_guid
+        self.identity_key = identity_key
+        self.identity_source = identity_source
+        self.identity_path = identity_path
 
 
 class LineageGraph(object):
     def __init__(self):
         self.nodes = {}
+        self.node_order = []
         self.edges = []
         self.node_counter = 0
-        self.visited_doc_keys = set()
+        self.edge_counter = 0
+        self.model_node_ids_by_identity = {}
+        self.visited_model_keys = set()
+        self.host_node_id = None
+        self.host_identity_key = ""
 
     def next_id(self, prefix):
         self.node_counter += 1
         return "{0}_{1}".format(prefix, self.node_counter)
 
-    def add_node(self, label, sublabel, kind, depth, parent_id=None, status=""):
+    def next_edge_id(self):
+        self.edge_counter += 1
+        return "edge_{0}".format(self.edge_counter)
+
+    def iter_nodes(self):
+        for node_id in self.node_order:
+            yield self.nodes[node_id]
+
+    def add_edge(
+        self,
+        from_id,
+        to_id,
+        kind="contains",
+        style="normal",
+        label="",
+        status="",
+        instance_id="",
+        type_id=""
+    ):
+        self.edges.append({
+            "id": self.next_edge_id(),
+            "from": from_id,
+            "to": to_id,
+            "kind": safe_str(kind) or "contains",
+            "style": safe_str(style) or "normal",
+            "label": safe_str(label),
+            "status": safe_str(status),
+            "instanceId": safe_str(instance_id),
+            "typeId": safe_str(type_id),
+        })
+
+    def add_node(
+        self,
+        label,
+        sublabel,
+        kind,
+        depth,
+        parent_id=None,
+        status="",
+        model_guid="",
+        identity_key="",
+        identity_source="",
+        identity_path=""
+    ):
         node_id = self.next_id(kind)
         self.nodes[node_id] = GraphNode(
             node_id,
@@ -319,13 +538,57 @@ class LineageGraph(object):
             int(depth),
             parent_id,
             safe_str(status),
+            safe_str(model_guid),
+            safe_str(identity_key),
+            safe_str(identity_source),
+            safe_str(identity_path),
         )
+        self.node_order.append(node_id)
         if parent_id:
-            self.edges.append({
-                "from": parent_id,
-                "to": node_id,
-            })
+            self.add_edge(parent_id, node_id)
         return node_id
+
+    def add_model_node(self, label, sublabel, kind, depth, identity_info, parent_id=None, status=""):
+        identity_info = identity_info or {}
+        identity_key = safe_str(identity_info.get("identityKey"))
+        model_guid = safe_str(identity_info.get("modelGuid"))
+        identity_source = safe_str(identity_info.get("identitySource"))
+        identity_path = safe_str(identity_info.get("path"))
+
+        if identity_key and identity_key in self.model_node_ids_by_identity:
+            node_id = self.model_node_ids_by_identity[identity_key]
+            node = self.nodes[node_id]
+            try:
+                if int(depth) < node.depth:
+                    node.depth = int(depth)
+            except:
+                pass
+            if kind == "host":
+                node.kind = "host"
+                node.status = safe_str(status) or node.status
+            if not node.model_guid and model_guid:
+                node.model_guid = model_guid
+            if identity_source and not node.identity_source:
+                node.identity_source = identity_source
+            if identity_path and not node.identity_path:
+                node.identity_path = identity_path
+            return node_id, False
+
+        node_id = self.add_node(
+            label=label,
+            sublabel=sublabel,
+            kind=kind,
+            depth=depth,
+            parent_id=parent_id,
+            status=status,
+            model_guid=model_guid,
+            identity_key=identity_key,
+            identity_source=identity_source,
+            identity_path=identity_path,
+        )
+        if identity_key:
+            self.model_node_ids_by_identity[identity_key] = node_id
+        return node_id, True
 
 
 # ____________________________________________________________________ COLLECTION
@@ -471,52 +734,229 @@ def collect_pointclouds(owner_doc, parent_node_id, depth, graph):
                 pass
 
 
-def collect_revit_links(owner_doc, parent_node_id, depth, graph):
+def collect_revit_link_instances(owner_doc):
     try:
-        link_instances = FilteredElementCollector(owner_doc).OfClass(RevitLinkInstance).ToElements()
+        return FilteredElementCollector(owner_doc).OfClass(RevitLinkInstance).ToElements()
     except:
-        link_instances = []
+        return []
+
+
+def collect_revit_link_types(owner_doc):
+    try:
+        return FilteredElementCollector(owner_doc).OfClass(RevitLinkType).ToElements()
+    except:
+        return []
+
+
+def collect_link_instances_by_type(owner_doc):
+    result = defaultdict(list)
+    link_instances = collect_revit_link_instances(owner_doc)
 
     for link_instance in link_instances:
         try:
-            link_type = owner_doc.GetElement(link_instance.GetTypeId())
-            link_doc = link_instance.GetLinkDocument()
+            type_key = element_id_key(link_instance.GetTypeId())
+            if type_key:
+                result[type_key].append(link_instance)
+        except:
+            pass
 
-            instance_name = ""
+    return result
+
+
+def get_first_loaded_link_document(link_instances):
+    for link_instance in link_instances or []:
+        try:
+            link_doc = link_instance.GetLinkDocument()
+            if link_doc is not None:
+                return link_doc
+        except:
+            pass
+    return None
+
+
+def is_nested_revit_link_type(link_type):
+    if link_type is None:
+        return False
+
+    for attr_name in ["IsNestedLink", "IsNested"]:
+        try:
+            value = getattr(link_type, attr_name)
+            if callable(value):
+                value = value()
+            if bool(value):
+                return True
+        except:
+            pass
+
+    return False
+
+
+def collect_revit_links(owner_doc, parent_node_id, depth, graph):
+    link_types = collect_revit_link_types(owner_doc)
+    instances_by_type = collect_link_instances_by_type(owner_doc)
+    processed_type_ids = set()
+    processed_link_count = [0]
+
+    def process_link_group(link_type, type_id, link_instances):
+        try:
+            if link_type is None and not link_instances:
+                return False
+
+            if not type_id and link_type is not None:
+                type_id = element_id_key(link_type.Id)
+            if type_id:
+                processed_type_ids.add(type_id)
+
+            link_doc = get_first_loaded_link_document(link_instances)
+
+            type_name = ""
             try:
-                instance_name = safe_str(link_instance.Name)
+                if link_type is not None:
+                    type_name = safe_str(link_type.Name)
             except:
                 pass
-
-            if not instance_name and link_type:
-                instance_name = safe_str(link_type.Name)
-            if not instance_name:
-                instance_name = "Revit Link"
+            if not type_name:
+                try:
+                    if link_instances:
+                        type_name = safe_str(link_instances[0].Name)
+                except:
+                    pass
+            if not type_name:
+                type_name = "Revit Link"
 
             path_value = ""
-            if link_type:
-                path_value = try_get_external_path(owner_doc, link_type.Id)
+            model_path = None
+            if link_type is not None:
+                model_path = try_get_external_model_path(owner_doc, link_type.Id)
+                path_value = model_path_to_user_visible(model_path)
+            if not path_value and link_doc is not None:
+                try:
+                    path_value = safe_str(link_doc.PathName)
+                except:
+                    pass
 
-            status = safe_get_link_status(link_type) if link_type else "Unknown"
-            node_id = graph.add_node(
-                label=instance_name,
+            status = safe_get_link_status(link_type) if link_type is not None else "Unknown"
+            if link_doc is not None:
+                status = "Loaded"
+            model_label = ""
+            try:
+                if link_doc is not None:
+                    model_label = safe_str(link_doc.Title)
+            except:
+                pass
+            if not model_label:
+                model_label = type_name
+            if not model_label:
+                model_label = "Revit Link"
+
+            identity_info = get_model_identity(
+                target_doc=link_doc,
+                model_path=model_path,
+                path_value=path_value,
+                fallback_label=model_label,
+            )
+            node_kind = "host" if (
+                graph.host_identity_key and
+                identity_info.get("identityKey") == graph.host_identity_key
+            ) else "revitlink"
+
+            node_id, created = graph.add_model_node(
+                label=model_label,
                 sublabel=basename_or_value(path_value) if path_value else "No path available",
-                kind="revitlink",
+                kind=node_kind,
                 depth=depth,
-                parent_id=parent_node_id,
+                parent_id=None,
                 status=status,
+                identity_info=identity_info,
             )
 
-            if link_doc:
-                key = doc_key(link_doc)
-                if key not in graph.visited_doc_keys:
-                    graph.visited_doc_keys.add(key)
+            if node_kind != "host":
+                try:
+                    node = graph.nodes[node_id]
+                    if not node.parent_id:
+                        node.parent_id = parent_node_id
+                except:
+                    pass
+
+            edge_style = "normal"
+            if (
+                graph.host_identity_key and
+                identity_info.get("identityKey") == graph.host_identity_key and
+                parent_node_id != graph.host_node_id
+            ):
+                edge_style = "reciprocal"
+
+            if link_instances:
+                for link_instance in link_instances:
+                    instance_name = ""
+                    try:
+                        instance_name = safe_str(link_instance.Name)
+                    except:
+                        pass
+                    graph.add_edge(
+                        from_id=parent_node_id,
+                        to_id=node_id,
+                        kind="revitlink",
+                        style=edge_style,
+                        label=instance_name or type_name,
+                        status=status,
+                        instance_id=element_id_key(link_instance.Id),
+                        type_id=type_id,
+                    )
+            else:
+                graph.add_edge(
+                    from_id=parent_node_id,
+                    to_id=node_id,
+                    kind="revitlink",
+                    style=edge_style,
+                    label=type_name,
+                    status=status,
+                    instance_id="",
+                    type_id=type_id,
+                )
+
+            model_key = identity_info.get("identityKey")
+            if link_doc is not None and model_key:
+                if model_key not in graph.visited_model_keys:
+                    graph.visited_model_keys.add(model_key)
                     collect_doc_contents(link_doc, node_id, depth + 1, graph)
+            return True
         except:
             try:
                 LOGGER.debug(traceback.format_exc())
             except:
                 pass
+        return False
+
+    for link_type in link_types:
+        try:
+            type_id = element_id_key(link_type.Id)
+            if is_nested_revit_link_type(link_type):
+                continue
+            if process_link_group(link_type, type_id, instances_by_type.get(type_id, [])):
+                processed_link_count[0] += 1
+        except:
+            try:
+                LOGGER.debug(traceback.format_exc())
+            except:
+                pass
+
+    for type_id, link_instances in instances_by_type.items():
+        if type_id in processed_type_ids:
+            continue
+
+        link_type = None
+        try:
+            if link_instances:
+                link_type = owner_doc.GetElement(link_instances[0].GetTypeId())
+        except:
+            link_type = None
+
+        if link_type is not None and is_nested_revit_link_type(link_type) and processed_link_count[0] > 0:
+            continue
+
+        if process_link_group(link_type, type_id, link_instances):
+            processed_link_count[0] += 1
 
 
 def collect_doc_contents(owner_doc, parent_node_id, depth, graph):
@@ -528,22 +968,37 @@ def collect_doc_contents(owner_doc, parent_node_id, depth, graph):
 
 def build_lineage_payload(active_doc):
     graph = LineageGraph()
-    host_node_id = graph.add_node(
+    host_path = safe_str(active_doc.PathName) if active_doc.PathName else ""
+    host_identity = get_model_identity(
+        target_doc=active_doc,
+        path_value=host_path,
+        fallback_label=active_doc.Title,
+    )
+    host_node_id, created = graph.add_model_node(
         label=active_doc.Title,
         sublabel=basename_or_value(active_doc.PathName) if active_doc.PathName else "Unsaved model",
         kind="host",
         depth=0,
         parent_id=None,
         status="Active Model",
+        identity_info=host_identity,
     )
 
-    graph.visited_doc_keys.add(doc_key(active_doc))
+    graph.host_node_id = host_node_id
+    graph.host_identity_key = host_identity.get("identityKey")
+    if graph.host_identity_key:
+        graph.visited_model_keys.add(graph.host_identity_key)
     collect_doc_contents(active_doc, host_node_id, 1, graph)
 
     counts = defaultdict(int)
     node_payloads = []
-    for node in graph.nodes.values():
-        counts[node.kind] += 1
+    for edge in graph.edges:
+        if edge.get("kind") == "revitlink":
+            counts["revitlink"] += 1
+
+    for node in graph.iter_nodes():
+        if node.kind not in ["host", "revitlink"]:
+            counts[node.kind] += 1
         node_payloads.append({
             "id": node.id,
             "label": node.label,
@@ -552,12 +1007,20 @@ def build_lineage_payload(active_doc):
             "depth": node.depth,
             "parentId": node.parent_id,
             "status": node.status,
+            "modelGuid": node.model_guid,
+            "identityKey": node.identity_key,
+            "identitySource": node.identity_source,
+            "identityPath": node.identity_path,
         })
 
     return {
         "model": {
             "title": safe_str(active_doc.Title),
             "path": safe_str(active_doc.PathName) if active_doc.PathName else "Unsaved model",
+            "modelGuid": host_identity.get("modelGuid", ""),
+            "identityKey": host_identity.get("identityKey", ""),
+            "identitySource": host_identity.get("identitySource", ""),
+            "identityPath": host_identity.get("path", ""),
             "generated": time.strftime("%Y-%m-%d %I:%M:%S %p"),
             "note": "Nested contents are only shown for loaded Revit links.",
         },
@@ -738,7 +1201,7 @@ if not focus_existing_window():
             exitscript=True,
         )
 
-    if len(payload.get("nodes", [])) <= 1:
+    if len(payload.get("nodes", [])) <= 1 and not payload.get("edges", []):
         forms.alert(
             "No linked items were found in the active model.",
             title="Lineage Viewer",

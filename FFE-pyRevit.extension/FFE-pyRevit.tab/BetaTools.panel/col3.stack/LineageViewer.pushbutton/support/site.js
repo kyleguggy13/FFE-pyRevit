@@ -3,7 +3,7 @@
 
   var SVG_NS = "http://www.w3.org/2000/svg";
 
-  var NODE_WIDTH = 400;
+  var NODE_WIDTH = 370;
   var NODE_HEIGHT = 96;
   var X_GAP = 130;
   var Y_GAP = 24;
@@ -70,6 +70,9 @@
     positions: {},
     layout: { width: 0, height: 0 },
     selectedNodeId: null,
+    collapsedNodeIds: {},
+    childIdsByNodeId: {},
+    visibleNodeIds: {},
     contentGroup: null,
     transform: { x: 20, y: 20, scale: 1 },
     autoFit: true,
@@ -126,20 +129,144 @@
     return text;
   }
 
+  function measuredTextLength(textElement, value) {
+    var lengthValue = 0;
+    try {
+      lengthValue = textElement.getComputedTextLength();
+    } catch (ignore) {
+      lengthValue = 0;
+    }
+    if (lengthValue > 0) {
+      return lengthValue;
+    }
+    return String(value || "").length * 5.8;
+  }
+
+  function fitTextElement(textElement, value, maxWidth) {
+    var text = String(value || "");
+    var low = 0;
+    var high = text.length;
+    var best = "";
+    var candidate;
+    var mid;
+
+    textElement.textContent = text;
+    if (!maxWidth || measuredTextLength(textElement, text) <= maxWidth) {
+      return;
+    }
+
+    while (low <= high) {
+      mid = Math.floor((low + high) / 2);
+      candidate = text.slice(0, mid).replace(/\s+$/, "") + "...";
+      textElement.textContent = candidate;
+      if (measuredTextLength(textElement, candidate) <= maxWidth) {
+        best = candidate;
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+
+    textElement.textContent = best || "...";
+  }
+
+  function addFittedText(parent, x, y, value, maxWidth, attrs) {
+    var text = addText(parent, x, y, value, attrs);
+    fitTextElement(text, value, maxWidth);
+    return text;
+  }
+
   function clamp(value, minValue, maxValue) {
     return Math.max(minValue, Math.min(maxValue, value));
   }
 
-  function shorten(value, maxLength) {
-    var text = value == null ? "" : String(value);
-    if (text.length <= maxLength) {
-      return text;
+  function isPlaceholderReference(value) {
+    var text = String(value || "").trim().toLowerCase();
+    return !text || text === "-" || text === "no path available" || text === "unknown";
+  }
+
+  function cleanFileName(value) {
+    var text = String(value || "").trim();
+    var slashIndex;
+    if (!text) {
+      return "";
     }
-    return text.slice(0, Math.max(0, maxLength - 3)) + "...";
+    text = text.split("|")[0].trim();
+    slashIndex = Math.max(text.lastIndexOf("\\"), text.lastIndexOf("/"));
+    if (slashIndex >= 0) {
+      text = text.slice(slashIndex + 1);
+    }
+    return text;
+  }
+
+  function nodeFileName(node) {
+    var reference = cleanFileName(node.sublabel);
+    var label = cleanFileName(node.label);
+    if (!isPlaceholderReference(reference)) {
+      return reference;
+    }
+    return label || "Untitled";
+  }
+
+  function normalizedLinkStatus(node) {
+    var raw = String(node.status || "").trim();
+    var compact = raw.toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+    if (node.kind === "host") {
+      return "Loaded";
+    }
+    if (compact === "notfound" || compact === "notlocated" || compact === "missing") {
+      return "Not Found";
+    }
+    if (compact.indexOf("unloaded") >= 0 || compact === "notloaded") {
+      return "Unloaded";
+    }
+    if (node.kind === "revitlink" && (!raw || compact === "unknown")) {
+      return "Unloaded";
+    }
+    if (compact.indexOf("loaded") >= 0 || compact === "linked") {
+      return "Loaded";
+    }
+    if (!raw) {
+      return "Unknown";
+    }
+    return raw;
+  }
+
+  function statusBadgeVariant(status) {
+    var compact = String(status || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+    if (compact === "loaded") {
+      return "text-bg-success";
+    }
+    if (compact === "unloaded") {
+      return "text-bg-secondary";
+    }
+    if (compact === "notfound") {
+      return "text-bg-danger";
+    }
+    if (compact === "imported") {
+      return "text-bg-warning";
+    }
+    if (compact === "linked") {
+      return "text-bg-info";
+    }
+    return "text-bg-secondary";
   }
 
   function nodeStyle(kind) {
     return styles[kind] || styles.revitlink;
+  }
+
+  function safeClassToken(value) {
+    return String(value || "normal").toLowerCase().replace(/[^a-z0-9_-]+/g, "-");
+  }
+
+  function edgeClasses(kind, style) {
+    return [
+      "graph-edge",
+      "is-kind-" + safeClassToken(kind || "contains"),
+      "is-style-" + safeClassToken(style || "normal")
+    ];
   }
 
   function countValue(counts, key) {
@@ -187,15 +314,134 @@
     setText("countPointCloud", countValue(counts, "pointcloud"));
   }
 
-  function computeLayout(nodes) {
-    var columns = {};
-    var maxDepth = 0;
-    var positions = {};
-    var maxColumnHeight = 0;
+  function compareNodes(a, b) {
+    var left = String(a.kind || "") + "|" + String(a.label || "").toLowerCase();
+    var right = String(b.kind || "") + "|" + String(b.label || "").toLowerCase();
+    if (left < right) {
+      return -1;
+    }
+    if (left > right) {
+      return 1;
+    }
+    return 0;
+  }
+
+  function buildHierarchy(nodes, edges) {
+    var nodesById = {};
+    var incoming = {};
+    var childrenById = {};
+    var childSeenByParent = {};
 
     nodes.forEach(function (node) {
       var depth = Number(node.depth) || 0;
       node.depth = depth;
+      nodesById[node.id] = node;
+    });
+
+    (edges || []).forEach(function (edge) {
+      var fromId = edge.from;
+      var toId = edge.to;
+      if (!fromId || !toId || fromId === toId || edge.style === "reciprocal") {
+        return;
+      }
+      if (!nodesById[fromId] || !nodesById[toId]) {
+        return;
+      }
+      if (!childrenById[fromId]) {
+        childrenById[fromId] = [];
+        childSeenByParent[fromId] = {};
+      }
+      if (!childSeenByParent[fromId][toId]) {
+        childrenById[fromId].push(toId);
+        childSeenByParent[fromId][toId] = true;
+      }
+      incoming[toId] = true;
+    });
+
+    return {
+      nodesById: nodesById,
+      incoming: incoming,
+      childrenById: childrenById
+    };
+  }
+
+  function hierarchyRoots(nodes, hierarchy) {
+    var roots = [];
+
+    nodes.forEach(function (node) {
+      if (node.kind === "host") {
+        roots.push(node);
+      }
+    });
+
+    if (!roots.length) {
+      nodes.forEach(function (node) {
+        if (!hierarchy.incoming[node.id]) {
+          roots.push(node);
+        }
+      });
+    }
+
+    if (!roots.length && nodes.length) {
+      roots.push(nodes[0]);
+    }
+
+    roots.sort(compareNodes);
+    return roots;
+  }
+
+  function sortedNodesByDepth(nodes) {
+    return nodes.slice().sort(function (a, b) {
+      var depthDelta = (Number(a.depth) || 0) - (Number(b.depth) || 0);
+      if (depthDelta !== 0) {
+        return depthDelta;
+      }
+      return compareNodes(a, b);
+    });
+  }
+
+  function computeLayout(nodes, edges) {
+    var columns = {};
+    var maxDepth = 0;
+    var positions = {};
+    var maxColumnHeight = 0;
+    var hierarchy = buildHierarchy(nodes, edges);
+    var nodesById = hierarchy.nodesById;
+    var childrenById = hierarchy.childrenById;
+    var visited = {};
+    var orderedNodes = [];
+    var roots = hierarchyRoots(nodes, hierarchy);
+
+    function walk(node, depth) {
+      var childIds;
+      var childNodes;
+      if (!node || visited[node.id]) {
+        return;
+      }
+      visited[node.id] = true;
+      node.depth = Number(depth) || 0;
+      orderedNodes.push(node);
+
+      childIds = childrenById[node.id] || [];
+      childNodes = childIds.map(function (childId) {
+        return nodesById[childId];
+      }).filter(Boolean);
+      childNodes.sort(compareNodes);
+      childNodes.forEach(function (childNode) {
+        walk(childNode, node.depth + 1);
+      });
+    }
+
+    roots.forEach(function (node) {
+      walk(node, Number(node.depth) || 0);
+    });
+
+    sortedNodesByDepth(nodes).forEach(function (node) {
+      walk(node, Number(node.depth) || 0);
+    });
+
+    orderedNodes.forEach(function (node) {
+      var depth = Number(node.depth) || 0;
       maxDepth = Math.max(maxDepth, depth);
       if (!columns[depth]) {
         columns[depth] = [];
@@ -204,18 +450,6 @@
     });
 
     Object.keys(columns).forEach(function (depthKey) {
-      columns[depthKey].sort(function (a, b) {
-        var left = String(a.kind || "") + "|" + String(a.label || "").toLowerCase();
-        var right = String(b.kind || "") + "|" + String(b.label || "").toLowerCase();
-        if (left < right) {
-          return -1;
-        }
-        if (left > right) {
-          return 1;
-        }
-        return 0;
-      });
-
       var columnHeight = columns[depthKey].length * NODE_HEIGHT +
         Math.max(0, columns[depthKey].length - 1) * Y_GAP;
       maxColumnHeight = Math.max(maxColumnHeight, columnHeight);
@@ -240,6 +474,52 @@
       positions: positions,
       width: MARGIN_X * 2 + (maxDepth + 1) * NODE_WIDTH + maxDepth * X_GAP,
       height: Math.max(maxColumnHeight + MARGIN_Y * 2, 350)
+    };
+  }
+
+  function pruneCollapsedNodes(nodesById) {
+    Object.keys(state.collapsedNodeIds).forEach(function (nodeId) {
+      if (!nodesById[nodeId]) {
+        delete state.collapsedNodeIds[nodeId];
+      }
+    });
+  }
+
+  function visibleGraph(nodes, edges, hierarchy) {
+    var visibleIds = {};
+    var roots = hierarchyRoots(nodes, hierarchy);
+    var nodesById = hierarchy.nodesById;
+    var childrenById = hierarchy.childrenById;
+
+    function walk(node) {
+      var childIds;
+      var childNodes;
+      if (!node || visibleIds[node.id]) {
+        return;
+      }
+      visibleIds[node.id] = true;
+      if (state.collapsedNodeIds[node.id]) {
+        return;
+      }
+
+      childIds = childrenById[node.id] || [];
+      childNodes = childIds.map(function (childId) {
+        return nodesById[childId];
+      }).filter(Boolean);
+      childNodes.sort(compareNodes);
+      childNodes.forEach(walk);
+    }
+
+    roots.forEach(walk);
+
+    return {
+      nodeIds: visibleIds,
+      nodes: nodes.filter(function (node) {
+        return !!visibleIds[node.id];
+      }),
+      edges: edges.filter(function (edge) {
+        return !!(visibleIds[edge.from] && visibleIds[edge.to]);
+      })
     };
   }
 
@@ -346,6 +626,44 @@
     svg.appendChild(defs);
   }
 
+  function edgePairKey(edge) {
+    return String(edge.from || "") + ">" + String(edge.to || "");
+  }
+
+  function copyEdge(edge) {
+    var result = {};
+    Object.keys(edge || {}).forEach(function (key) {
+      result[key] = edge[key];
+    });
+    return result;
+  }
+
+  function decorateEdges(edges) {
+    var groups = {};
+    var decorated = [];
+
+    edges.forEach(function (edge) {
+      var copy = copyEdge(edge);
+      var key = edgePairKey(copy);
+      if (!groups[key]) {
+        groups[key] = [];
+      }
+      groups[key].push(copy);
+      decorated.push(copy);
+    });
+
+    Object.keys(groups).forEach(function (key) {
+      var group = groups[key];
+      group.forEach(function (edge, index) {
+        edge.parallelIndex = index;
+        edge.parallelCount = group.length;
+        edge.parallelOffset = (index - (group.length - 1) / 2) * 16;
+      });
+    });
+
+    return decorated;
+  }
+
   function renderEdge(parentGroup, edge, nodesById, positions) {
     var parentNode = nodesById[edge.from];
     var childNode = nodesById[edge.to];
@@ -357,8 +675,9 @@
 
     var x1;
     var x2;
-    var y1 = parentPos.y + NODE_HEIGHT / 2;
-    var y2 = childPos.y + NODE_HEIGHT / 2;
+    var offset = Number(edge.parallelOffset) || 0;
+    var y1 = parentPos.y + NODE_HEIGHT / 2 + offset;
+    var y2 = childPos.y + NODE_HEIGHT / 2 + offset;
 
     if (parentNode.depth <= childNode.depth) {
       x1 = parentPos.x + NODE_WIDTH;
@@ -372,30 +691,120 @@
     var c1x = x1 <= x2 ? x1 + dx : x1 - dx;
     var c2x = x1 <= x2 ? x2 - dx : x2 + dx;
     var pathD = "M " + x1 + " " + y1 + " C " + c1x + " " + y1 + ", " + c2x + " " + y2 + ", " + x2 + " " + y2;
-
-    parentGroup.appendChild(createSvgElement("path", {
-      class: "graph-edge",
+    var path = createSvgElement("path", {
+      class: edgeClasses(edge.kind, edge.style).join(" "),
       d: pathD,
       fill: "none",
-      stroke: "#c4cad1",
-      "stroke-width": "2.2",
+      "data-edge-id": edge.id || "",
       "data-from": edge.from,
-      "data-to": edge.to
+      "data-to": edge.to,
+      "data-kind": edge.kind || "contains",
+      "data-style": edge.style || "normal"
+    });
+
+    var title = createSvgElement("title");
+    title.textContent = [
+      edge.label || "",
+      parentNode.label && childNode.label ? parentNode.label + " -> " + childNode.label : "",
+      edge.status || ""
+    ].filter(Boolean).join(" | ");
+    path.appendChild(title);
+    parentGroup.appendChild(path);
+  }
+
+  function childCount(nodeId) {
+    return (state.childIdsByNodeId[nodeId] || []).length;
+  }
+
+  function renderNodeExpander(parentGroup, node, position) {
+    var count = childCount(node.id);
+    var collapsed = !!state.collapsedNodeIds[node.id];
+    var cx = position.x + NODE_WIDTH - 25;
+    var cy = position.y + 25;
+    var group;
+    var title;
+
+    if (!count) {
+      return;
+    }
+
+    group = createSvgElement("g", {
+      class: "node-expander" + (collapsed ? " is-collapsed" : ""),
+      "data-collapse-node-id": node.id
+    });
+
+    title = createSvgElement("title");
+    title.textContent = (collapsed ? "Expand" : "Collapse") + " " + count + " child item" + (count === 1 ? "" : "s");
+    group.appendChild(title);
+
+    group.appendChild(createSvgElement("circle", {
+      cx: cx,
+      cy: cy,
+      r: "10"
     }));
+    group.appendChild(createSvgElement("line", {
+      x1: cx - 4,
+      y1: cy,
+      x2: cx + 4,
+      y2: cy
+    }));
+    if (collapsed) {
+      group.appendChild(createSvgElement("line", {
+        x1: cx,
+        y1: cy - 4,
+        x2: cx,
+        y2: cy + 4
+      }));
+    }
+
+    parentGroup.appendChild(group);
+  }
+
+  function renderBootstrapBadge(parentGroup, x, y, label) {
+    var width = Math.max(62, label.length * 7 + 18);
+    var variant = statusBadgeVariant(label);
+    var textClass = "node-status-badge-text";
+    if (variant === "text-bg-warning" || variant === "text-bg-info") {
+      textClass += " is-dark-text";
+    }
+
+    parentGroup.appendChild(createSvgElement("rect", {
+      class: "node-status-badge badge " + variant,
+      x: x,
+      y: y,
+      rx: "5",
+      ry: "5",
+      width: width,
+      height: "20"
+    }));
+    addText(parentGroup, x + width / 2, y + 14, label, {
+      class: textClass,
+      "font-family": "Segoe UI, Arial",
+      "font-size": "10",
+      "font-weight": "700",
+      "text-anchor": "middle"
+    });
   }
 
   function renderNode(parentGroup, node, position) {
     var style = nodeStyle(node.kind);
+    var fileName = nodeFileName(node);
+    var linkStatus = normalizedLinkStatus(node);
+    var hasChildren = childCount(node.id) > 0;
+    var titleMaxWidth = hasChildren ? NODE_WIDTH - 60 : NODE_WIDTH - 36;
     var group = createSvgElement("g", {
-      class: "graph-node",
+      class: "graph-node" + (hasChildren ? " has-children" : "") + (state.collapsedNodeIds[node.id] ? " is-collapsed" : ""),
       "data-node-id": node.id
     });
     var title = createSvgElement("title");
     title.textContent = [
-      node.label || "",
+      fileName || node.label || "",
       style.tag || "",
+      "Link Status: " + linkStatus,
       node.sublabel || "",
-      node.status || ""
+      node.identityPath ? "Model Path: " + node.identityPath : "",
+      node.modelGuid ? "Model GUID: " + node.modelGuid : "",
+      node.identitySource || ""
     ].filter(Boolean).join(" | ");
     group.appendChild(title);
 
@@ -416,53 +825,24 @@
     }));
     group.appendChild(shadowGroup);
 
-    group.appendChild(createSvgElement("rect", {
-      x: position.x + 14,
-      y: position.y + 14,
-      rx: "6",
-      ry: "6",
-      width: "26",
-      height: "26",
-      fill: style.iconFill,
-      stroke: style.iconStroke,
-      "stroke-width": "1.2"
-    }));
-
-    addText(group, position.x + 27, position.y + 32, style.icon, {
+    addFittedText(group, position.x + 18, position.y + 30, fileName, titleMaxWidth, {
       "font-family": "Segoe UI, Arial",
-      "font-size": "12",
-      "font-weight": "700",
-      "text-anchor": "middle",
-      fill: style.iconStroke
-    });
-
-    addText(group, position.x + 52, position.y + 28, shorten(node.label, 42), {
-      "font-family": "Segoe UI, Arial",
-      "font-size": "12",
+      "font-size": "10",
       "font-weight": "700",
       fill: "#2f3438"
     });
 
-    addText(group, position.x + 52, position.y + 50, style.tag, {
+    addText(group, position.x + 18, position.y + 52, style.tag, {
       "font-family": "Segoe UI, Arial",
-      "font-size": "10",
+      "font-size": "8",
+      "font-weight": "700",
+      "text-transform": "uppercase",
       fill: "#676e75"
     });
 
-    addText(group, position.x + 52, position.y + 71, shorten(node.sublabel, 48), {
-      "font-family": "Segoe UI, Arial",
-      "font-size": "10",
-      fill: "#80878e"
-    });
+    renderBootstrapBadge(group, position.x + 18, position.y + 65, linkStatus);
 
-    if (node.status) {
-      addText(group, position.x + 52, position.y + 88, shorten(node.status, 50), {
-        "font-family": "Segoe UI, Arial",
-        "font-size": "10",
-        fill: "#7b8288"
-      });
-    }
-
+    renderNodeExpander(group, node, position);
     parentGroup.appendChild(group);
   }
 
@@ -494,6 +874,12 @@
     Array.prototype.forEach.call(nodes, function (nodeElement) {
       var nodeId = nodeElement.getAttribute("data-node-id");
       var classes = ["graph-node"];
+      if (childCount(nodeId)) {
+        classes.push("has-children");
+      }
+      if (state.collapsedNodeIds[nodeId]) {
+        classes.push("is-collapsed");
+      }
       if (selectedNodeId && nodeId === selectedNodeId) {
         classes.push("is-selected");
       } else if (selectedNodeId && relatedIds[nodeId]) {
@@ -505,7 +891,10 @@
     Array.prototype.forEach.call(edgeElements, function (edgeElement) {
       var fromId = edgeElement.getAttribute("data-from");
       var toId = edgeElement.getAttribute("data-to");
-      var classes = ["graph-edge"];
+      var classes = edgeClasses(
+        edgeElement.getAttribute("data-kind"),
+        edgeElement.getAttribute("data-style")
+      );
       if (selectedNodeId) {
         if (fromId === selectedNodeId || toId === selectedNodeId) {
           classes.push("is-selected");
@@ -526,6 +915,7 @@
       setText("detailDepth", "-");
       setText("detailParent", "-");
       setText("detailReference", "-");
+      setText("detailIdentity", "-");
       return;
     }
 
@@ -533,6 +923,23 @@
     var parentLabel = "-";
     if (node.parentId && state.nodesById[node.parentId]) {
       parentLabel = state.nodesById[node.parentId].label || "-";
+    }
+    var identityText = "-";
+    if (node.identityPath) {
+      identityText = node.identityPath;
+      if (node.identitySource) {
+        identityText += " | " + node.identitySource;
+      }
+      if (node.modelGuid) {
+        identityText += " | GUID: " + node.modelGuid;
+      }
+    } else if (node.modelGuid) {
+      identityText = node.modelGuid;
+      if (node.identitySource) {
+        identityText += " | " + node.identitySource;
+      }
+    } else if (node.identitySource || node.identityKey) {
+      identityText = [node.identitySource || "", node.identityKey || ""].filter(Boolean).join(" | ");
     }
 
     setText("detailKind", style.tag);
@@ -542,6 +949,7 @@
     setText("detailDepth", node.depth);
     setText("detailParent", parentLabel);
     setText("detailReference", node.sublabel || "-");
+    setText("detailIdentity", identityText);
   }
 
   function selectNode(nodeId) {
@@ -582,14 +990,40 @@
     return hostId || nodes[0].id;
   }
 
-  function renderGraph(payload) {
+  function setNodeCollapsed(nodeId, collapsed) {
+    if (!nodeId || !childCount(nodeId)) {
+      return false;
+    }
+    if (collapsed) {
+      state.collapsedNodeIds[nodeId] = true;
+    } else {
+      delete state.collapsedNodeIds[nodeId];
+    }
+    return true;
+  }
+
+  function toggleNodeCollapsed(nodeId) {
+    if (!setNodeCollapsed(nodeId, !state.collapsedNodeIds[nodeId])) {
+      return;
+    }
+    renderGraph(state.payload || {}, { preserveView: !state.autoFit });
+    selectNode(nodeId);
+  }
+
+  function renderGraph(payload, options) {
     var svg = $("graphSvg");
     var emptyState = $("emptyState");
-    var nodes = payload.nodes || [];
-    var edges = payload.edges || [];
+    var allNodes = payload.nodes || [];
+    var allEdges = payload.edges || [];
+    var hierarchy = buildHierarchy(allNodes, allEdges);
+    var visible;
+    var nodes;
+    var edges;
+    var renderEdges;
     var contentGroup;
     var edgeGroup;
     var nodeGroup;
+    var preserveView = !!(options && options.preserveView);
 
     clearElement(svg);
     updateSvgViewport();
@@ -598,8 +1032,15 @@
     state.positions = {};
     state.layout = { width: 0, height: 0 };
     state.contentGroup = null;
+    state.childIdsByNodeId = hierarchy.childrenById;
+    pruneCollapsedNodes(hierarchy.nodesById);
+    visible = visibleGraph(allNodes, allEdges, hierarchy);
+    nodes = visible.nodes;
+    edges = visible.edges;
+    renderEdges = decorateEdges(edges);
+    state.visibleNodeIds = visible.nodeIds;
 
-    if (!nodes.length) {
+    if (!allNodes.length) {
       emptyState.hidden = false;
       updateDetails(null);
       return;
@@ -611,7 +1052,7 @@
       state.nodesById[node.id] = node;
     });
 
-    state.layout = computeLayout(nodes.slice());
+    state.layout = computeLayout(nodes.slice(), edges);
     state.positions = state.layout.positions;
 
     addDefs(svg);
@@ -623,7 +1064,7 @@
     svg.appendChild(contentGroup);
     state.contentGroup = contentGroup;
 
-    edges.forEach(function (edge) {
+    renderEdges.forEach(function (edge) {
       renderEdge(edgeGroup, edge, state.nodesById, state.positions);
     });
 
@@ -634,11 +1075,16 @@
       }
     });
 
-    if (!state.selectedNodeId || !state.nodesById[state.selectedNodeId]) {
+    if (!state.selectedNodeId || !state.visibleNodeIds[state.selectedNodeId]) {
       state.selectedNodeId = firstNodeId(nodes);
     }
 
-    fitGraph();
+    if (preserveView) {
+      updateSvgViewport();
+      applyTransform();
+    } else {
+      fitGraph();
+    }
     selectNode(state.selectedNodeId);
   }
 
@@ -665,8 +1111,27 @@
     return null;
   }
 
+  function collapseNodeIdFromEvent(event) {
+    var current = event.target;
+    var svg = $("graphSvg");
+    while (current && current !== svg) {
+      if (current.getAttribute) {
+        var nodeId = current.getAttribute("data-collapse-node-id");
+        if (nodeId) {
+          return nodeId;
+        }
+      }
+      current = current.parentNode;
+    }
+    return null;
+  }
+
   function onMouseDown(event) {
     if (event.button !== 0) {
+      return;
+    }
+    if (collapseNodeIdFromEvent(event)) {
+      event.preventDefault();
       return;
     }
     state.drag.active = true;
@@ -719,6 +1184,15 @@
     }
   }
 
+  function onGraphClick(event) {
+    var collapseNodeId = collapseNodeIdFromEvent(event);
+    if (!collapseNodeId || event.detail > 1) {
+      return;
+    }
+    toggleNodeCollapsed(collapseNodeId);
+    event.preventDefault();
+  }
+
   function onWheel(event) {
     var factor = event.deltaY < 0 ? 1.12 : 0.89;
     zoomAt(event.clientX, event.clientY, factor);
@@ -726,6 +1200,10 @@
   }
 
   function onDoubleClick(event) {
+    if (collapseNodeIdFromEvent(event)) {
+      event.preventDefault();
+      return;
+    }
     var nodeId = nodeIdFromEvent(event);
     if (nodeId) {
       selectNode(nodeId);
@@ -747,6 +1225,27 @@
     }
     if (event.key === "0") {
       resetGraph();
+      event.preventDefault();
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      toggleNodeCollapsed(state.selectedNodeId);
+      event.preventDefault();
+      return;
+    }
+    if (event.key === "ArrowLeft" && state.selectedNodeId) {
+      if (setNodeCollapsed(state.selectedNodeId, true)) {
+        renderGraph(state.payload || {}, { preserveView: !state.autoFit });
+        selectNode(state.selectedNodeId);
+      }
+      event.preventDefault();
+      return;
+    }
+    if (event.key === "ArrowRight" && state.selectedNodeId) {
+      if (setNodeCollapsed(state.selectedNodeId, false)) {
+        renderGraph(state.payload || {}, { preserveView: !state.autoFit });
+        selectNode(state.selectedNodeId);
+      }
       event.preventDefault();
       return;
     }
@@ -790,6 +1289,7 @@
 
     if (svg) {
       svg.addEventListener("mousedown", onMouseDown);
+      svg.addEventListener("click", onGraphClick);
       svg.addEventListener("wheel", onWheel, { passive: false });
       svg.addEventListener("dblclick", onDoubleClick);
     }

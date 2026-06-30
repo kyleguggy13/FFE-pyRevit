@@ -277,8 +277,88 @@ h1 {
   stroke-width: 3;
 }
 
+.graph-node.is-collapsed .node-box {
+  stroke-dasharray: 7 5;
+}
+
+.node-status-badge.badge {
+  stroke: none;
+}
+
+.node-status-badge.text-bg-success {
+  fill: #198754;
+}
+
+.node-status-badge.text-bg-secondary {
+  fill: #6c757d;
+}
+
+.node-status-badge.text-bg-danger {
+  fill: #dc3545;
+}
+
+.node-status-badge.text-bg-warning {
+  fill: #ffc107;
+}
+
+.node-status-badge.text-bg-info {
+  fill: #0dcaf0;
+}
+
+.node-status-badge-text {
+  fill: #ffffff;
+  pointer-events: none;
+}
+
+.node-status-badge-text.is-dark-text {
+  fill: #212529;
+}
+
+.node-expander {
+  cursor: pointer;
+}
+
+.node-expander circle {
+  fill: #ffffff;
+  stroke: var(--line-strong);
+  stroke-width: 1.5;
+  transition: fill 0.12s ease, stroke 0.12s ease, stroke-width 0.12s ease;
+}
+
+.node-expander line {
+  stroke: var(--muted);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+
+.node-expander:hover circle,
+.graph-node.is-selected .node-expander circle {
+  fill: #eaf7f4;
+  stroke: var(--teal);
+  stroke-width: 2;
+}
+
+.node-expander:hover line,
+.graph-node.is-selected .node-expander line {
+  stroke: var(--teal);
+}
+
 .graph-edge {
+  stroke: #c4cad1;
+  stroke-width: 2.2;
+  stroke-linecap: round;
   transition: stroke 0.12s ease, stroke-width 0.12s ease, opacity 0.12s ease;
+}
+
+.graph-edge.is-kind-revitlink {
+  stroke: #aeb8c3;
+}
+
+.graph-edge.is-style-reciprocal {
+  stroke: var(--danger);
+  stroke-width: 2.6;
+  stroke-dasharray: 8 5;
 }
 
 .graph-edge.is-muted {
@@ -289,6 +369,11 @@ h1 {
   opacity: 1;
   stroke: var(--teal);
   stroke-width: 3;
+}
+
+.graph-edge.is-selected.is-style-reciprocal {
+  stroke: var(--danger);
+  stroke-width: 3.2;
 }
 
 .empty-state {
