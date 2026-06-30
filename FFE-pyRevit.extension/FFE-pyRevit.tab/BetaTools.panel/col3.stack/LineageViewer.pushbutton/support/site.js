@@ -71,11 +71,25 @@
     layout: { width: 0, height: 0 },
     selectedNodeId: null,
     collapsedNodeIds: {},
+    manualNodePositions: {},
     childIdsByNodeId: {},
     visibleNodeIds: {},
+    renderEdges: [],
+    renderEdgesById: {},
     contentGroup: null,
     transform: { x: 20, y: 20, scale: 1 },
     autoFit: true,
+    nodeDrag: {
+      active: false,
+      nodeId: null,
+      didMove: false,
+      startClientX: 0,
+      startClientY: 0,
+      startNodeX: 0,
+      startNodeY: 0,
+      renderX: 0,
+      renderY: 0
+    },
     drag: {
       active: false,
       startedOnNodeId: null,
@@ -523,6 +537,73 @@
     };
   }
 
+  function pruneManualNodePositions(nodesById) {
+    Object.keys(state.manualNodePositions).forEach(function (nodeId) {
+      if (!nodesById[nodeId]) {
+        delete state.manualNodePositions[nodeId];
+      }
+    });
+  }
+
+  function applyManualNodePositions(nodes) {
+    nodes.forEach(function (node) {
+      var manual = state.manualNodePositions[node.id];
+      var x;
+      var y;
+      if (!manual || !state.positions[node.id]) {
+        return;
+      }
+      x = Number(manual.x);
+      y = Number(manual.y);
+      if (isNaN(x) || isNaN(y)) {
+        return;
+      }
+      state.positions[node.id] = {
+        x: x,
+        y: y
+      };
+    });
+  }
+
+  function refreshLayoutBounds() {
+    var minX = Infinity;
+    var minY = Infinity;
+    var maxX = -Infinity;
+    var maxY = -Infinity;
+    var hasPosition = false;
+
+    Object.keys(state.visibleNodeIds || {}).forEach(function (nodeId) {
+      var position = state.positions[nodeId];
+      if (!position) {
+        return;
+      }
+      hasPosition = true;
+      minX = Math.min(minX, position.x);
+      minY = Math.min(minY, position.y);
+      maxX = Math.max(maxX, position.x + NODE_WIDTH);
+      maxY = Math.max(maxY, position.y + NODE_HEIGHT);
+    });
+
+    if (!hasPosition) {
+      state.layout.bounds = {
+        minX: 0,
+        minY: 0,
+        width: state.layout.width || 0,
+        height: state.layout.height || 0
+      };
+      return;
+    }
+
+    state.layout.bounds = {
+      minX: minX - MARGIN_X,
+      minY: minY - MARGIN_Y,
+      width: Math.max(maxX - minX + MARGIN_X * 2, 350),
+      height: Math.max(maxY - minY + MARGIN_Y * 2, 350)
+    };
+    state.layout.width = state.layout.bounds.width;
+    state.layout.height = state.layout.bounds.height;
+  }
+
   function viewportSize() {
     var viewport = $("graphViewport");
     return {
@@ -555,14 +636,21 @@
     if (!state.layout.width || !state.layout.height) {
       return;
     }
+    refreshLayoutBounds();
     var size = updateSvgViewport();
+    var bounds = state.layout.bounds || {
+      minX: 0,
+      minY: 0,
+      width: state.layout.width,
+      height: state.layout.height
+    };
     var availableWidth = Math.max(100, size.width - 80);
     var availableHeight = Math.max(100, size.height - 80);
-    var scale = Math.min(availableWidth / state.layout.width, availableHeight / state.layout.height);
+    var scale = Math.min(availableWidth / bounds.width, availableHeight / bounds.height);
     scale = clamp(scale, MIN_SCALE, 1);
     state.transform.scale = scale;
-    state.transform.x = (size.width - state.layout.width * scale) / 2;
-    state.transform.y = (size.height - state.layout.height * scale) / 2;
+    state.transform.x = (size.width - bounds.width * scale) / 2 - bounds.minX * scale;
+    state.transform.y = (size.height - bounds.height * scale) / 2 - bounds.minY * scale;
     state.autoFit = true;
     applyTransform();
   }
@@ -664,13 +752,13 @@
     return decorated;
   }
 
-  function renderEdge(parentGroup, edge, nodesById, positions) {
+  function edgePathD(edge, nodesById, positions) {
     var parentNode = nodesById[edge.from];
     var childNode = nodesById[edge.to];
     var parentPos = positions[edge.from];
     var childPos = positions[edge.to];
     if (!parentNode || !childNode || !parentPos || !childPos) {
-      return;
+      return "";
     }
 
     var x1;
@@ -679,7 +767,7 @@
     var y1 = parentPos.y + NODE_HEIGHT / 2 + offset;
     var y2 = childPos.y + NODE_HEIGHT / 2 + offset;
 
-    if (parentNode.depth <= childNode.depth) {
+    if (parentPos.x + NODE_WIDTH / 2 <= childPos.x + NODE_WIDTH / 2) {
       x1 = parentPos.x + NODE_WIDTH;
       x2 = childPos.x;
     } else {
@@ -690,7 +778,16 @@
     var dx = Math.max(50, Math.abs(x2 - x1) / 2);
     var c1x = x1 <= x2 ? x1 + dx : x1 - dx;
     var c2x = x1 <= x2 ? x2 - dx : x2 + dx;
-    var pathD = "M " + x1 + " " + y1 + " C " + c1x + " " + y1 + ", " + c2x + " " + y2 + ", " + x2 + " " + y2;
+    return "M " + x1 + " " + y1 + " C " + c1x + " " + y1 + ", " + c2x + " " + y2 + ", " + x2 + " " + y2;
+  }
+
+  function renderEdge(parentGroup, edge, nodesById, positions) {
+    var parentNode = nodesById[edge.from];
+    var childNode = nodesById[edge.to];
+    var pathD = edgePathD(edge, nodesById, positions);
+    if (!pathD) {
+      return;
+    }
     var path = createSvgElement("path", {
       class: edgeClasses(edge.kind, edge.style).join(" "),
       d: pathD,
@@ -710,6 +807,39 @@
     ].filter(Boolean).join(" | ");
     path.appendChild(title);
     parentGroup.appendChild(path);
+  }
+
+  function nodeElementById(nodeId) {
+    var nodes = document.querySelectorAll(".graph-node");
+    var found = null;
+    Array.prototype.some.call(nodes, function (nodeElement) {
+      if (nodeElement.getAttribute("data-node-id") === nodeId) {
+        found = nodeElement;
+        return true;
+      }
+      return false;
+    });
+    return found;
+  }
+
+  function setNodeElementOffset(nodeId, dx, dy) {
+    var nodeElement = nodeElementById(nodeId);
+    if (!nodeElement) {
+      return;
+    }
+    nodeElement.setAttribute("transform", "translate(" + dx + " " + dy + ")");
+  }
+
+  function updateRenderedEdges() {
+    var edgeElements = document.querySelectorAll(".graph-edge");
+    Array.prototype.forEach.call(edgeElements, function (edgeElement) {
+      var edgeId = edgeElement.getAttribute("data-edge-id");
+      var edge = state.renderEdgesById[edgeId];
+      var pathD = edge ? edgePathD(edge, state.nodesById, state.positions) : "";
+      if (pathD) {
+        edgeElement.setAttribute("d", pathD);
+      }
+    });
   }
 
   function childCount(nodeId) {
@@ -794,7 +924,9 @@
     var titleMaxWidth = hasChildren ? NODE_WIDTH - 60 : NODE_WIDTH - 36;
     var group = createSvgElement("g", {
       class: "graph-node" + (hasChildren ? " has-children" : "") + (state.collapsedNodeIds[node.id] ? " is-collapsed" : ""),
-      "data-node-id": node.id
+      "data-node-id": node.id,
+      "data-render-x": position.x,
+      "data-render-y": position.y
     });
     var title = createSvgElement("title");
     title.textContent = [
@@ -1032,8 +1164,11 @@
     state.positions = {};
     state.layout = { width: 0, height: 0 };
     state.contentGroup = null;
+    state.renderEdges = [];
+    state.renderEdgesById = {};
     state.childIdsByNodeId = hierarchy.childrenById;
     pruneCollapsedNodes(hierarchy.nodesById);
+    pruneManualNodePositions(hierarchy.nodesById);
     visible = visibleGraph(allNodes, allEdges, hierarchy);
     nodes = visible.nodes;
     edges = visible.edges;
@@ -1054,6 +1189,8 @@
 
     state.layout = computeLayout(nodes.slice(), edges);
     state.positions = state.layout.positions;
+    applyManualNodePositions(nodes);
+    refreshLayoutBounds();
 
     addDefs(svg);
     contentGroup = createSvgElement("g", { id: "graphContent" });
@@ -1063,6 +1200,10 @@
     contentGroup.appendChild(nodeGroup);
     svg.appendChild(contentGroup);
     state.contentGroup = contentGroup;
+    state.renderEdges = renderEdges;
+    renderEdges.forEach(function (edge) {
+      state.renderEdgesById[edge.id] = edge;
+    });
 
     renderEdges.forEach(function (edge) {
       renderEdge(edgeGroup, edge, state.nodesById, state.positions);
@@ -1126,7 +1267,16 @@
     return null;
   }
 
+  function numberAttr(element, attrName, fallbackValue) {
+    var value = element ? Number(element.getAttribute(attrName)) : NaN;
+    return isNaN(value) ? fallbackValue : value;
+  }
+
   function onMouseDown(event) {
+    var nodeId;
+    var nodeElement;
+    var viewport;
+
     if (event.button !== 0) {
       return;
     }
@@ -1134,15 +1284,39 @@
       event.preventDefault();
       return;
     }
+    nodeId = nodeIdFromEvent(event);
+    if (nodeId && state.positions[nodeId]) {
+      nodeElement = nodeElementById(nodeId);
+      state.nodeDrag.active = true;
+      state.nodeDrag.nodeId = nodeId;
+      state.nodeDrag.didMove = false;
+      state.nodeDrag.startClientX = event.clientX;
+      state.nodeDrag.startClientY = event.clientY;
+      state.nodeDrag.startNodeX = state.positions[nodeId].x;
+      state.nodeDrag.startNodeY = state.positions[nodeId].y;
+      state.nodeDrag.renderX = numberAttr(nodeElement, "data-render-x", state.positions[nodeId].x);
+      state.nodeDrag.renderY = numberAttr(nodeElement, "data-render-y", state.positions[nodeId].y);
+      selectNode(nodeId);
+      if (nodeElement) {
+        nodeElement.setAttribute("class", nodeElement.getAttribute("class") + " is-dragging");
+      }
+      viewport = $("graphViewport");
+      if (viewport) {
+        viewport.classList.add("is-node-dragging");
+      }
+      event.preventDefault();
+      return;
+    }
+
     state.drag.active = true;
-    state.drag.startedOnNodeId = nodeIdFromEvent(event);
+    state.drag.startedOnNodeId = null;
     state.drag.didMove = false;
     state.drag.startClientX = event.clientX;
     state.drag.startClientY = event.clientY;
     state.drag.startX = state.transform.x;
     state.drag.startY = state.transform.y;
 
-    var viewport = $("graphViewport");
+    viewport = $("graphViewport");
     if (viewport) {
       viewport.classList.add("is-panning");
     }
@@ -1150,11 +1324,49 @@
   }
 
   function onMouseMove(event) {
+    var nodeId;
+    var dx;
+    var dy;
+    var newX;
+    var newY;
+
+    if (state.nodeDrag.active) {
+      nodeId = state.nodeDrag.nodeId;
+      dx = (event.clientX - state.nodeDrag.startClientX) / state.transform.scale;
+      dy = (event.clientY - state.nodeDrag.startClientY) / state.transform.scale;
+      if (Math.abs(event.clientX - state.nodeDrag.startClientX) > 3 ||
+          Math.abs(event.clientY - state.nodeDrag.startClientY) > 3) {
+        state.nodeDrag.didMove = true;
+      }
+      if (state.nodeDrag.didMove && nodeId) {
+        newX = state.nodeDrag.startNodeX + dx;
+        newY = state.nodeDrag.startNodeY + dy;
+        state.positions[nodeId] = {
+          x: newX,
+          y: newY
+        };
+        state.manualNodePositions[nodeId] = {
+          x: newX,
+          y: newY
+        };
+        setNodeElementOffset(
+          nodeId,
+          newX - state.nodeDrag.renderX,
+          newY - state.nodeDrag.renderY
+        );
+        refreshLayoutBounds();
+        updateRenderedEdges();
+        state.autoFit = false;
+      }
+      event.preventDefault();
+      return;
+    }
+
     if (!state.drag.active) {
       return;
     }
-    var dx = event.clientX - state.drag.startClientX;
-    var dy = event.clientY - state.drag.startClientY;
+    dx = event.clientX - state.drag.startClientX;
+    dy = event.clientY - state.drag.startClientY;
     if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
       state.drag.didMove = true;
     }
@@ -1165,12 +1377,43 @@
   }
 
   function onMouseUp(event) {
+    var nodeId = state.nodeDrag.nodeId;
+    var wasNodeClick = state.nodeDrag.active && !state.nodeDrag.didMove;
+    var wasNodeMove = state.nodeDrag.active && state.nodeDrag.didMove;
     var startedOnNodeId = state.drag.startedOnNodeId;
     var wasClick = state.drag.active && !state.drag.didMove;
+    var viewport = $("graphViewport");
+    var nodeElement;
+
+    if (state.nodeDrag.active) {
+      state.nodeDrag.active = false;
+      state.nodeDrag.nodeId = null;
+      if (viewport) {
+        viewport.classList.remove("is-node-dragging");
+      }
+      nodeElement = nodeElementById(nodeId);
+      if (nodeElement) {
+        nodeElement.setAttribute(
+          "class",
+          String(nodeElement.getAttribute("class") || "")
+            .replace(/\bis-dragging\b/g, "")
+            .replace(/\s+/g, " ")
+            .replace(/^\s+|\s+$/g, "")
+        );
+      }
+      if (wasNodeMove) {
+        renderGraph(state.payload || {}, { preserveView: true });
+        selectNode(nodeId);
+      } else if (wasNodeClick) {
+        selectNode(nodeId);
+      }
+      event.preventDefault();
+      return;
+    }
+
     state.drag.active = false;
     state.drag.startedOnNodeId = null;
 
-    var viewport = $("graphViewport");
     if (viewport) {
       viewport.classList.remove("is-panning");
     }

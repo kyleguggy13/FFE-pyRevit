@@ -169,6 +169,10 @@ h1 {
   cursor: grabbing;
 }
 
+.graph-section.is-node-dragging .graph-svg {
+  cursor: grabbing;
+}
+
 .graph-toolbar {
   position: absolute;
   z-index: 2;
@@ -259,8 +263,12 @@ h1 {
 }
 
 .graph-node {
-  cursor: pointer;
+  cursor: grab;
   font-size: 10px;
+}
+
+.graph-node.is-dragging {
+  cursor: grabbing;
 }
 
 .graph-node .node-box {
@@ -273,6 +281,11 @@ h1 {
 }
 
 .graph-node.is-selected .node-box {
+  stroke: var(--teal);
+  stroke-width: 3;
+}
+
+.graph-node.is-dragging .node-box {
   stroke: var(--teal);
   stroke-width: 3;
 }
