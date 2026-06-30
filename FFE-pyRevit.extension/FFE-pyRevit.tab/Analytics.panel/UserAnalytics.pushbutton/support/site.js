@@ -6,6 +6,7 @@
     entries: [],
     filteredEntries: [],
     selectedContributionYear: null,
+    activityChart: null,
     resizeTimer: null
   };
 
@@ -520,6 +521,8 @@
         series.push({
           key: monthKey(cursor),
           label: monthLabel(cursor),
+          fullLabel: monthLabel(cursor),
+          period: "month",
           count: counts[monthKey(cursor)] || 0
         });
         cursor.setMonth(cursor.getMonth() + 1);
@@ -531,6 +534,8 @@
         series.push({
           key: dateKey(cursor),
           label: pad2(cursor.getMonth() + 1) + "/" + pad2(cursor.getDate()),
+          fullLabel: formatShortDate(cursor),
+          period: "day",
           count: counts[dateKey(cursor)] || 0
         });
         cursor.setDate(cursor.getDate() + 1);
@@ -540,135 +545,194 @@
     return series;
   }
 
-  function setupCanvas(canvas) {
-    var dpr = globalScope.devicePixelRatio || 1;
-    var width = Math.max(320, canvas.clientWidth || canvas.width || 900);
-    var height = Math.max(220, canvas.clientHeight || canvas.height || 260);
-    var context;
+  function destroyActivityChart() {
+    if (state.activityChart) {
+      state.activityChart.destroy();
+      state.activityChart = null;
+    }
+  }
 
-    canvas.width = Math.floor(width * dpr);
-    canvas.height = Math.floor(height * dpr);
-    context = canvas.getContext("2d");
-    context.setTransform(dpr, 0, 0, dpr, 0, 0);
-    context.clearRect(0, 0, width, height);
+  function setActivityChartEmpty(message) {
+    var chartShell = byId("activity-chart-scroll");
+    var empty = byId("activity-chart-empty");
 
-    return {
-      context: context,
-      width: width,
-      height: height
+    destroyActivityChart();
+
+    if (chartShell) {
+      chartShell.hidden = true;
+    }
+    if (empty) {
+      empty.hidden = false;
+      empty.textContent = message;
+    }
+  }
+
+  function getActivityBarWidth(series) {
+    if (series.length && series[0].period === "month") {
+      return 76;
+    }
+    return 36;
+  }
+
+  function getActivityMaxBarThickness(series) {
+    if (series.length && series[0].period === "month") {
+      return 44;
+    }
+    return 22;
+  }
+
+  function getActivityBarRadius(series) {
+    if (series.length && series[0].period === "month") {
+      return 6;
+    }
+    return 4;
+  }
+
+  function getChartDevicePixelRatio(chartWidth) {
+    return chartWidth > 4096 ? 1 : globalScope.devicePixelRatio || 1;
+  }
+
+  function makeActivityTickCallback(seriesLength) {
+    return function (value, index) {
+      if (seriesLength > 70 && index % 7 !== 0) {
+        return "";
+      }
+      if (seriesLength > 32 && index % 2 === 1) {
+        return "";
+      }
+      return this.getLabelForValue(value);
     };
   }
 
-  function drawNoCanvasData(context, width, height, message) {
-    context.fillStyle = "#667386";
-    context.font = "700 14px Segoe UI, Arial, sans-serif";
-    context.textAlign = "center";
-    context.textBaseline = "middle";
-    context.fillText(message, width / 2, height / 2);
-  }
-
-  function drawActivityChart(entries) {
+  function renderActivityChart(entries) {
+    var ChartCtor = globalScope.Chart;
+    var chartShell = byId("activity-chart-scroll");
+    var chartBody = byId("activity-chart-canvas-wrap");
     var canvas = byId("activity-chart");
-    var setup;
-    var context;
-    var width;
-    var height;
-    var series;
+    var empty = byId("activity-chart-empty");
+    var series = buildActivitySeries(entries);
     var maxCount;
-    var padding;
+    var labels;
+    var counts;
+    var fullLabels;
+    var barWidth;
     var chartWidth;
-    var chartHeight;
-    var baseline;
-    var drawBars;
+    var chartData;
+    var chartOptions;
 
-    if (!canvas || !canvas.getContext) {
+    if (!chartShell || !chartBody || !canvas) {
       return;
     }
 
-    setup = setupCanvas(canvas);
-    context = setup.context;
-    width = setup.width;
-    height = setup.height;
-    series = buildActivitySeries(entries);
-
     if (!series.length) {
-      drawNoCanvasData(context, width, height, "No activity in current filter");
+      setActivityChartEmpty("No activity in current filter");
+      return;
+    }
+
+    if (typeof ChartCtor === "undefined") {
+      setActivityChartEmpty("Chart library could not load.");
       return;
     }
 
     maxCount = series.reduce(function (maxValue, item) {
       return Math.max(maxValue, item.count);
     }, 1);
-
-    padding = {
-      top: 28,
-      right: 24,
-      bottom: 42,
-      left: 52
-    };
-    chartWidth = Math.max(1, width - padding.left - padding.right);
-    chartHeight = Math.max(1, height - padding.top - padding.bottom);
-    baseline = padding.top + chartHeight;
-    drawBars = series.length <= 65;
-
-    context.strokeStyle = "#dce3ea";
-    context.lineWidth = 1;
-    context.fillStyle = "#667386";
-    context.font = "700 11px Segoe UI, Arial, sans-serif";
-    context.textAlign = "right";
-    context.textBaseline = "middle";
-
-    [0, 0.25, 0.5, 0.75, 1].forEach(function (ratio) {
-      var y = baseline - chartHeight * ratio;
-      var label = Math.round(maxCount * ratio);
-      context.beginPath();
-      context.moveTo(padding.left, y);
-      context.lineTo(width - padding.right, y);
-      context.stroke();
-      context.fillText(label, padding.left - 8, y);
+    labels = series.map(function (item) {
+      return item.label;
     });
+    counts = series.map(function (item) {
+      return item.count;
+    });
+    fullLabels = series.map(function (item) {
+      return item.fullLabel || item.label;
+    });
+    barWidth = getActivityBarWidth(series);
+    chartShell.hidden = false;
+    if (empty) {
+      empty.hidden = true;
+    }
+    chartWidth = Math.max(chartShell.clientWidth || 0, 560, series.length * barWidth);
+    chartBody.style.width = chartWidth + "px";
 
-    context.strokeStyle = "#c7d2de";
-    context.beginPath();
-    context.moveTo(padding.left, padding.top);
-    context.lineTo(padding.left, baseline);
-    context.lineTo(width - padding.right, baseline);
-    context.stroke();
+    chartData = {
+      labels: labels,
+      datasets: [{
+        label: "Actions",
+        data: counts,
+        fullLabels: fullLabels,
+        backgroundColor: "rgba(19, 133, 125, 0.72)",
+        borderColor: "rgba(13, 95, 89, 0.95)",
+        hoverBackgroundColor: "rgba(23, 57, 92, 0.82)",
+        hoverBorderColor: "rgba(23, 57, 92, 1)",
+        borderWidth: 1,
+        borderRadius: getActivityBarRadius(series),
+        minBarLength: 3,
+        maxBarThickness: getActivityMaxBarThickness(series)
+      }]
+    };
 
-    if (drawBars) {
-      series.forEach(function (item, index) {
-        var slot = chartWidth / series.length;
-        var barWidth = Math.max(3, Math.min(24, slot * 0.68));
-        var x = padding.left + slot * index + (slot - barWidth) / 2;
-        var barHeight = (item.count / maxCount) * chartHeight;
-        var y = baseline - barHeight;
-
-        context.fillStyle = index % 3 === 0 ? "#13857d" : index % 3 === 1 ? "#17395c" : "#b88717";
-        context.fillRect(x, y, barWidth, barHeight || 1);
-      });
-    } else {
-      context.strokeStyle = "#13857d";
-      context.lineWidth = 3;
-      context.beginPath();
-      series.forEach(function (item, index) {
-        var x = padding.left + (chartWidth * index) / Math.max(1, series.length - 1);
-        var y = baseline - (item.count / maxCount) * chartHeight;
-        if (index === 0) {
-          context.moveTo(x, y);
-        } else {
-          context.lineTo(x, y);
+    chartOptions = {
+      maintainAspectRatio: false,
+      responsive: true,
+      devicePixelRatio: getChartDevicePixelRatio(chartWidth),
+      animation: { duration: 220 },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: "rgba(24, 32, 42, 0.92)",
+          displayColors: false,
+          padding: 10,
+          titleFont: { size: 12, weight: "700" },
+          bodyFont: { size: 12, weight: "700" },
+          callbacks: {
+            title: function (context) {
+              return context[0].dataset.fullLabels[context[0].dataIndex] || "";
+            },
+            label: function (context) {
+              var count = context.parsed.y || 0;
+              return formatNumber(count) + " " + (count === 1 ? "action" : "actions");
+            }
+          }
         }
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: {
+            autoSkip: false,
+            callback: makeActivityTickCallback(series.length),
+            color: "#667386",
+            font: { size: 12, weight: "700" },
+            maxRotation: 0,
+            minRotation: 0
+          }
+        },
+        y: {
+          beginAtZero: true,
+          suggestedMax: Math.max(5, maxCount),
+          ticks: {
+            precision: 0,
+            color: "#667386",
+            font: { size: 12, weight: "700" }
+          },
+          grid: { color: "rgba(23, 57, 92, 0.08)" }
+        }
+      }
+    };
+
+    if (!state.activityChart) {
+      state.activityChart = new ChartCtor(canvas, {
+        type: "bar",
+        data: chartData,
+        options: chartOptions
       });
-      context.stroke();
+      return;
     }
 
-    context.fillStyle = "#667386";
-    context.font = "700 11px Segoe UI, Arial, sans-serif";
-    context.textBaseline = "top";
-    context.textAlign = "left";
-    context.fillText(series[0].label, padding.left, baseline + 14);
-    context.textAlign = "right";
-    context.fillText(series[series.length - 1].label, width - padding.right, baseline + 14);
+    state.activityChart.data = chartData;
+    state.activityChart.options = chartOptions;
+    state.activityChart.resize();
+    state.activityChart.update();
   }
 
   function renderCharts(entries) {
@@ -690,7 +754,7 @@
     setText("docs-subtitle", formatNumber(docRows.length) + " documents");
     setText("origins-subtitle", formatNumber(familyEntries.length) + " loads");
 
-    drawActivityChart(entries);
+    renderActivityChart(entries);
     renderBarChart("actions-chart", actionRows, 9, "No actions in current filter");
     renderBarChart("docs-chart", docRows, 9, "No documents in current filter");
     renderBarChart("origins-chart", originRows, 9, "No family load origins in current filter");
@@ -1132,7 +1196,7 @@
       globalScope.clearTimeout(state.resizeTimer);
     }
     state.resizeTimer = globalScope.setTimeout(function () {
-      drawActivityChart(state.filteredEntries || []);
+      renderActivityChart(state.filteredEntries || []);
     }, 120);
   }
 

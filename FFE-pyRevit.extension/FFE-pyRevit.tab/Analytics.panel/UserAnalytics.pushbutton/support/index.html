@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FFE-pyRevit User Analytics</title>
     <link rel="stylesheet" href="styles.css" />
+    <script src="vendor/chart.umd.min.js" defer></script>
     <script src="site.js" defer></script>
   </head>
   <body>
@@ -123,7 +124,14 @@
               <h2>Activity Over Time</h2>
               <span id="activity-subtitle">0 entries</span>
             </div>
-            <canvas id="activity-chart" class="activity-chart" width="900" height="260"></canvas>
+            <div class="activity-chart-body">
+              <div id="activity-chart-scroll" class="activity-chart-scroll">
+                <div id="activity-chart-canvas-wrap" class="activity-chart-canvas-wrap">
+                  <canvas id="activity-chart" class="activity-chart" role="img" aria-label="Activity over time"></canvas>
+                </div>
+              </div>
+              <div id="activity-chart-empty" class="empty-state activity-chart-empty" hidden>No activity in current filter</div>
+            </div>
           </article>
 
           <article class="chart-card">
