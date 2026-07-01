@@ -98,6 +98,13 @@
       startClientY: 0,
       startX: 0,
       startY: 0
+    },
+    detailsResize: {
+      active: false,
+      axis: "horizontal",
+      startClientX: 0,
+      startClientY: 0,
+      startSize: 0
     }
   };
 
@@ -620,6 +627,124 @@
     }
     svg.setAttribute("viewBox", "0 0 " + size.width + " " + size.height);
     return size;
+  }
+
+  function detailsPanelElement() {
+    return $("detailsPanel") || document.querySelector(".details-panel");
+  }
+
+  function viewerWorkspaceElement() {
+    return $("viewerWorkspace") || document.querySelector(".viewer-workspace");
+  }
+
+  function detailsResizeHandleElement() {
+    return $("detailsResizeHandle");
+  }
+
+  function detailsResizeAxis() {
+    var workspace = viewerWorkspaceElement();
+    var direction;
+    if (!workspace || !window.getComputedStyle) {
+      return "horizontal";
+    }
+    direction = window.getComputedStyle(workspace).flexDirection;
+    return direction === "column" || direction === "column-reverse" ? "vertical" : "horizontal";
+  }
+
+  function detailsPaneSize(axis) {
+    var panel = detailsPanelElement();
+    var rect;
+    if (!panel) {
+      return 0;
+    }
+    rect = panel.getBoundingClientRect();
+    return axis === "vertical" ? rect.height : rect.width;
+  }
+
+  function detailsPaneLimits(axis) {
+    var workspace = viewerWorkspaceElement();
+    var handle = detailsResizeHandleElement();
+    var total = axis === "vertical" ? 520 : 900;
+    var handleSize = 9;
+    var minPanel = axis === "vertical" ? 170 : 240;
+    var minGraph = axis === "vertical" ? 280 : 360;
+    var maxPanel;
+
+    if (workspace) {
+      total = axis === "vertical" ? workspace.clientHeight : workspace.clientWidth;
+    }
+    if (handle) {
+      handleSize = axis === "vertical" ? handle.offsetHeight : handle.offsetWidth;
+    }
+
+    maxPanel = total - minGraph - handleSize;
+    return {
+      min: minPanel,
+      max: Math.max(minPanel, maxPanel)
+    };
+  }
+
+  function updateDetailsResizeHandle(axis, size, limits) {
+    var handle = detailsResizeHandleElement();
+    if (!handle) {
+      return;
+    }
+    axis = axis || detailsResizeAxis();
+    limits = limits || detailsPaneLimits(axis);
+    size = size || detailsPaneSize(axis);
+    handle.setAttribute("aria-orientation", axis === "vertical" ? "horizontal" : "vertical");
+    handle.setAttribute("aria-valuemin", limits.min);
+    handle.setAttribute("aria-valuemax", limits.max);
+    handle.setAttribute("aria-valuenow", clamp(Math.round(size), limits.min, limits.max));
+  }
+
+  function refreshGraphAfterDetailsResize() {
+    updateSvgViewport();
+    if (state.autoFit) {
+      fitGraph();
+    } else {
+      applyTransform();
+    }
+  }
+
+  function setDetailsPaneSize(size, axis, refreshGraph) {
+    var panel = detailsPanelElement();
+    var limits;
+    if (!panel) {
+      return;
+    }
+    axis = axis || detailsResizeAxis();
+    limits = detailsPaneLimits(axis);
+    size = clamp(Math.round(size), limits.min, limits.max);
+
+    panel.style.flexBasis = size + "px";
+    if (axis === "vertical") {
+      panel.style.height = size + "px";
+      panel.style.width = "";
+    } else {
+      panel.style.width = size + "px";
+      panel.style.height = "";
+    }
+
+    updateDetailsResizeHandle(axis, size, limits);
+    if (refreshGraph !== false) {
+      refreshGraphAfterDetailsResize();
+    }
+  }
+
+  function syncDetailsPaneResize() {
+    var panel = detailsPanelElement();
+    var axis;
+    if (!panel) {
+      return;
+    }
+    axis = detailsResizeAxis();
+    if (axis === "vertical") {
+      panel.style.width = "";
+    } else {
+      panel.style.height = "";
+    }
+    setDetailsPaneSize(detailsPaneSize(axis), axis, false);
   }
 
   function applyTransform() {
@@ -1330,6 +1455,10 @@
     var newX;
     var newY;
 
+    if (state.detailsResize.active) {
+      return;
+    }
+
     if (state.nodeDrag.active) {
       nodeId = state.nodeDrag.nodeId;
       dx = (event.clientX - state.nodeDrag.startClientX) / state.transform.scale;
@@ -1384,6 +1513,10 @@
     var wasClick = state.drag.active && !state.drag.didMove;
     var viewport = $("graphViewport");
     var nodeElement;
+
+    if (state.detailsResize.active) {
+      return;
+    }
 
     if (state.nodeDrag.active) {
       state.nodeDrag.active = false;
@@ -1512,6 +1645,119 @@
     }
   }
 
+  function startDetailsResize(event) {
+    var axis;
+    var handle;
+    var workspace;
+    if (event.button !== undefined && event.button !== 0) {
+      return;
+    }
+
+    axis = detailsResizeAxis();
+    state.detailsResize.active = true;
+    state.detailsResize.axis = axis;
+    state.detailsResize.startClientX = event.clientX;
+    state.detailsResize.startClientY = event.clientY;
+    state.detailsResize.startSize = detailsPaneSize(axis);
+
+    handle = detailsResizeHandleElement();
+    workspace = viewerWorkspaceElement();
+    if (handle) {
+      handle.classList.add("is-active");
+    }
+    if (workspace) {
+      workspace.classList.add("is-resizing");
+    }
+    if (document.body) {
+      document.body.classList.add("is-resizing-details");
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function onDetailsResizeMove(event) {
+    var resizeState = state.detailsResize;
+    var delta;
+    if (!resizeState.active) {
+      return;
+    }
+
+    delta = resizeState.axis === "vertical" ?
+      resizeState.startClientY - event.clientY :
+      resizeState.startClientX - event.clientX;
+    setDetailsPaneSize(resizeState.startSize + delta, resizeState.axis);
+
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function endDetailsResize(event) {
+    var handle;
+    var workspace;
+    if (!state.detailsResize.active) {
+      return;
+    }
+
+    state.detailsResize.active = false;
+    handle = detailsResizeHandleElement();
+    workspace = viewerWorkspaceElement();
+    if (handle) {
+      handle.classList.remove("is-active");
+    }
+    if (workspace) {
+      workspace.classList.remove("is-resizing");
+    }
+    if (document.body) {
+      document.body.classList.remove("is-resizing-details");
+    }
+    refreshGraphAfterDetailsResize();
+
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }
+
+  function onDetailsResizeKeyDown(event) {
+    var axis = detailsResizeAxis();
+    var currentSize = detailsPaneSize(axis);
+    var limits = detailsPaneLimits(axis);
+    var step = event.shiftKey ? 48 : 24;
+    var nextSize = null;
+
+    if (event.key === "Home") {
+      nextSize = limits.min;
+    } else if (event.key === "End") {
+      nextSize = limits.max;
+    } else if (axis === "horizontal" && event.key === "ArrowLeft") {
+      nextSize = currentSize + step;
+    } else if (axis === "horizontal" && event.key === "ArrowRight") {
+      nextSize = currentSize - step;
+    } else if (axis === "vertical" && event.key === "ArrowUp") {
+      nextSize = currentSize + step;
+    } else if (axis === "vertical" && event.key === "ArrowDown") {
+      nextSize = currentSize - step;
+    }
+
+    if (nextSize === null) {
+      return;
+    }
+    setDetailsPaneSize(nextSize, axis);
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function bindDetailsResizeHandle() {
+    var handle = detailsResizeHandleElement();
+    if (!handle) {
+      return;
+    }
+    handle.addEventListener("mousedown", startDetailsResize);
+    handle.addEventListener("keydown", onDetailsResizeKeyDown);
+    updateDetailsResizeHandle();
+  }
+
   function init() {
     var closeButton = $("closeButton");
     var svg = $("graphSvg");
@@ -1529,6 +1775,7 @@
     });
     bindControl("fitButton", fitGraph);
     bindControl("resetButton", resetGraph);
+    bindDetailsResizeHandle();
 
     if (svg) {
       svg.addEventListener("mousedown", onMouseDown);
@@ -1537,13 +1784,16 @@
       svg.addEventListener("dblclick", onDoubleClick);
     }
     document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mousemove", onDetailsResizeMove);
     document.addEventListener("mouseup", onMouseUp);
+    document.addEventListener("mouseup", endDetailsResize);
 
     if (viewport) {
       viewport.addEventListener("keydown", onKeyDown);
     }
 
     window.addEventListener("resize", function () {
+      syncDetailsPaneResize();
       updateSvgViewport();
       if (state.autoFit) {
         fitGraph();
@@ -1551,6 +1801,7 @@
         applyTransform();
       }
     });
+    window.addEventListener("blur", endDetailsResize);
 
     postHost({ type: "appReady" });
   }

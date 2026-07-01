@@ -46,7 +46,7 @@
         </div>
       </section>
 
-      <div class="viewer-workspace">
+      <div id="viewerWorkspace" class="viewer-workspace">
         <section id="graphViewport" class="graph-section" aria-label="Lineage graph" tabindex="0">
           <div class="graph-toolbar" aria-label="Graph controls">
             <button id="zoomInButton" class="tool-button" type="button" title="Zoom in" aria-label="Zoom in">+</button>
@@ -58,7 +58,9 @@
           <svg id="graphSvg" class="graph-svg" role="img" aria-label="Linked item relationship graph"></svg>
         </section>
 
-        <aside class="details-panel" aria-label="Selected item details">
+        <div id="detailsResizeHandle" class="details-resize-handle" role="separator" aria-label="Resize details pane" aria-orientation="vertical" aria-controls="detailsPanel" tabindex="0" title="Resize details pane"></div>
+
+        <aside id="detailsPanel" class="details-panel" aria-label="Selected item details">
           <div class="details-heading">
             <div id="detailKind" class="detail-kind">Selected Item</div>
             <h2 id="detailTitle">No selection</h2>
