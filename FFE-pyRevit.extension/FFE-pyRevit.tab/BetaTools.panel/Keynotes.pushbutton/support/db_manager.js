@@ -40,6 +40,8 @@
     snapshot.libraryId = text(snapshot.libraryId || snapshot.library_id);
     snapshot.libraryKey = text(snapshot.libraryKey || snapshot.library_key);
     snapshot.displayPath = text(snapshot.displayPath || snapshot.display_path);
+    snapshot.documentTitle = text(snapshot.documentTitle || snapshot.document_title);
+    snapshot.documentPath = text(snapshot.documentPath || snapshot.document_path);
     snapshot.encoding = text(snapshot.encoding || "utf-8");
     snapshot.lineEnding = snapshot.lineEnding || snapshot.line_ending || "\r\n";
     return snapshot;

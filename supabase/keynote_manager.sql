@@ -5,6 +5,8 @@ create table if not exists public.keynote_libraries (
   id uuid primary key default gen_random_uuid(),
   library_key text not null unique,
   display_path text not null default '',
+  document_title text not null default '',
+  document_path text not null default '',
   encoding text not null default 'utf-8',
   line_ending text not null default E'\r\n',
   file_hash text not null default '',
@@ -19,7 +21,9 @@ create table if not exists public.keynote_libraries (
 
 alter table public.keynote_libraries
   add column if not exists file_hash text not null default '',
-  add column if not exists last_write_utc double precision;
+  add column if not exists last_write_utc double precision,
+  add column if not exists document_title text not null default '',
+  add column if not exists document_path text not null default '';
 
 create table if not exists public.keynote_entries (
   id uuid primary key default gen_random_uuid(),
@@ -96,6 +100,27 @@ create table if not exists public.keynote_analytics_runs (
 create index if not exists keynote_analytics_runs_library_document_idx
   on public.keynote_analytics_runs (library_id, document_key, created_at desc);
 
+alter table public.keynote_analytics_runs
+  add column if not exists document_title text not null default '',
+  add column if not exists document_path text not null default '';
+
+update public.keynote_libraries l
+set document_title = coalesce(r.document_title, ''),
+    document_path = coalesce(r.document_path, '')
+from (
+  select distinct on (library_id)
+    library_id,
+    document_title,
+    document_path
+  from public.keynote_analytics_runs
+  order by library_id, created_at desc, id desc
+) r
+where l.id = r.library_id
+  and (
+    coalesce(l.document_title, '') = ''
+    or coalesce(l.document_path, '') = ''
+  );
+
 create table if not exists public.keynote_analytics_current (
   id uuid primary key default gen_random_uuid(),
   library_id uuid not null references public.keynote_libraries(id) on delete cascade,
@@ -168,6 +193,8 @@ as $$
     'libraryId', l.id::text,
     'libraryKey', l.library_key,
     'displayPath', l.display_path,
+    'documentTitle', l.document_title,
+    'documentPath', l.document_path,
     'encoding', l.encoding,
     'lineEnding', l.line_ending,
     'fileHash', l.file_hash,
@@ -212,6 +239,8 @@ as $$
     'libraryId', l.id::text,
     'libraryKey', l.library_key,
     'displayPath', l.display_path,
+    'documentTitle', l.document_title,
+    'documentPath', l.document_path,
     'encoding', l.encoding,
     'lineEnding', l.line_ending,
     'fileHash', l.file_hash,
@@ -1015,6 +1044,11 @@ begin
     coalesce(p_client_name, '')
   )
   returning id into v_run_id;
+
+  update public.keynote_libraries
+  set document_title = coalesce(p_document_title, ''),
+      document_path = coalesce(p_document_path, '')
+  where id = v_library_id;
 
   delete from public.keynote_analytics_current
   where library_id = v_library_id
