@@ -761,6 +761,73 @@ def normalize_keynote_lines(text):
     return value.replace("\r\n", "\n").replace("\r", "\n").split("\n")
 
 
+def is_keynote_comment_line(line):
+    return safe_unicode(line).lstrip().startswith(u"#")
+
+
+def natural_sort_parts(value):
+    value = safe_unicode(value).strip().lower()
+    parts = []
+    token = u""
+    token_is_digit = None
+
+    def append_token():
+        if not token:
+            return
+        if token_is_digit:
+            parts.append((0, int(token), len(token)))
+        else:
+            parts.append((1, token))
+
+    for character in value:
+        character_is_digit = character.isdigit()
+        if token and character_is_digit != token_is_digit:
+            append_token()
+            token = character
+        else:
+            token += character
+        token_is_digit = character_is_digit
+
+    append_token()
+    return tuple(parts)
+
+
+def natural_entry_sort_key(entry):
+    key = safe_unicode((entry or {}).get("key")).strip()
+    text = safe_unicode((entry or {}).get("text")).strip()
+    try:
+        line_number = int((entry or {}).get("lineNumber") or 0)
+    except:
+        line_number = 0
+    return (natural_sort_parts(key), key.lower(), text.lower(), line_number)
+
+
+def escape_keynote_metadata_value(value):
+    return safe_unicode(value).replace(u"\"", u"\\\"")
+
+
+def format_keynote_encoding_label(encoding):
+    value = safe_str(encoding).strip().lower()
+    if value.startswith("utf-16"):
+        return "UTF-16"
+    if value == "utf-8-sig":
+        return "UTF-8 BOM"
+    if value == "utf-8":
+        return "UTF-8"
+    if value == "mbcs":
+        return "Windows ANSI"
+    if value == "latin-1":
+        return "Latin-1"
+    return safe_str(encoding).strip() or "UTF-8"
+
+
+def make_keynote_metadata_header(source_path, encoding):
+    return u'# @datastore("txt") @source("{0}") @encoding("{1}")'.format(
+        escape_keynote_metadata_value(source_path),
+        escape_keynote_metadata_value(format_keynote_encoding_label(encoding))
+    )
+
+
 def parse_keynote_text(text):
     entries = []
     issues = []
@@ -768,6 +835,8 @@ def parse_keynote_text(text):
     for line_index, line in enumerate(normalize_keynote_lines(text)):
         line_number = line_index + 1
         if not line.strip():
+            continue
+        if is_keynote_comment_line(line):
             continue
 
         parts = line.split("\t")
@@ -819,8 +888,6 @@ def validate_entries(entries, source_issues=None):
 
         if not key:
             issues.append(make_issue("error", "Key is required.", key, line_number, "emptyKey"))
-        if not text:
-            issues.append(make_issue("error", "Text is required.", key, line_number, "emptyText"))
 
         for field_name, field_value in [("Key", key), ("Text", text), ("Parent", parent_key)]:
             if "\t" in field_value or "\r" in field_value or "\n" in field_value:
@@ -912,11 +979,10 @@ def has_error_issues(issues):
     return False
 
 
-def canonicalize_entries(entries, line_ending):
+def canonicalize_entries(entries, line_ending, source_path="", encoding=""):
     entries = entries or []
     line_ending = line_ending or "\r\n"
 
-    by_key = {}
     children = {}
     ordered_entries = []
 
@@ -928,40 +994,49 @@ def canonicalize_entries(entries, line_ending):
             "lineNumber": entry.get("lineNumber"),
         }
         ordered_entries.append(normalized)
-        by_key[normalized["key"]] = normalized
         parent_key = normalized["parentKey"]
         if parent_key not in children:
             children[parent_key] = []
         children[parent_key].append(normalized)
 
-    result = []
+    for parent_key in children:
+        children[parent_key].sort(key=natural_entry_sort_key)
+
+    lines = [
+        make_keynote_metadata_header(source_path, encoding),
+        u'# --------------------- @table(categories:"Root Keynotes Table")',
+    ]
     visited = set()
 
-    def append_branch(parent_key):
-        for child in children.get(parent_key, []):
-            child_key = child["key"]
-            if child_key in visited:
-                continue
-            visited.add(child_key)
-            result.append(child)
-            append_branch(child_key)
+    def append_category_row(entry):
+        lines.append(u"{0}\t{1}".format(entry["key"], entry["text"]))
 
-    append_branch("")
+    def append_keynote_row(entry):
+        lines.append(u"{0}\t{1}\t{2}".format(entry["key"], entry["text"], entry["parentKey"]))
 
-    for entry in ordered_entries:
-        key = entry["key"]
-        if key not in visited:
-            visited.add(key)
-            result.append(entry)
+    def append_keynote_branch(entry):
+        entry_key = entry["key"]
+        if entry_key in visited:
+            return
+        visited.add(entry_key)
+        append_keynote_row(entry)
+        for child in children.get(entry_key, []):
+            append_keynote_branch(child)
 
-    lines = []
-    for entry in result:
-        if entry["parentKey"]:
-            lines.append(u"{0}\t{1}\t{2}".format(entry["key"], entry["text"], entry["parentKey"]))
-        else:
-            lines.append(u"{0}\t{1}".format(entry["key"], entry["text"]))
+    for root_entry in children.get("", []):
+        append_category_row(root_entry)
 
-    if not lines:
+    lines.append(u'# --------------------- @table(keynotes:"Keynotes Table")')
+
+    for root_entry in children.get("", []):
+        for child_entry in children.get(root_entry["key"], []):
+            append_keynote_branch(child_entry)
+
+    for entry in sorted(ordered_entries, key=natural_entry_sort_key):
+        if entry["parentKey"] and entry["key"] not in visited:
+            append_keynote_branch(entry)
+
+    if len(lines) <= 3:
         return u""
 
     return safe_unicode(line_ending).join(lines) + safe_unicode(line_ending)
@@ -3012,7 +3087,7 @@ def save_keynote_payload(target_doc, save_payload):
             if current_line_ending:
                 line_ending = current_line_ending
 
-            keynote_text = canonicalize_entries(merged_entries, line_ending)
+            keynote_text = canonicalize_entries(merged_entries, line_ending, current_path, encoding)
             encoded = encode_keynote_text(keynote_text, encoding)
             backup_path = create_backup_file(current_path)
             write_binary_file(current_path, encoded)

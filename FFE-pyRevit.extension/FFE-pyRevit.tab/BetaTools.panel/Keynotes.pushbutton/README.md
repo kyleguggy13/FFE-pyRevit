@@ -63,11 +63,21 @@ The selected division header shows the current division key and description. Div
 
 Edits are not written to the keynote file until you click `Save`.
 
+## Keynote Text File Format
+
+The shared keynote file is tab-delimited text. Data rows use either `Key<TAB>Text` for parent rows or `Key<TAB>Text<TAB>ParentKey` for child rows.
+
+Rows whose first non-space character is `#` are treated as comments. Revit does not load those rows as keynotes, and the manager ignores them while reading the file.
+
+On save, the manager writes a metadata comment, then a `categories` table containing only root parent rows, then a `keynotes` table containing every non-root keynote row. Sub-groups are normal rows in the `keynotes` table; child rows use the sub-group key as their parent key.
+
+Blank text is allowed when the tab-delimited columns are still present. For example, a child row with no text should be written as `Key<TAB><TAB>ParentKey`.
+
 ## Saving and Refreshing
 
 Click `Save` to merge your edits into the shared keynote file and reload Revit's keynote table.
 
-Save may be blocked if the manager finds errors such as duplicate keys, missing required text, missing parents, malformed source lines, or a file access problem. Open `Warnings` and fix the listed items before saving again.
+Save may be blocked if the manager finds errors such as duplicate keys, empty keys, missing parents, malformed source lines, or a file access problem. Open `Warnings` and fix the listed items before saving again.
 
 Click `Refresh` to reload the keynote file from disk. Refreshing discards unsaved edits in the manager, so save first if you want to keep your changes.
 
@@ -98,7 +108,7 @@ Use this before reviewing unused keynotes, especially after other users have add
 The manager validates the keynote file before saving. Common warnings and errors include:
 
 - Duplicate keynote keys.
-- Empty keys or descriptions.
+- Empty keys.
 - Parent keys that do not exist.
 - Parent/child cycles.
 - Keynote file missing or unavailable.

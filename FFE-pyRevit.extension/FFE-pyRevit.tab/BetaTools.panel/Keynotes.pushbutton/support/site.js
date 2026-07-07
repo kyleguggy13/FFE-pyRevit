@@ -124,6 +124,43 @@
     }
   }
 
+  function naturalCompareText(first, second) {
+    var firstParts = trim(first).toLowerCase().match(/\d+|\D+/g) || [""];
+    var secondParts = trim(second).toLowerCase().match(/\d+|\D+/g) || [""];
+    var length = Math.max(firstParts.length, secondParts.length);
+    var index;
+    var firstPart;
+    var secondPart;
+    var firstNumber;
+    var secondNumber;
+
+    for (index = 0; index < length; index += 1) {
+      firstPart = firstParts[index] || "";
+      secondPart = secondParts[index] || "";
+
+      if (/^\d+$/.test(firstPart) && /^\d+$/.test(secondPart)) {
+        firstNumber = Number(firstPart);
+        secondNumber = Number(secondPart);
+        if (firstNumber !== secondNumber) {
+          return firstNumber - secondNumber;
+        }
+        if (firstPart.length !== secondPart.length) {
+          return firstPart.length - secondPart.length;
+        }
+      } else if (firstPart !== secondPart) {
+        return firstPart < secondPart ? -1 : 1;
+      }
+    }
+
+    return 0;
+  }
+
+  function compareEntriesByKey(first, second) {
+    return naturalCompareText(first && first.key, second && second.key) ||
+      naturalCompareText(first && first.text, second && second.text) ||
+      ((first && first.originalIndex) || 0) - ((second && second.originalIndex) || 0);
+  }
+
   function makeLocalId() {
     var id = "local-" + state.nextLocalId;
     state.nextLocalId += 1;
@@ -381,7 +418,7 @@
   function rootEntries() {
     return state.entries.filter(function (entry) {
       return !trim(entry.parentKey);
-    });
+    }).sort(compareEntriesByKey);
   }
 
   function buildChildrenMap() {
@@ -394,6 +431,9 @@
         children[parentKey] = [];
       }
       children[parentKey].push(entry);
+    });
+    Object.keys(children).forEach(function (parentKey) {
+      children[parentKey].sort(compareEntriesByKey);
     });
 
     return children;
@@ -730,9 +770,6 @@
 
       if (!key) {
         issues.push(makeIssue("error", "Key is required.", key, "emptyKey"));
-      }
-      if (!valueText) {
-        issues.push(makeIssue("error", "Text is required.", key, "emptyText"));
       }
 
       [
