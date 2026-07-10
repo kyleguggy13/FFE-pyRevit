@@ -32,6 +32,7 @@
     modelHealth: null,
     modelIssuesOpen: false,
     reviewedModelHealthSignature: "",
+    modelIssueResolutions: {},
     remotePending: false,
     allowNextLoad: false,
     collapsedEntryIds: {},
@@ -225,7 +226,13 @@
           sheetCount: Number(issue.sheetCount || 0),
           unsheetedCount: Number(issue.unsheetedCount || 0),
           sheets: issue.sheets || [],
-          typeNames: issue.typeNames || []
+          typeNames: issue.typeNames || [],
+          resolution: issue.resolution ? {
+            resolutionType: text(issue.resolution.resolutionType),
+            familyTypeName: text(issue.resolution.familyTypeName),
+            familyTypeText: text(issue.resolution.familyTypeText),
+            fileText: text(issue.resolution.fileText)
+          } : null
         };
       })
     };
@@ -246,13 +253,56 @@
       health.placedKeyCount,
       health.missingKeyCount,
       health.issues.map(function (issue) {
-        return [issue.severity, issue.code, issue.key, issue.placedCount].join(":");
+        return [
+          issue.severity,
+          issue.code,
+          issue.key,
+          issue.placedCount,
+          issue.resolution && issue.resolution.familyTypeName,
+          issue.resolution && issue.resolution.familyTypeText,
+          issue.resolution && issue.resolution.fileText
+        ].join(":");
       }).join("|")
     ].join("|");
   }
 
   function modelIssueCount() {
     return currentModelHealth().issues.length;
+  }
+
+  function modelIssueResolutionId(issue) {
+    var resolution = issue && issue.resolution;
+    return [
+      text(issue && issue.code),
+      trim(issue && issue.key),
+      trim(resolution && resolution.familyTypeName)
+    ].join("|");
+  }
+
+  function inferParentKeyForMissingKey(key) {
+    var targetKey = trim(key);
+    var bestMatch = "";
+
+    state.entries.forEach(function (entry) {
+      var candidateKey = trim(entry.key);
+      if (
+        candidateKey &&
+        targetKey.indexOf(candidateKey + ".") === 0 &&
+        candidateKey.length > bestMatch.length
+      ) {
+        bestMatch = candidateKey;
+      }
+    });
+    return bestMatch;
+  }
+
+  function unresolvedModelIssueCount() {
+    return currentModelHealth().issues.filter(function (issue) {
+      return Boolean(
+        issue.resolution &&
+        !state.modelIssueResolutions[modelIssueResolutionId(issue)]
+      );
+    }).length;
   }
 
   function isModelSafeModeActive() {
@@ -1755,6 +1805,129 @@
     return "Model Health";
   }
 
+  function applyModelIssueResolution(issue, source, replacementKey) {
+    var resolution = issue && issue.resolution;
+    var entry = issue && entriesByKey()[issue.key];
+    var replacementEntry;
+
+    if (!resolution || (source !== "familyType" && source !== "textFile")) {
+      return;
+    }
+    if (entry && isEntryRemotelyClaimed(entry)) {
+      setStatus({
+        status: "warning",
+        message: editClaimTitle(entry) || "This keynote is being edited by another user."
+      });
+      renderAll();
+      return;
+    }
+
+    if (source === "familyType") {
+      if (!entry) {
+        entry = normalizeEntry({
+          id: makeLocalId(),
+          key: issue.key,
+          text: resolution.familyTypeText,
+          parentKey: inferParentKeyForMissingKey(issue.key),
+          sortOrder: state.entries.length,
+          lineNumber: null
+        }, state.entries.length);
+        state.entries.push(entry);
+      } else {
+        entry.text = text(resolution.familyTypeText);
+      }
+      replacementKey = "";
+    } else {
+      replacementKey = trim(replacementKey);
+      replacementEntry = entriesByKey()[replacementKey];
+      if (!replacementEntry) {
+        setStatus({ status: "warning", message: "Select a keynote entry from the text file first." });
+        return;
+      }
+      if (entry && !state.baselineEntries.some(function (baselineEntry) {
+        return baselineEntry.key === issue.key;
+      })) {
+        state.entries = state.entries.filter(function (candidate) {
+          return candidate.id !== entry.id;
+        });
+      }
+    }
+
+    state.modelIssueResolutions[modelIssueResolutionId(issue)] = {
+      issueKey: issue.key,
+      source: source,
+      replacementKey: replacementKey
+    };
+    markDirty();
+    syncLocalEditClaims();
+    setStatus({
+      status: "warning",
+      message: source === "familyType"
+        ? "Keynote " + issue.key + " will be added to the text file from the family type when saved."
+        : "Family keynote " + issue.key + " will be replaced by text-file keynote " + replacementKey + " when saved."
+    });
+    renderAll();
+  }
+
+  function createModelIssueResolutionControls(issue) {
+    var resolution = issue.resolution;
+    var selectedResolution = state.modelIssueResolutions[modelIssueResolutionId(issue)] || {};
+    var selectedSource = selectedResolution.source || "";
+    var controls = document.createElement("div");
+    var familyButton = document.createElement("button");
+    var fileChoice = document.createElement("div");
+    var fileSelect = document.createElement("select");
+    var fileButton = document.createElement("button");
+    var placeholderOption = document.createElement("option");
+
+    controls.className = "model-issue-resolution";
+    familyButton.type = "button";
+    familyButton.className = "model-resolution-button";
+    familyButton.setAttribute("data-selected", selectedSource === "familyType" ? "true" : "false");
+    familyButton.textContent = "Use Family Type: " + (resolution.familyTypeText || "(blank)");
+    familyButton.title = "Write the family type text to the keynote file.";
+    familyButton.addEventListener("click", function () {
+      applyModelIssueResolution(issue, "familyType");
+    });
+
+    fileChoice.className = "model-resolution-file-choice";
+    fileSelect.className = "model-resolution-select";
+    fileSelect.setAttribute("aria-label", "Replacement keynote from text file for " + issue.key);
+    placeholderOption.value = "";
+    placeholderOption.textContent = "Choose text-file keynote...";
+    fileSelect.appendChild(placeholderOption);
+    state.baselineEntries.slice().sort(compareEntriesByKey).forEach(function (entry) {
+      var option;
+      if (!trim(entry.key) || entry.key === issue.key) {
+        return;
+      }
+      option = document.createElement("option");
+      option.value = entry.key;
+      option.textContent = entry.key + " - " + (entry.text || "(blank)");
+      fileSelect.appendChild(option);
+    });
+    fileSelect.value = selectedResolution.replacementKey || "";
+
+    fileButton.type = "button";
+    fileButton.className = "model-resolution-button";
+    fileButton.setAttribute("data-selected", selectedSource === "textFile" ? "true" : "false");
+    fileButton.textContent = "Use Text File";
+    fileButton.disabled = !fileSelect.value;
+    fileButton.title = "Overwrite the family type and migrate its placed instances to the selected text-file keynote.";
+    fileSelect.addEventListener("change", function () {
+      fileButton.disabled = !fileSelect.value;
+    });
+    fileButton.addEventListener("click", function () {
+      applyModelIssueResolution(issue, "textFile", fileSelect.value);
+    });
+
+    fileChoice.appendChild(fileSelect);
+    fileChoice.appendChild(fileButton);
+    controls.appendChild(familyButton);
+    controls.appendChild(fileChoice);
+    return controls;
+  }
+
   function renderModelHealth() {
     var health = currentModelHealth();
     var issueCount = modelIssueCount();
@@ -1812,11 +1985,12 @@
       } else {
         var lastGroupTitle = "";
         health.issues.forEach(function (issue) {
-          var item = document.createElement("button");
+          var canJump = Boolean(issue.key && entriesByKey()[issue.key]);
+          var canResolve = Boolean(isSafeMode && issue.resolution);
+          var item = document.createElement(canResolve ? "div" : "button");
           var label = document.createElement("span");
           var message = document.createElement("strong");
           var detail = document.createElement("span");
-          var canJump = Boolean(issue.key && entriesByKey()[issue.key]);
           var groupTitle = modelIssueGroupTitle(issue);
 
           if (groupTitle !== lastGroupTitle) {
@@ -1827,14 +2001,18 @@
             lastGroupTitle = groupTitle;
           }
 
-          item.type = "button";
+          if (!canResolve) {
+            item.type = "button";
+          }
           item.className = "model-issue-item";
           item.setAttribute("data-severity", issue.severity || "warning");
-          item.disabled = !canJump;
-          item.setAttribute(
-            "title",
-            canJump ? "Jump to keynote " + issue.key : "This issue is not tied to a row in the keynote file."
-          );
+          if (!canResolve) {
+            item.disabled = !canJump;
+            item.setAttribute(
+              "title",
+              canJump ? "Jump to keynote " + issue.key : "This issue is not tied to a row in the keynote file."
+            );
+          }
 
           label.className = "validation-label";
           label.textContent = text(issue.severity || "warning").toUpperCase();
@@ -1846,7 +2024,9 @@
           item.appendChild(message);
           item.appendChild(detail);
 
-          if (canJump) {
+          if (canResolve) {
+            item.appendChild(createModelIssueResolutionControls(issue));
+          } else if (canJump) {
             item.addEventListener("click", function () {
               setModelIssuesOpen(false);
               selectEntryByKey(issue.key, true);
@@ -1859,8 +2039,11 @@
     }
 
     if (acknowledge) {
-      acknowledge.disabled = !health.safeModeRecommended;
-      acknowledge.textContent = isSafeMode ? "Reviewed - Unlock Editing" : "Reviewed";
+      var unresolvedCount = unresolvedModelIssueCount();
+      acknowledge.disabled = !health.safeModeRecommended || (isSafeMode && unresolvedCount > 0);
+      acknowledge.textContent = isSafeMode && unresolvedCount
+        ? "Resolve " + formatNumber(unresolvedCount) + " missing keynote(s) to unlock"
+        : (isSafeMode ? "Reviewed - Unlock Editing" : "Reviewed");
     }
   }
 
@@ -1873,6 +2056,13 @@
   function acknowledgeModelHealthReview() {
     if (!currentModelHealth().safeModeRecommended) {
       setModelIssuesOpen(false);
+      return;
+    }
+    if (isModelSafeModeActive() && unresolvedModelIssueCount()) {
+      setStatus({
+        status: "warning",
+        message: "Choose the family type or a replacement text-file keynote for each available missing-key error."
+      });
       return;
     }
     state.reviewedModelHealthSignature = modelHealthSignature();
@@ -3214,6 +3404,7 @@
     setPlacementMode(preferences.placementMode || state.payload.placementMode || state.placementMode);
     state.entries = (state.payload.entries || []).map(normalizeEntry);
     state.modelHealth = normalizeModelHealth(state.payload.modelHealth || {});
+    state.modelIssueResolutions = {};
     state.sheetVisibleKeynotes = Object.keys(state.modelHealth.placedKeyMap || {}).length
       ? state.modelHealth.placedKeyMap
       : normalizeSheetVisibleKeynotes(state.payload.sheetVisibleKeynotes || {});
@@ -3772,6 +3963,9 @@
       lastWriteUtc: state.payload.lastWriteUtc,
       fileHash: state.payload.fileHash,
       sourceHasMalformed: hasSourceIssueCode("malformedLine"),
+      modelIssueResolutions: Object.keys(state.modelIssueResolutions).map(function (resolutionId) {
+        return state.modelIssueResolutions[resolutionId];
+      }),
       baselineEntries: state.baselineEntries.map(function (entry) {
         return {
           id: entry.id,

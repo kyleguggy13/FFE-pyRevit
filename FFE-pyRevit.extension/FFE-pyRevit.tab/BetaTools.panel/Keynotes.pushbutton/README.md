@@ -117,6 +117,12 @@ The manager validates the keynote file before saving. Common warnings and errors
 
 Errors must be fixed before saving. Warnings may not always block saving, but they should be reviewed.
 
+## Safe Mode
+
+Safe Mode pauses editing and saving when the model health scan finds a significant number of placed keynote keys that are missing from the active keynote file. Open `Model Issues` to review the affected keynotes.
+
+For a placed Generic Annotation key that is missing from the text file, choose `Use Family Type` to add its key and text to the file. Choose a replacement keynote and `Use Text File` to overwrite the family type and migrate its placed instances to that file entry. Resolve every available missing-key choice, unlock editing, and click `Save` to apply the selections.
+
 ## Best Practices
 
 - Save before placing keynotes you have just edited.

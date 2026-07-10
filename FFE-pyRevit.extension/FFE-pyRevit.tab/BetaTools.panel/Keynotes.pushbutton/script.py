@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 __title__ = "FFE-Keynotes"
-__version__ = "v0.13"
+__version__ = "v0.14"
 __persistentengine__ = True
 __min_revit_ver__ = 2026
-__doc__ = """Version = v0.13
-Date    = 06.16.2026
+__doc__ = """Version = v0.14
+Date    = 07.10.2026
 __________________________________________________________________
 Description:
 Persistent WebView2 keynote manager for the active Revit document's
@@ -29,6 +29,7 @@ Last update:
 - [06.09.2026] - v0.11 Made Place As persist across sessions.
 - [06.10.2026] - v0.12 Added placement filter and collapsible division panel.
 - [06.12.2026] - v0.13 Added automatic model health scan and Safe Mode.
+- [07.10.2026] - v0.14 Added per-keynote family type/text file conflict resolution in Safe Mode.
 __________________________________________________________________
 Author: Kyle Guggenheim"""
 
@@ -38,6 +39,7 @@ TODO:
 - Select placed keynote icon and display list of sheets/views where it is placed.
 - Add realtime updates when a keynote is added or removed.
 - Figure out how to work around Keynote's workset.
+- Add a ellipsis menu to each row for additional actions like "Copy Key", "Copy Text", "Delete Row", "Move Row to Division".
 
 
 Key behaviors:
@@ -129,7 +131,7 @@ PATH_SUPPORT = os.path.join(PATH_SCRIPT, "support")
 PATH_INDEX = os.path.join(PATH_SUPPORT, "index.html")
 
 APP_NAME = "FFE Keynote Manager"
-APP_VERSION = "v0.13"
+APP_VERSION = "v0.14"
 LOCAL_APP_NAME = "KeynoteManager"
 GENERIC_KEYNOTE_FAMILY_NAME = "FFE_Symbol_Keynote (Type)"
 GENERIC_KEYNOTE_NUMBER_PARAMETER = "Number"
@@ -2295,7 +2297,7 @@ def collect_keynote_analytics(target_doc, keynote_payload):
     return analytics
 
 
-def make_model_health_issue(severity, code, key, message, row=None, details="", type_names=None):
+def make_model_health_issue(severity, code, key, message, row=None, details="", type_names=None, resolution=None):
     row = row or {}
     issue = {
         "severity": severity or "warning",
@@ -2312,6 +2314,13 @@ def make_model_health_issue(severity, code, key, message, row=None, details="", 
     }
     if type_names:
         issue["typeNames"] = [safe_unicode(name).strip() for name in type_names if safe_unicode(name).strip()]
+    if resolution:
+        issue["resolution"] = {
+            "resolutionType": safe_unicode(resolution.get("resolutionType")).strip(),
+            "familyTypeName": safe_unicode(resolution.get("familyTypeName")).strip(),
+            "familyTypeText": safe_unicode(resolution.get("familyTypeText")).strip(),
+            "fileText": safe_unicode(resolution.get("fileText")).strip(),
+        }
     return issue
 
 
@@ -2453,7 +2462,7 @@ def append_generic_annotation_model_health_issues(target_doc, entry_by_key, issu
                     symbol_key,
                     "Generic Annotation type '{0}' text does not match the keynote file.".format(type_name),
                     row,
-                    "Model text: {0} | File text: {1}".format(current_text, expected_text)
+                    "Family type text: {0} | Text file: {1}".format(current_text, expected_text)
                 ))
 
     for symbol_key, key_symbols in symbols_by_key.items():
@@ -2494,6 +2503,7 @@ def make_model_health_signature(analytics, issues, keynote_payload):
             "placedCount": issue.get("placedCount") or 0,
             "genericAnnotationCount": issue.get("genericAnnotationCount") or 0,
             "typeNames": issue.get("typeNames") or [],
+            "resolution": issue.get("resolution") or {},
         })
 
     source = json.dumps({
@@ -2507,6 +2517,33 @@ def make_model_health_signature(analytics, issues, keynote_payload):
     return hashlib.sha256(source.encode("utf-8")).hexdigest()
 
 
+def collect_generic_annotation_resolution_sources(target_doc):
+    """Collect the best family-type source for each Generic Annotation keynote key."""
+    result = {}
+    family = get_generic_annotation_keynote_family(target_doc)
+    if family is None:
+        return result
+
+    instances_by_symbol = collect_generic_annotation_instances_by_symbol(target_doc)
+    for symbol in get_family_symbols(target_doc, family):
+        key = safe_unicode(get_generic_annotation_symbol_key(symbol)).strip()
+        if not key:
+            continue
+
+        symbol_id_key = get_element_id_key(symbol)
+        candidate = {
+            "resolutionType": "missingGenericAnnotationKey",
+            "familyTypeName": get_element_name(symbol),
+            "familyTypeText": get_lookup_parameter_text(symbol, [GENERIC_KEYNOTE_TEXT_PARAMETER]),
+            "instanceCount": len(instances_by_symbol.get(symbol_id_key) or []),
+        }
+        existing = result.get(key)
+        if existing is None or candidate["instanceCount"] > existing.get("instanceCount", 0):
+            result[key] = candidate
+
+    return result
+
+
 def build_model_health_from_analytics(target_doc, keynote_payload, analytics):
     keynote_payload = keynote_payload or {}
     analytics = analytics or {}
@@ -2518,6 +2555,7 @@ def build_model_health_from_analytics(target_doc, keynote_payload, analytics):
         if key:
             entry_by_key[key] = entry
 
+    generic_annotation_sources = collect_generic_annotation_resolution_sources(target_doc)
     missing_key_count = 0
     missing_placed_count = 0
     for row in analytics.get("analyticsRows") or []:
@@ -2525,14 +2563,21 @@ def build_model_health_from_analytics(target_doc, keynote_payload, analytics):
             continue
         missing_key_count += 1
         missing_placed_count += int(row.get("placedCount") or 0)
+        missing_key = safe_unicode(row.get("keynoteKey")).strip()
+        resolution = None
+        if int(row.get("genericAnnotationCount") or 0):
+            resolution = generic_annotation_sources.get(missing_key)
         issues.append(make_model_health_issue(
             "error",
             "placedKeyMissingFromLibrary",
-            row.get("keynoteKey"),
+            missing_key,
             "Placed keynote key '{0}' was not found in the active keynote file.".format(
-                safe_unicode(row.get("keynoteKey")).strip()
+                missing_key
             ),
-            row
+            row,
+            "Choose the family type to add this keynote to the text file, or choose a text-file keynote to replace the family type.",
+            None,
+            resolution
         ))
 
     append_generic_annotation_model_health_issues(target_doc, entry_by_key, issues)
@@ -2892,6 +2937,22 @@ def make_key_rename_map(baseline_entries, desired_entries):
     return key_renames
 
 
+def make_model_issue_key_rename_map(model_issue_resolutions, desired_entries):
+    """Build family/reference migrations selected from Safe Mode missing-key errors."""
+    desired_by_key = keyed_entries(desired_entries)
+    key_renames = {}
+
+    for resolution in model_issue_resolutions or []:
+        if safe_str(resolution.get("source")).strip() != "textFile":
+            continue
+        old_key = safe_unicode(resolution.get("issueKey")).strip()
+        new_key = safe_unicode(resolution.get("replacementKey")).strip()
+        if old_key and new_key and old_key != new_key and new_key in desired_by_key:
+            key_renames[old_key] = new_key
+
+    return key_renames
+
+
 def make_deleted_key_set(baseline_entries, desired_entries):
     desired_by_id = indexed_entries(desired_entries)
     deleted_keys = set()
@@ -3041,6 +3102,13 @@ def save_keynote_payload(target_doc, save_payload):
         encoding = safe_str(save_payload.get("encoding")) or "utf-8"
         line_ending = save_payload.get("lineEnding") or "\r\n"
         key_renames = make_key_rename_map(baseline_entries, entries)
+        model_issue_key_renames = make_model_issue_key_rename_map(
+            save_payload.get("modelIssueResolutions") or [],
+            entries
+        )
+        for old_key, new_key in model_issue_key_renames.items():
+            if old_key not in key_renames:
+                key_renames[old_key] = new_key
         deleted_keys = make_deleted_key_set(baseline_entries, entries)
         reference_update = {}
         generic_annotation_sync = make_generic_annotation_sync_summary()
