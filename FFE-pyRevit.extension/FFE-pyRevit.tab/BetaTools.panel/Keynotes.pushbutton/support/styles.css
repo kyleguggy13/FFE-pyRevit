@@ -1075,7 +1075,7 @@ h2 {
 }
 
 .note-table-header th:nth-child(2) {
-  text-align: center;
+  text-align: start;
 }
 
 .note-row {
