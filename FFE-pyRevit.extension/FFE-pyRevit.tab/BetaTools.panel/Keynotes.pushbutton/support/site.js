@@ -4,6 +4,7 @@
   var UNGROUPED_ID = "__ungrouped__";
   var REMOTE_ENTRY_REFRESH_DELAY_MS = 600;
   var EDIT_CLAIM_HEARTBEAT_MS = 60000;
+  var activeRowActionMenu = null;
 
   var state = {
     payload: null,
@@ -1168,15 +1169,16 @@
     }
 
     models.forEach(function (model) {
-      var item = document.createElement("button");
+      var item = document.createElement("div");
       var copy = document.createElement("span");
       var title = document.createElement("strong");
       var subtitle = document.createElement("span");
       var badge = document.createElement("span");
+      var actionControls = document.createElement("span");
+      var menuButton;
       var isSelected = selectedModel && model.id === selectedModel.id;
       var claimTitle = model.entry ? editClaimTitle(model.entry) : "";
 
-      item.type = "button";
       item.className = "list-group-item list-group-item-action division-row" +
         (isSelected ? " active is-selected" : "") +
         (claimTitle ? " is-claimed" : "");
@@ -1193,11 +1195,29 @@
       badge.className = "badge rounded-pill division-note-badge";
       badge.textContent = formatNumber(model.rows.length);
       badge.setAttribute("aria-label", formatNumber(model.rows.length) + (model.rows.length === 1 ? " note" : " notes"));
+      actionControls.className = "division-row-actions";
 
       copy.appendChild(title);
       copy.appendChild(subtitle);
       item.appendChild(copy);
-      item.appendChild(badge);
+      actionControls.appendChild(badge);
+      if (model.entry) {
+        menuButton = document.createElement("button");
+        menuButton.type = "button";
+        menuButton.className = "division-more-button";
+        menuButton.appendChild(createEllipsisVerticalIcon());
+        menuButton.setAttribute("aria-label", "More actions for parent " + (model.entry.key || "new parent"));
+        menuButton.setAttribute("aria-haspopup", "menu");
+        menuButton.setAttribute("aria-expanded", "false");
+        menuButton.setAttribute("title", "More parent actions");
+        menuButton.addEventListener("click", function (event) {
+          event.preventDefault();
+          event.stopPropagation();
+          openParentActionMenu(model.entry, menuButton, false);
+        });
+        actionControls.appendChild(menuButton);
+      }
+      item.appendChild(actionControls);
       item.addEventListener("click", function () {
         selectDivision(model.id);
       });
@@ -1250,6 +1270,7 @@
     var model = selectedDivisionModel();
     var keyInput = byId("division-key-input");
     var textInput = byId("division-text-input");
+    var menuButton = byId("division-more-button");
     var hasEntry = Boolean(model && model.entry);
     var claimTitle = hasEntry ? editClaimTitle(model.entry) : "";
     var safeMode = isModelSafeModeActive();
@@ -1282,6 +1303,13 @@
       textInput.disabled = safeMode || !hasEntry || Boolean(claimTitle);
       textInput.value = hasEntry ? model.entry.text : "Keynotes without a root division";
       textInput.setAttribute("title", safeMode ? "Review model issues before editing." : (claimTitle || ""));
+    }
+    if (menuButton) {
+      menuButton.disabled = !hasEntry;
+      menuButton.setAttribute(
+        "aria-label",
+        hasEntry ? "More actions for parent " + (model.entry.key || "new parent") : "No parent actions available"
+      );
     }
   }
 
@@ -1321,6 +1349,488 @@
     path.setAttribute("d", "M0 14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H2a2 2 0 0 0-2 2zm4.5-6.5h5.793L8.146 5.354a.5.5 0 1 1 .708-.708l3 3a.5.5 0 0 1 0 .708l-3 3a.5.5 0 0 1-.708-.708L10.293 8.5H4.5a.5.5 0 0 1 0-1");
     svg.appendChild(path);
     return svg;
+  }
+
+  function createEllipsisVerticalIcon() {
+    var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+
+    svg.setAttribute("class", "lucide lucide-ellipsis-vertical");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "2");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    svg.setAttribute("focusable", "false");
+    svg.setAttribute("aria-hidden", "true");
+
+    [5, 12, 19].forEach(function (cy) {
+      var circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      circle.setAttribute("cx", "12");
+      circle.setAttribute("cy", String(cy));
+      circle.setAttribute("r", "1");
+      svg.appendChild(circle);
+    });
+    return svg;
+  }
+
+  function closeRowActionMenu(restoreFocus) {
+    var trigger;
+
+    if (!activeRowActionMenu) {
+      return;
+    }
+
+    trigger = activeRowActionMenu.trigger;
+    if (trigger) {
+      trigger.setAttribute("aria-expanded", "false");
+    }
+    if (activeRowActionMenu.element && activeRowActionMenu.element.parentNode) {
+      activeRowActionMenu.element.parentNode.removeChild(activeRowActionMenu.element);
+    }
+    activeRowActionMenu = null;
+
+    if (restoreFocus && trigger && document.documentElement.contains(trigger)) {
+      trigger.focus();
+    }
+  }
+
+  function positionRowActionMenu(menu, trigger) {
+    var triggerRect;
+    var menuRect;
+    var left;
+    var top;
+    var viewportPadding = 8;
+
+    if (!menu || !trigger) {
+      return;
+    }
+
+    menu.style.visibility = "hidden";
+    menu.style.left = "0px";
+    menu.style.top = "0px";
+    triggerRect = trigger.getBoundingClientRect();
+    menuRect = menu.getBoundingClientRect();
+    left = triggerRect.right - menuRect.width;
+    top = triggerRect.bottom + 4;
+
+    if (left < viewportPadding) {
+      left = viewportPadding;
+    }
+    if (left + menuRect.width > globalScope.innerWidth - viewportPadding) {
+      left = globalScope.innerWidth - menuRect.width - viewportPadding;
+    }
+    if (top + menuRect.height > globalScope.innerHeight - viewportPadding) {
+      top = triggerRect.top - menuRect.height - 4;
+    }
+    if (top < viewportPadding) {
+      top = viewportPadding;
+    }
+
+    menu.style.left = Math.round(left) + "px";
+    menu.style.top = Math.round(top) + "px";
+    menu.style.visibility = "visible";
+  }
+
+  function createRowActionButton(label, handler, options) {
+    var button = document.createElement("button");
+
+    options = options || {};
+    button.type = "button";
+    button.className = "row-action-menu-item" + (options.danger ? " is-danger" : "");
+    button.textContent = label;
+    button.setAttribute("role", "menuitem");
+    button.disabled = Boolean(options.disabled);
+    if (options.title) {
+      button.setAttribute("title", options.title);
+    }
+    button.addEventListener("click", function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (button.disabled) {
+        return;
+      }
+      handler();
+    });
+    return button;
+  }
+
+  function copyNoteText(entry) {
+    var noteText = text(entry && entry.text);
+    var clipboard = globalScope.navigator && globalScope.navigator.clipboard;
+    var copyPromise;
+
+    function fallbackCopy() {
+      var textarea = document.createElement("textarea");
+      var copied;
+
+      textarea.value = noteText;
+      textarea.setAttribute("readonly", "readonly");
+      textarea.className = "clipboard-copy-source";
+      document.body.appendChild(textarea);
+      textarea.select();
+      copied = document.execCommand && document.execCommand("copy");
+      document.body.removeChild(textarea);
+      if (!copied) {
+        throw new Error("Clipboard copy was not available.");
+      }
+    }
+
+    closeRowActionMenu(false);
+    try {
+      copyPromise = clipboard && typeof clipboard.writeText === "function"
+        ? clipboard.writeText(noteText)
+        : Promise.resolve().then(fallbackCopy);
+      copyPromise.then(function () {
+        setStatus({
+          status: "ready",
+          message: "Copied text for keynote '" + (entry.key || "new keynote") + "'."
+        });
+      }).catch(function () {
+        try {
+          fallbackCopy();
+          setStatus({
+            status: "ready",
+            message: "Copied text for keynote '" + (entry.key || "new keynote") + "'."
+          });
+        } catch (ignore) {
+          setStatus({ status: "error", message: "Could not copy the keynote text to the clipboard." });
+        }
+      });
+    } catch (ignore) {
+      setStatus({ status: "error", message: "Could not copy the keynote text to the clipboard." });
+    }
+  }
+
+  function renderMoveToDivisionMenu(menu, entry, trigger) {
+    var heading = document.createElement("div");
+    var currentRoot = rootAncestorFor(entry);
+    var roots = rootEntries();
+
+    clearElement(menu);
+    menu.classList.add("is-division-picker");
+    menu.appendChild(createRowActionButton("Back", function () {
+      renderRowActionMenuContent(menu, entry, trigger);
+    }));
+
+    heading.className = "row-action-menu-heading";
+    heading.textContent = "Move Note to Division";
+    menu.appendChild(heading);
+
+    roots.forEach(function (division) {
+      var isDirectParent = trim(entry.parentKey) === trim(division.key);
+      var isCurrentDivision = currentRoot && currentRoot.id === division.id;
+      var label = divisionTitle(division) + " - " + (division.text || "Untitled division");
+      if (isCurrentDivision) {
+        label += " (current)";
+      }
+      menu.appendChild(createRowActionButton(label, function () {
+        closeRowActionMenu(false);
+        moveNoteToDivision(entry, division);
+      }, {
+        disabled: isDirectParent,
+        title: isDirectParent ? "This note is already directly under this division." : ""
+      }));
+    });
+
+    if (!roots.length) {
+      heading = document.createElement("div");
+      heading.className = "row-action-menu-empty";
+      heading.textContent = "No divisions are available.";
+      menu.appendChild(heading);
+    }
+
+    positionRowActionMenu(menu, trigger);
+    if (menu.querySelector(".row-action-menu-item:not(:disabled)")) {
+      menu.querySelector(".row-action-menu-item:not(:disabled)").focus();
+    }
+  }
+
+  function renderRowActionMenuContent(menu, entry, trigger) {
+    var safeMode = isModelSafeModeActive();
+    var claimed = isEntryRemotelyClaimed(entry);
+    var parentKey = trim(entry && entry.parentKey);
+    var sequenceParent = parentKey ? entriesByKey()[parentKey] || null : null;
+    var sequenceParentClaimed = sequenceParent && isEntryRemotelyClaimed(sequenceParent);
+    var editingDisabled = safeMode || claimed;
+    var sequenceDisabled = safeMode || !sequenceParent || sequenceParentClaimed;
+    var disabledTitle = safeMode
+      ? "Review model issues before editing."
+      : (claimed ? editClaimTitle(entry) : "");
+    var sequenceDisabledTitle = safeMode
+      ? "Review model issues before editing."
+      : (sequenceParentClaimed
+        ? editClaimTitle(sequenceParent)
+        : (!sequenceParent ? "This keynote does not have a valid parent." : ""));
+
+    clearElement(menu);
+    menu.classList.remove("is-division-picker");
+    menu.appendChild(createRowActionButton("Copy Text", function () {
+      copyNoteText(entry);
+    }));
+    menu.appendChild(createRowActionButton("Delete Note", function () {
+      closeRowActionMenu(false);
+      deleteEntry(entry);
+    }, { disabled: editingDisabled, title: disabledTitle, danger: true }));
+    menu.appendChild(createRowActionButton("Move Note to Division", function () {
+      renderMoveToDivisionMenu(menu, entry, trigger);
+    }, { disabled: editingDisabled, title: disabledTitle }));
+    menu.appendChild(createRowActionButton("Promote to Parent", function () {
+      closeRowActionMenu(false);
+      promoteNoteToParent(entry);
+    }, { disabled: editingDisabled, title: disabledTitle }));
+    menu.appendChild(createRowActionButton("Add Note in Sequence", function () {
+      closeRowActionMenu(false);
+      addNoteInSequenceForEntry(entry);
+    }, { disabled: sequenceDisabled, title: sequenceDisabledTitle }));
+    menu.appendChild(createRowActionButton("UPPER CASE", function () {
+      closeRowActionMenu(false);
+      uppercaseNoteText(entry);
+    }, { disabled: editingDisabled, title: disabledTitle }));
+    positionRowActionMenu(menu, trigger);
+    if (menu.querySelector(".row-action-menu-item:not(:disabled)")) {
+      menu.querySelector(".row-action-menu-item:not(:disabled)").focus();
+    }
+  }
+
+  function openRowActionMenu(entry, trigger) {
+    var menu;
+
+    if (
+      activeRowActionMenu &&
+      activeRowActionMenu.entryId === entry.id &&
+      activeRowActionMenu.menuKind === "note"
+    ) {
+      closeRowActionMenu(true);
+      return;
+    }
+
+    closeRowActionMenu(false);
+    selectNote(entry.id, false);
+    menu = document.createElement("div");
+    menu.className = "row-action-menu";
+    menu.id = "row-action-menu";
+    menu.setAttribute("role", "menu");
+    menu.setAttribute("aria-label", "Actions for keynote " + (entry.key || "new keynote"));
+    menu.addEventListener("click", function (event) {
+      event.stopPropagation();
+    });
+    document.body.appendChild(menu);
+    activeRowActionMenu = {
+      element: menu,
+      entryId: entry.id,
+      menuKind: "note",
+      trigger: trigger
+    };
+    trigger.setAttribute("aria-expanded", "true");
+    trigger.setAttribute("aria-controls", menu.id);
+    renderRowActionMenuContent(menu, entry, trigger);
+  }
+
+  function descendantEntriesFor(entry) {
+    if (!entry) {
+      return [];
+    }
+    return state.entries.filter(function (candidate) {
+      return entryIsDescendantOf(candidate, entry);
+    });
+  }
+
+  function directChildEntriesFor(entry) {
+    var parentKey = trim(entry && entry.key);
+    return state.entries.filter(function (candidate) {
+      return trim(candidate.parentKey) === parentKey;
+    });
+  }
+
+  function firstRemotelyClaimedEntry(entries) {
+    var index;
+    for (index = 0; index < entries.length; index += 1) {
+      if (isEntryRemotelyClaimed(entries[index])) {
+        return entries[index];
+      }
+    }
+    return null;
+  }
+
+  function renderParentDestinationMenu(menu, entry, trigger, mode) {
+    var heading = document.createElement("div");
+    var roots = rootEntries().filter(function (candidate) {
+      return candidate.id !== entry.id;
+    });
+    var isDeleteMove = mode === "deleteMove";
+
+    clearElement(menu);
+    menu.classList.add("is-division-picker");
+    menu.appendChild(createRowActionButton("Back", function () {
+      if (isDeleteMove) {
+        renderDeleteParentMenu(menu, entry, trigger);
+      } else {
+        renderParentActionMenuContent(menu, entry, trigger);
+      }
+    }));
+
+    heading.className = "row-action-menu-heading";
+    heading.textContent = isDeleteMove ? "Move Subnotes to Parent" : "Demote Under Parent";
+    menu.appendChild(heading);
+
+    roots.forEach(function (destination) {
+      var label = divisionTitle(destination) + " - " + (destination.text || "Untitled division");
+      menu.appendChild(createRowActionButton(label, function () {
+        closeRowActionMenu(false);
+        if (isDeleteMove) {
+          deleteParentAndMoveSubnotes(entry, destination);
+        } else {
+          demoteParentToNote(entry, destination);
+        }
+      }));
+    });
+
+    if (!roots.length) {
+      heading = document.createElement("div");
+      heading.className = "row-action-menu-empty";
+      heading.textContent = "Create another parent before using this action.";
+      menu.appendChild(heading);
+    }
+
+    positionRowActionMenu(menu, trigger);
+    if (menu.querySelector(".row-action-menu-item:not(:disabled)")) {
+      menu.querySelector(".row-action-menu-item:not(:disabled)").focus();
+    }
+  }
+
+  function renderDeleteParentMenu(menu, entry, trigger) {
+    var descendants = descendantEntriesFor(entry);
+    var directChildren = directChildEntriesFor(entry);
+    var safeMode = isModelSafeModeActive();
+    var deleteAllClaimedEntry = firstRemotelyClaimedEntry([entry].concat(descendants));
+    var moveClaimedEntry = firstRemotelyClaimedEntry([entry].concat(directChildren));
+    var alternateParentCount = rootEntries().filter(function (candidate) {
+      return candidate.id !== entry.id;
+    }).length;
+    var heading = document.createElement("div");
+    var summary = document.createElement("div");
+    var deleteLabel = descendants.length
+      ? "Delete Parent + All " + formatNumber(descendants.length) + " Subnotes"
+      : "Delete Parent";
+    var deleteDisabledTitle = safeMode
+      ? "Review model issues before editing."
+      : (deleteAllClaimedEntry ? editClaimTitle(deleteAllClaimedEntry) : "");
+    var moveDisabledTitle = safeMode
+      ? "Review model issues before editing."
+      : (moveClaimedEntry
+        ? editClaimTitle(moveClaimedEntry)
+        : (!alternateParentCount ? "Create another parent before moving these subnotes." : ""));
+
+    clearElement(menu);
+    menu.classList.remove("is-division-picker");
+    menu.appendChild(createRowActionButton("Back", function () {
+      renderParentActionMenuContent(menu, entry, trigger);
+    }));
+
+    heading.className = "row-action-menu-heading";
+    heading.textContent = "Delete Parent " + (entry.key || "");
+    menu.appendChild(heading);
+
+    summary.className = "row-action-menu-summary";
+    summary.textContent = descendants.length
+      ? "Choose whether to delete every subnote or move them before deleting this parent."
+      : "This parent has no subnotes.";
+    menu.appendChild(summary);
+
+    menu.appendChild(createRowActionButton(deleteLabel, function () {
+      closeRowActionMenu(false);
+      deleteParentAndSubnotes(entry);
+    }, {
+      disabled: safeMode || Boolean(deleteAllClaimedEntry),
+      title: deleteDisabledTitle,
+      danger: true
+    }));
+
+    if (descendants.length) {
+      menu.appendChild(createRowActionButton("Move Subnotes to Another Parent", function () {
+        renderParentDestinationMenu(menu, entry, trigger, "deleteMove");
+      }, {
+        disabled: safeMode || Boolean(moveClaimedEntry) || !alternateParentCount,
+        title: moveDisabledTitle
+      }));
+    }
+
+    positionRowActionMenu(menu, trigger);
+    if (menu.querySelector(".row-action-menu-item:not(:disabled)")) {
+      menu.querySelector(".row-action-menu-item:not(:disabled)").focus();
+    }
+  }
+
+  function renderParentActionMenuContent(menu, entry, trigger) {
+    var safeMode = isModelSafeModeActive();
+    var claimed = isEntryRemotelyClaimed(entry);
+    var editingDisabled = safeMode || claimed;
+    var alternateParentCount = rootEntries().filter(function (candidate) {
+      return candidate.id !== entry.id;
+    }).length;
+    var disabledTitle = safeMode
+      ? "Review model issues before editing."
+      : (claimed ? editClaimTitle(entry) : "");
+
+    clearElement(menu);
+    menu.classList.remove("is-division-picker");
+    menu.appendChild(createRowActionButton("Copy Text", function () {
+      copyNoteText(entry);
+    }));
+    menu.appendChild(createRowActionButton("Demote to a Note", function () {
+      renderParentDestinationMenu(menu, entry, trigger, "demote");
+    }, {
+      disabled: editingDisabled || !alternateParentCount,
+      title: disabledTitle || (!alternateParentCount ? "Create another parent before demoting this parent." : "")
+    }));
+    menu.appendChild(createRowActionButton("Delete Parent", function () {
+      renderDeleteParentMenu(menu, entry, trigger);
+    }, { disabled: editingDisabled, title: disabledTitle, danger: true }));
+    positionRowActionMenu(menu, trigger);
+    if (menu.querySelector(".row-action-menu-item:not(:disabled)")) {
+      menu.querySelector(".row-action-menu-item:not(:disabled)").focus();
+    }
+  }
+
+  function openParentActionMenu(entry, trigger, showDeleteOptions) {
+    var menu;
+
+    if (!entry || trim(entry.parentKey)) {
+      return;
+    }
+    if (
+      activeRowActionMenu &&
+      activeRowActionMenu.entryId === entry.id &&
+      activeRowActionMenu.menuKind === "parent"
+    ) {
+      closeRowActionMenu(true);
+      return;
+    }
+
+    closeRowActionMenu(false);
+    menu = document.createElement("div");
+    menu.className = "row-action-menu";
+    menu.id = "parent-action-menu";
+    menu.setAttribute("role", "menu");
+    menu.setAttribute("aria-label", "Actions for parent " + (entry.key || "new parent"));
+    menu.addEventListener("click", function (event) {
+      event.stopPropagation();
+    });
+    document.body.appendChild(menu);
+    activeRowActionMenu = {
+      element: menu,
+      entryId: entry.id,
+      menuKind: "parent",
+      trigger: trigger
+    };
+    trigger.setAttribute("aria-expanded", "true");
+    trigger.setAttribute("aria-controls", menu.id);
+    if (showDeleteOptions) {
+      renderDeleteParentMenu(menu, entry, trigger);
+    } else {
+      renderParentActionMenuContent(menu, entry, trigger);
+    }
   }
 
   function placementModeLabel() {
@@ -1499,6 +2009,7 @@
       return;
     }
 
+    closeRowActionMenu(false);
     clearElement(body);
 
     if (!rows.length) {
@@ -1524,10 +2035,12 @@
       var entry = row.entry;
       var item = document.createElement("tr");
       var actionCell = document.createElement("td");
+      var actionWrap = document.createElement("div");
       var keyCell = document.createElement("td");
       var textCell = document.createElement("td");
       var keyWrap = document.createElement("div");
       var placeButton = document.createElement("button");
+      var menuButton = document.createElement("button");
       var treeControl;
       var keyInput = document.createElement("input");
       var textInput = document.createElement("textarea");
@@ -1559,6 +2072,7 @@
       item.style.setProperty("--depth", row.depth);
 
       actionCell.className = "note-cell note-action-cell";
+      actionWrap.className = "note-action-wrap";
       keyCell.className = "note-cell note-key-cell";
       textCell.className = "note-cell note-text-cell";
       keyWrap.className = "note-key-wrap";
@@ -1574,6 +2088,19 @@
         event.preventDefault();
         event.stopPropagation();
         placeKeynote(entry);
+      });
+
+      menuButton.type = "button";
+      menuButton.className = "note-more-button";
+      menuButton.appendChild(createEllipsisVerticalIcon());
+      menuButton.setAttribute("aria-label", "More actions for keynote " + (entry.key || "new keynote"));
+      menuButton.setAttribute("aria-haspopup", "menu");
+      menuButton.setAttribute("aria-expanded", "false");
+      menuButton.setAttribute("title", "More actions");
+      menuButton.addEventListener("click", function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        openRowActionMenu(entry, menuButton);
       });
 
       if (row.hasChildren) {
@@ -1651,7 +2178,9 @@
       keyWrap.appendChild(treeControl);
       keyWrap.appendChild(keyInput);
       appendPlacedKeyBadge(keyWrap, entry.key);
-      actionCell.appendChild(placeButton);
+      actionWrap.appendChild(placeButton);
+      actionWrap.appendChild(menuButton);
+      actionCell.appendChild(actionWrap);
       keyCell.appendChild(keyWrap);
       textCell.appendChild(textInput);
       item.appendChild(actionCell);
@@ -2231,7 +2760,7 @@
       if (
         active &&
         active.closest &&
-        active.closest(".note-table-body, .selected-division-card")
+        active.closest(".note-table-body, .selected-division-card, .row-action-menu")
       ) {
         return;
       }
@@ -2784,6 +3313,12 @@
     return isNaN(number) ? 0 : number;
   }
 
+  function nullableDbId(value) {
+    // Supabase assigns UUIDs to new rows; JSON null prevents a blank value from reaching a UUID cast.
+    var dbId = trim(value);
+    return dbId || null;
+  }
+
   function sortOrderFor(entry, fallbackIndex, baseEntry) {
     if (baseEntry && (baseEntry.sortOrder || baseEntry.sortOrder === 0)) {
       return Number(baseEntry.sortOrder);
@@ -2796,7 +3331,7 @@
 
   function makeDbUpsert(entry, baseEntry, index) {
     return {
-      dbId: text((baseEntry && baseEntry.dbId) || entry.dbId || ""),
+      dbId: nullableDbId((baseEntry && baseEntry.dbId) || entry.dbId),
       key: trim(entry.key),
       text: trim(entry.text),
       parentKey: trim(entry.parentKey),
@@ -2808,7 +3343,7 @@
 
   function makeDbDelete(baseEntry) {
     return {
-      dbId: text(baseEntry.dbId || ""),
+      dbId: nullableDbId(baseEntry.dbId),
       key: trim(baseEntry.key),
       baseVersion: numericVersion(baseEntry.rowVersion)
     };
@@ -3074,6 +3609,26 @@
     });
   }
 
+  function filePayloadDiffersFromSnapshot(payload, snapshot) {
+    var fileEntries = (payload && payload.entries) || [];
+    var snapshotEntries = (snapshot && snapshot.entries) || [];
+    var snapshotByKey;
+    var differs = false;
+
+    if (!snapshot || fileEntries.length !== snapshotEntries.length) {
+      return true;
+    }
+
+    snapshotByKey = indexEntriesByKey(snapshotEntries);
+    fileEntries.forEach(function (entry) {
+      var match = snapshotByKey[trim(entry.key)];
+      if (!match || !entryFieldsEqual(entry, match)) {
+        differs = true;
+      }
+    });
+    return differs;
+  }
+
   function attachSupabaseLibrary(payload, reason) {
     var db = dbManager();
     var settings = (payload && payload.supabase) || {};
@@ -3130,6 +3685,15 @@
       state.dbInitializing = false;
       state.dbReady = true;
       state.syncIssues = [];
+      if (filePayloadDiffersFromSnapshot(payload, snapshot)) {
+        syncSavedFileSnapshot(
+          db,
+          payload,
+          "Loaded shared keynote file.",
+          "Supabase mirror recovered from the shared keynote file."
+        );
+        return;
+      }
       applySnapshotMetadata(snapshot);
       subscribeToLibrary(snapshot);
       subscribeToEntries(snapshot);
@@ -3194,6 +3758,10 @@
 
   function isMissingSupabaseLibraryError(error) {
     return text(error && (error.message || error)).toLowerCase().indexOf("keynote library was not found") !== -1;
+  }
+
+  function isInvalidSupabaseUuidError(error) {
+    return text(error && (error.message || error)).toLowerCase().indexOf("invalid input syntax for type uuid") !== -1;
   }
 
   function applySupabaseSnapshotResult(result, fileMessage, suffix) {
@@ -3365,6 +3933,15 @@
           filePayload,
           fileMessage,
           "Supabase library was recreated from the saved file."
+        );
+        return;
+      }
+      if (isInvalidSupabaseUuidError(error)) {
+        syncSavedFileSnapshot(
+          db,
+          filePayload,
+          fileMessage,
+          "Supabase rejected a missing row ID, so the mirror was recovered from the saved file."
         );
         return;
       }
@@ -3713,12 +4290,23 @@
 
   function addNoteInSequence() {
     var selectedNote = selectedNoteEntry();
-    var parent = selectedSequenceParentEntry();
     var missingParentMessage = "Select a division or keynote row before adding a note in sequence.";
-    var parentKey;
 
-    if (selectedNote) {
-      parentKey = trim(selectedNote.parentKey);
+    if (!selectedNote) {
+      addNoteUnderParent(selectedDivisionEntry(), missingParentMessage);
+      return;
+    }
+
+    addNoteInSequenceForEntry(selectedNote);
+  }
+
+  function addNoteInSequenceForEntry(entry) {
+    var parentKey = trim(entry && entry.parentKey);
+    var parent = parentKey ? entriesByKey()[parentKey] || null : null;
+    var missingParentMessage = "Select a keynote with a parent before adding a note in sequence.";
+
+    if (entry) {
+      parentKey = trim(entry.parentKey);
       missingParentMessage = parentKey
         ? "Parent key '" + parentKey + "' was not found. Fix the parent before adding a note in sequence."
         : "Select a keynote with a parent before adding a note in sequence.";
@@ -3769,9 +4357,7 @@
     renderAll();
   }
 
-  function deleteSelected() {
-    var entry = actionTargetEntry();
-
+  function deleteEntry(entry) {
     if (!entry) {
       return;
     }
@@ -3808,6 +4394,216 @@
     markDirty();
     syncLocalEditClaims();
     renderAll();
+  }
+
+  function deleteSelected() {
+    var entry = actionTargetEntry();
+    var deleteButton = byId("delete-row");
+
+    if (entry && !trim(entry.parentKey) && deleteButton) {
+      openParentActionMenu(entry, deleteButton, true);
+      return;
+    }
+    deleteEntry(entry);
+  }
+
+  function moveNoteToDivision(entry, division) {
+    if (!entry || !division || trim(division.parentKey)) {
+      setStatus({ status: "error", message: "Select a valid division before moving this keynote." });
+      return;
+    }
+    if (blockForSafeMode("Moving keynotes")) {
+      return;
+    }
+    if (isEntryRemotelyClaimed(entry)) {
+      setStatus({ status: "warning", message: editClaimTitle(entry) || "This keynote is being edited by another user." });
+      renderAll();
+      return;
+    }
+    if (trim(entry.parentKey) === trim(division.key)) {
+      setStatus({
+        status: "ready",
+        message: "Keynote '" + (entry.key || "new keynote") + "' is already in division " + divisionTitle(division) + "."
+      });
+      return;
+    }
+
+    entry.parentKey = division.key;
+    setSelectionForEntry(entry);
+    markDirty();
+    syncLocalEditClaims();
+    renderAll();
+    setStatus({
+      status: "ready",
+      message: "Moved keynote '" + (entry.key || "new keynote") + "' to division " + divisionTitle(division) + "."
+    });
+  }
+
+  function promoteNoteToParent(entry) {
+    if (!entry || !trim(entry.parentKey)) {
+      setStatus({ status: "warning", message: "This keynote is already a parent." });
+      return;
+    }
+    if (blockForSafeMode("Promoting keynotes")) {
+      return;
+    }
+    if (isEntryRemotelyClaimed(entry)) {
+      setStatus({ status: "warning", message: editClaimTitle(entry) || "This keynote is being edited by another user." });
+      renderAll();
+      return;
+    }
+
+    entry.parentKey = "";
+    setSelectionForEntry(entry);
+    markDirty();
+    syncLocalEditClaims();
+    renderAll();
+    setStatus({
+      status: "ready",
+      message: "Promoted keynote '" + (entry.key || "new keynote") + "' to a parent."
+    });
+  }
+
+  function demoteParentToNote(entry, destination) {
+    if (!entry || trim(entry.parentKey) || !destination || trim(destination.parentKey) || entry.id === destination.id) {
+      setStatus({ status: "error", message: "Select another valid parent before demoting this parent." });
+      return;
+    }
+    if (blockForSafeMode("Demoting parents")) {
+      return;
+    }
+    if (isEntryRemotelyClaimed(entry)) {
+      setStatus({ status: "warning", message: editClaimTitle(entry) || "This parent is being edited by another user." });
+      renderAll();
+      return;
+    }
+
+    entry.parentKey = destination.key;
+    setSelectionForEntry(entry);
+    markDirty();
+    syncLocalEditClaims();
+    renderAll();
+    setStatus({
+      status: "ready",
+      message: "Demoted parent '" + (entry.key || "new parent") + "' to a note under parent " + divisionTitle(destination) + "."
+    });
+  }
+
+  function deleteParentAndSubnotes(entry) {
+    var entriesToDelete;
+    var claimedEntry;
+    var deleteIds = {};
+
+    if (!entry || trim(entry.parentKey)) {
+      return;
+    }
+    if (blockForSafeMode("Deleting parents")) {
+      return;
+    }
+
+    entriesToDelete = [entry].concat(descendantEntriesFor(entry));
+    claimedEntry = firstRemotelyClaimedEntry(entriesToDelete);
+    if (claimedEntry) {
+      setStatus({
+        status: "warning",
+        message: editClaimTitle(claimedEntry) || "A keynote in this parent is being edited by another user."
+      });
+      renderAll();
+      return;
+    }
+
+    entriesToDelete.forEach(function (candidate) {
+      deleteIds[candidate.id] = true;
+      delete state.collapsedEntryIds[candidate.id];
+    });
+    state.entries = state.entries.filter(function (candidate) {
+      return !deleteIds[candidate.id];
+    });
+    if (deleteIds[state.selectedDivisionId]) {
+      state.selectedDivisionId = null;
+    }
+    if (deleteIds[state.selectedNoteId]) {
+      state.selectedNoteId = null;
+    }
+    state.selectedId = state.selectedNoteId || state.selectedDivisionId;
+    ensureSelection();
+    markDirty();
+    syncLocalEditClaims();
+    renderAll();
+    setStatus({
+      status: "ready",
+      message: "Deleted parent '" + (entry.key || "new parent") + "' and " +
+        formatNumber(entriesToDelete.length - 1) + " subnote(s)."
+    });
+  }
+
+  function deleteParentAndMoveSubnotes(entry, destination) {
+    var directChildren;
+    var claimedEntry;
+
+    if (
+      !entry ||
+      trim(entry.parentKey) ||
+      !destination ||
+      trim(destination.parentKey) ||
+      entry.id === destination.id
+    ) {
+      setStatus({ status: "error", message: "Select another valid parent before moving these subnotes." });
+      return;
+    }
+    if (blockForSafeMode("Deleting parents")) {
+      return;
+    }
+
+    directChildren = directChildEntriesFor(entry);
+    claimedEntry = firstRemotelyClaimedEntry([entry].concat(directChildren));
+    if (claimedEntry) {
+      setStatus({
+        status: "warning",
+        message: editClaimTitle(claimedEntry) || "A keynote being moved is currently edited by another user."
+      });
+      renderAll();
+      return;
+    }
+
+    directChildren.forEach(function (child) {
+      child.parentKey = destination.key;
+    });
+    state.entries = state.entries.filter(function (candidate) {
+      return candidate.id !== entry.id;
+    });
+    delete state.collapsedEntryIds[entry.id];
+    setSelectionForEntry(destination);
+    markDirty();
+    syncLocalEditClaims();
+    renderAll();
+    setStatus({
+      status: "ready",
+      message: "Deleted parent '" + (entry.key || "new parent") + "' and moved its " +
+        formatNumber(directChildren.length) + " direct subnote(s) to parent " + divisionTitle(destination) + "."
+    });
+  }
+
+  function uppercaseNoteText(entry) {
+    var upperText;
+
+    if (!entry) {
+      return;
+    }
+    upperText = text(entry.text).toUpperCase();
+    if (upperText === entry.text) {
+      setStatus({
+        status: "ready",
+        message: "Text for keynote '" + (entry.key || "new keynote") + "' is already uppercase."
+      });
+      return;
+    }
+
+    updateEntryField(entry.id, "text", upperText, true);
+    setStatus({
+      status: "ready",
+      message: "Converted text for keynote '" + (entry.key || "new keynote") + "' to uppercase."
+    });
   }
 
   function refreshData() {
@@ -4170,8 +4966,40 @@
       });
     }
 
+    document.addEventListener("click", function () {
+      closeRowActionMenu(false);
+    });
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && activeRowActionMenu) {
+        event.preventDefault();
+        closeRowActionMenu(true);
+      }
+    });
+    globalScope.addEventListener("resize", function () {
+      closeRowActionMenu(false);
+    });
+    if (byId("notes-section-body")) {
+      byId("notes-section-body").addEventListener("scroll", function () {
+        closeRowActionMenu(false);
+      });
+    }
+    if (document.querySelector(".division-list-wrap")) {
+      document.querySelector(".division-list-wrap").addEventListener("scroll", function () {
+        closeRowActionMenu(false);
+      });
+    }
+
     bindDivisionInput("division-key-input", "key");
     bindDivisionInput("division-text-input", "text");
+
+    bindClick("division-more-button", function (event) {
+      var entry = selectedDivisionEntry();
+      if (entry) {
+        event.preventDefault();
+        event.stopPropagation();
+        openParentActionMenu(entry, byId("division-more-button"), false);
+      }
+    });
 
     bindClick("add-root", addRoot);
     bindClick("add-sequence", addNoteInSequence);

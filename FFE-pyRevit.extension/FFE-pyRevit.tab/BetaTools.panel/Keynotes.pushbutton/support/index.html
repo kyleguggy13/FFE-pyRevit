@@ -26,7 +26,7 @@
       <header class="title-card">
         <div class="brand-copy">
           <p class="eyebrow">FFE-PYREVIT v1.13.1</p>
-          <h1>KEYNOTE MANAGER v0.14</h1>
+          <h1>KEYNOTE MANAGER v0.16</h1>
           <p class="meta-line">
             <span id="doc-title">Waiting for Revit document</span>
             <span id="dirty-state" data-dirty="false">NO CHANGES</span>
@@ -227,6 +227,33 @@
               <span class="sr-only">Division description</span>
               <input id="division-text-input" type="text" autocomplete="off" disabled />
             </label>
+            <button
+              id="division-more-button"
+              class="division-more-button division-header-more-button"
+              type="button"
+              aria-label="More actions for selected parent"
+              aria-haspopup="menu"
+              aria-expanded="false"
+              title="More parent actions"
+              disabled
+            >
+              <svg
+                class="lucide lucide-ellipsis-vertical"
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                focusable="false"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="5" r="1"></circle>
+                <circle cx="12" cy="12" r="1"></circle>
+                <circle cx="12" cy="19" r="1"></circle>
+              </svg>
+            </button>
           </div>
 
           <div id="notes-section-body" class="table-responsive note-table-shell">
@@ -238,7 +265,7 @@
               </colgroup>
               <thead id="notes-title" class="note-table-header">
                 <tr>
-                  <th scope="col" aria-label="Place user keynote"></th>
+                  <th scope="col" aria-label="Place keynote and row actions"></th>
                   <th scope="col">Key</th>
                   <th scope="col">Description</th>
                 </tr>

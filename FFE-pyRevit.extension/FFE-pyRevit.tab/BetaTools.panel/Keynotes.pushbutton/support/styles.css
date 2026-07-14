@@ -666,6 +666,7 @@ h2 {
   border-color: var(--divider-soft);
   background: var(--page-3);
   color: var(--ink-1);
+  cursor: pointer;
   text-align: left;
 }
 
@@ -762,6 +763,13 @@ h2 {
   box-shadow: inset 0 0 0 1px rgba(45, 82, 120, 0.14);
 }
 
+.division-row-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
 .division-row.list-group-item.active .division-note-badge,
 .division-row.list-group-item.is-selected .division-note-badge {
   background: var(--page-3);
@@ -841,7 +849,7 @@ h2 {
   min-height: 46px;
   position: relative;
   display: grid;
-  grid-template-columns: 8px auto minmax(54px, 96px) minmax(0, 1fr);
+  grid-template-columns: 8px auto minmax(54px, 96px) minmax(0, 1fr) 28px;
   align-items: center;
   gap: 7px;
   padding: 5px 8px;
@@ -1041,7 +1049,7 @@ h2 {
 }
 
 .note-action-col {
-  width: 36px;
+  width: 64px;
 }
 
 .note-key-col {
@@ -1131,6 +1139,13 @@ h2 {
   vertical-align: middle;
 }
 
+.note-action-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+}
+
 .note-key-cell {
   position: relative;
   border-right: 1px solid var(--divider-soft);
@@ -1204,7 +1219,9 @@ h2 {
   background: var(--accent-wash);
 }
 
-.note-place-button {
+.note-place-button,
+.note-more-button,
+.division-more-button {
   width: 28px;
   min-width: 28px;
   height: 28px;
@@ -1219,24 +1236,129 @@ h2 {
   line-height: 1;
 }
 
+.note-more-button,
+.division-more-button {
+  color: var(--ink-2);
+}
+
+.note-more-button svg,
+.division-more-button svg {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+}
+
 .note-place-button svg {
   width: 15px;
   height: 15px;
 }
 
 .note-place-button:hover,
-.note-place-button:focus-visible {
+.note-place-button:focus-visible,
+.note-more-button:hover,
+.note-more-button:focus-visible,
+.division-more-button:hover,
+.division-more-button:focus-visible {
   outline: none;
   background: var(--accent-wash);
 }
 
-.note-place-button:focus-visible {
+.note-place-button:focus-visible,
+.note-more-button:focus-visible,
+.division-more-button:focus-visible {
   outline: 2px solid rgba(82, 108, 165, 0.26);
   outline-offset: 1px;
 }
 
+.division-more-button:disabled {
+  color: var(--ink-3);
+  opacity: 0.55;
+}
+
 .note-place-button.needs-save {
   color: var(--ink-3);
+}
+
+.row-action-menu {
+  width: 200px;
+  max-height: min(360px, calc(100vh - 16px));
+  position: fixed;
+  z-index: 40;
+  display: grid;
+  align-content: start;
+  overflow-y: auto;
+  padding: 5px;
+  border: 1px solid var(--divider-soft);
+  border-radius: var(--r-md);
+  background: var(--page-3);
+  box-shadow: 0 12px 30px rgba(4, 26, 51, 0.18);
+}
+
+.row-action-menu-item {
+  appearance: none;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-1);
+  font-size: var(--t-em-sm);
+  line-height: var(--lh-base);
+  text-align: left;
+}
+
+.row-action-menu-item:hover,
+.row-action-menu-item:focus-visible {
+  outline: none;
+  background: var(--accent-wash);
+}
+
+.row-action-menu-item:focus-visible {
+  box-shadow: inset 0 0 0 2px rgba(82, 108, 165, 0.26);
+}
+
+.row-action-menu-item:disabled {
+  background: transparent;
+  color: var(--ink-3);
+  cursor: not-allowed;
+}
+
+.row-action-menu-item.is-danger:not(:disabled) {
+  color: var(--negative);
+}
+
+.row-action-menu-heading,
+.row-action-menu-empty {
+  padding: 7px 9px 5px;
+  color: var(--ink-2);
+  font-size: var(--t-em-xs);
+  font-weight: var(--w-semibold);
+  letter-spacing: 0.04em;
+  line-height: var(--lh-base);
+  text-transform: uppercase;
+}
+
+.row-action-menu-empty {
+  color: var(--ink-3);
+  font-weight: var(--w-regular);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.row-action-menu-summary {
+  padding: 4px 9px 8px;
+  color: var(--ink-2);
+  font-size: var(--t-em-xs);
+  line-height: var(--lh-base);
+}
+
+.clipboard-copy-source {
+  position: fixed;
+  top: -1000px;
+  left: -1000px;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .note-row.is-parent-row .note-key-input {

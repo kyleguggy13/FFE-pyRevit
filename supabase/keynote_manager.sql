@@ -530,7 +530,7 @@ begin
       values (
         v_library_id,
         btrim(coalesce(v_claim."claimKey", '')),
-        nullif(v_claim."dbId", '')::uuid,
+        nullif(btrim(v_claim."dbId"), '')::uuid,
         btrim(coalesce(v_claim.key, '')),
         p_client_id,
         coalesce(p_client_name, '')
@@ -707,6 +707,8 @@ begin
     );
   end if;
 
+  -- PostgreSQL does not guarantee boolean short-circuit evaluation, so blank
+  -- database row IDs must become NULL before any UUID cast is evaluated.
   for v_item in
     select *
     from jsonb_to_recordset(coalesce(p_changes -> 'deletes', '[]'::jsonb))
@@ -717,7 +719,7 @@ begin
     from public.keynote_entries
     where library_id = v_library.id
       and (
-        (coalesce(v_item."dbId", '') <> '' and id = v_item."dbId"::uuid)
+        (coalesce(v_item."dbId", '') <> '' and id = nullif(btrim(v_item."dbId"), '')::uuid)
         or (coalesce(v_item."dbId", '') = '' and keynote_key = coalesce(v_item.key, ''))
       )
     for update;
@@ -751,7 +753,7 @@ begin
     from public.keynote_entries
     where library_id = v_library.id
       and (
-        (coalesce(v_item."dbId", '') <> '' and id = v_item."dbId"::uuid)
+        (coalesce(v_item."dbId", '') <> '' and id = nullif(btrim(v_item."dbId"), '')::uuid)
         or (
           coalesce(v_item."dbId", '') = ''
           and coalesce(v_item."previousKey", '') <> ''
@@ -832,14 +834,14 @@ begin
         updated_by_client_name = coalesce(p_client_name, '')
     where library_id = v_library.id
       and (
-        (coalesce(v_item."dbId", '') <> '' and id = v_item."dbId"::uuid)
+        (coalesce(v_item."dbId", '') <> '' and id = nullif(btrim(v_item."dbId"), '')::uuid)
         or (coalesce(v_item."dbId", '') = '' and keynote_key = coalesce(v_item.key, ''))
       );
 
     delete from public.keynote_entries
     where library_id = v_library.id
       and (
-        (coalesce(v_item."dbId", '') <> '' and id = v_item."dbId"::uuid)
+        (coalesce(v_item."dbId", '') <> '' and id = nullif(btrim(v_item."dbId"), '')::uuid)
         or (coalesce(v_item."dbId", '') = '' and keynote_key = coalesce(v_item.key, ''))
       );
     if found then
@@ -862,7 +864,7 @@ begin
         updated_by_client_name = coalesce(p_client_name, '')
     where library_id = v_library.id
       and (
-        (coalesce(v_item."dbId", '') <> '' and id = v_item."dbId"::uuid)
+        (coalesce(v_item."dbId", '') <> '' and id = nullif(btrim(v_item."dbId"), '')::uuid)
         or (
           coalesce(v_item."dbId", '') = ''
           and coalesce(v_item."previousKey", '') <> ''

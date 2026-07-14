@@ -59,6 +59,21 @@ Select a division, then edit rows directly in the keynote table.
 
 Each row has a keynote key and description. Child keynotes are shown in a tree under their parent. Use the expand and collapse controls in the key column to show or hide child rows.
 
+Use the ellipsis button in a keynote row for actions that apply directly to that row:
+
+- `Copy Text` copies the keynote description to the clipboard.
+- `Delete Note` removes the note when it has no child keynotes.
+- `Move Note to Division` reparents the note under the selected top-level division. Any children of the moved note remain attached to it.
+- `Promote to Parent` makes the note a new top-level parent. Any children of the promoted note remain attached to it.
+- `Add Note in Sequence` creates a new note under the same parent.
+- `UPPER CASE` converts the keynote description to uppercase.
+
+Each parent also has an ellipsis menu in the Divisions list and selected-parent header:
+
+- `Copy Text` copies the parent description.
+- `Demote to a Note` moves the parent under another top-level parent while retaining its subnotes.
+- `Delete Parent` asks whether its complete subnote tree should also be deleted or moved to another parent. Moving reparents the direct subnotes so their nested descendants remain attached.
+
 The selected division header shows the current division key and description. Division descriptions can be edited there. Division keys are protected during normal editing; if key editing is enabled in your version, use extra care because changing keys can affect existing placed references.
 
 Edits are not written to the keynote file until you click `Save`.

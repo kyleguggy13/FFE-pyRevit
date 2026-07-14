@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 __title__ = "FFE-Keynotes"
-__version__ = "v0.14"
+__version__ = "v0.16"
 __persistentengine__ = True
 __min_revit_ver__ = 2026
-__doc__ = """Version = v0.14
-Date    = 07.10.2026
+__doc__ = """Version = v0.16
+Date    = 07.14.2026
 __________________________________________________________________
 Description:
 Persistent WebView2 keynote manager for the active Revit document's
@@ -30,6 +30,8 @@ Last update:
 - [06.10.2026] - v0.12 Added placement filter and collapsible division panel.
 - [06.12.2026] - v0.13 Added automatic model health scan and Safe Mode.
 - [07.10.2026] - v0.14 Added per-keynote family type/text file conflict resolution in Safe Mode.
+- [07.14.2026] - v0.15 Added per-row ellipsis actions for copying, deleting, moving, sequencing, and uppercasing notes.
+- [07.14.2026] - v0.16 Added note promotion and parent menus with safe demotion and subnote-aware deletion.
 __________________________________________________________________
 Author: Kyle Guggenheim"""
 
@@ -39,7 +41,6 @@ TODO:
 - Select placed keynote icon and display list of sheets/views where it is placed.
 - Add realtime updates when a keynote is added or removed.
 - Figure out how to work around Keynote's workset.
-- Add a ellipsis menu to each row for additional actions like "Copy Key", "Copy Text", "Delete Row", "Move Row to Division".
 
 
 Key behaviors:
@@ -53,6 +54,8 @@ Key behaviors:
   the old key are updated to the new key.
 - Places saved rows as either Revit User Keynotes or FFE_Symbol_Keynote Generic
   Annotations.
+- Provides row-specific utility actions without changing the selected keynote first.
+- Supports promoting notes to parents and demoting parents while preserving their descendant hierarchy.
 
 Revit API notes:
 - Targets Revit 2026.
@@ -131,7 +134,7 @@ PATH_SUPPORT = os.path.join(PATH_SCRIPT, "support")
 PATH_INDEX = os.path.join(PATH_SUPPORT, "index.html")
 
 APP_NAME = "FFE Keynote Manager"
-APP_VERSION = "v0.14"
+APP_VERSION = "v0.16"
 LOCAL_APP_NAME = "KeynoteManager"
 GENERIC_KEYNOTE_FAMILY_NAME = "FFE_Symbol_Keynote (Type)"
 GENERIC_KEYNOTE_NUMBER_PARAMETER = "Number"
