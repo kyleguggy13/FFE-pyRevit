@@ -71,7 +71,14 @@ create table if not exists public.keynote_edit_claims (
 create index if not exists keynote_edit_claims_library_client_idx
   on public.keynote_edit_claims (library_id, client_id);
 
-create table if not exists public.keynote_analytics_runs (
+-- Analytics stores only the latest collected state. These legacy tables held
+-- append-only runs and replace-all current rows, so they are intentionally
+-- removed once when this schema is upgraded. Rerunning the schema is safe
+-- because the replacement tables below are not dropped.
+drop table if exists public.keynote_analytics_current cascade;
+drop table if exists public.keynote_analytics_runs cascade;
+
+create table if not exists public.keynote_analytics_documents (
   id uuid primary key default gen_random_uuid(),
   library_id uuid not null references public.keynote_libraries(id) on delete cascade,
   document_key text not null,
@@ -94,37 +101,16 @@ create table if not exists public.keynote_analytics_runs (
   collected_by_client_name text not null default '',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  constraint keynote_analytics_runs_document_key_not_empty check (btrim(document_key) <> '')
+  constraint keynote_analytics_documents_document_key_not_empty check (btrim(document_key) <> ''),
+  constraint keynote_analytics_documents_library_document_unique unique (library_id, document_key)
 );
 
-create index if not exists keynote_analytics_runs_library_document_idx
-  on public.keynote_analytics_runs (library_id, document_key, created_at desc);
+create index if not exists keynote_analytics_documents_library_updated_idx
+  on public.keynote_analytics_documents (library_id, updated_at desc, document_key);
 
-alter table public.keynote_analytics_runs
-  add column if not exists document_title text not null default '',
-  add column if not exists document_path text not null default '';
-
-update public.keynote_libraries l
-set document_title = coalesce(r.document_title, ''),
-    document_path = coalesce(r.document_path, '')
-from (
-  select distinct on (library_id)
-    library_id,
-    document_title,
-    document_path
-  from public.keynote_analytics_runs
-  order by library_id, created_at desc, id desc
-) r
-where l.id = r.library_id
-  and (
-    coalesce(l.document_title, '') = ''
-    or coalesce(l.document_path, '') = ''
-  );
-
-create table if not exists public.keynote_analytics_current (
+create table if not exists public.keynote_analytics_keynotes (
   id uuid primary key default gen_random_uuid(),
-  library_id uuid not null references public.keynote_libraries(id) on delete cascade,
-  document_key text not null,
+  analytics_document_id uuid not null references public.keynote_analytics_documents(id) on delete cascade,
   keynote_key text not null,
   keynote_text text not null default '',
   parent_key text not null default '',
@@ -136,16 +122,14 @@ create table if not exists public.keynote_analytics_current (
   sheet_count integer not null default 0,
   unsheeted_count integer not null default 0,
   sheets jsonb not null default '[]'::jsonb,
-  source_run_id uuid references public.keynote_analytics_runs(id) on delete set null,
-  updated_at timestamptz not null default now(),
   created_at timestamptz not null default now(),
-  constraint keynote_analytics_current_key_not_empty check (btrim(keynote_key) <> ''),
-  constraint keynote_analytics_current_document_key_not_empty check (btrim(document_key) <> ''),
-  constraint keynote_analytics_current_library_document_key_unique unique (library_id, document_key, keynote_key)
+  updated_at timestamptz not null default now(),
+  constraint keynote_analytics_keynotes_key_not_empty check (btrim(keynote_key) <> ''),
+  constraint keynote_analytics_keynotes_document_key_unique unique (analytics_document_id, keynote_key)
 );
 
-create index if not exists keynote_analytics_current_library_document_idx
-  on public.keynote_analytics_current (library_id, document_key, placed, keynote_key);
+create index if not exists keynote_analytics_keynotes_document_placed_idx
+  on public.keynote_analytics_keynotes (analytics_document_id, placed, keynote_key);
 
 create or replace function public.touch_keynote_updated_at()
 returns trigger
@@ -172,14 +156,14 @@ create trigger touch_keynote_edit_claims_updated_at
 before update on public.keynote_edit_claims
 for each row execute function public.touch_keynote_updated_at();
 
-drop trigger if exists touch_keynote_analytics_runs_updated_at on public.keynote_analytics_runs;
-create trigger touch_keynote_analytics_runs_updated_at
-before update on public.keynote_analytics_runs
+drop trigger if exists touch_keynote_analytics_documents_updated_at on public.keynote_analytics_documents;
+create trigger touch_keynote_analytics_documents_updated_at
+before update on public.keynote_analytics_documents
 for each row execute function public.touch_keynote_updated_at();
 
-drop trigger if exists touch_keynote_analytics_current_updated_at on public.keynote_analytics_current;
-create trigger touch_keynote_analytics_current_updated_at
-before update on public.keynote_analytics_current
+drop trigger if exists touch_keynote_analytics_keynotes_updated_at on public.keynote_analytics_keynotes;
+create trigger touch_keynote_analytics_keynotes_updated_at
+before update on public.keynote_analytics_keynotes
 for each row execute function public.touch_keynote_updated_at();
 
 create or replace function public.build_keynote_snapshot(p_library_id uuid)
@@ -968,9 +952,10 @@ set search_path = public
 as $$
 declare
   v_library_id uuid;
-  v_run_id uuid;
+  v_analytics_document_id uuid;
   v_item record;
   v_summary jsonb := coalesce(p_summary, '{}'::jsonb);
+  v_seen_keys text[] := array[]::text[];
   v_key text;
   v_keynote_text text;
   v_parent_key text;
@@ -983,6 +968,7 @@ declare
   v_unsheeted_count integer;
   v_sheets jsonb;
   v_synced_count integer := 0;
+  v_deleted_count integer := 0;
 begin
   if btrim(coalesce(p_library_key, '')) = '' then
     raise exception 'Library key is required.';
@@ -1001,7 +987,7 @@ begin
     raise exception 'Keynote library was not found.';
   end if;
 
-  insert into public.keynote_analytics_runs (
+  insert into public.keynote_analytics_documents (
     library_id,
     document_key,
     document_title,
@@ -1043,16 +1029,38 @@ begin
     coalesce(p_client_id, ''),
     coalesce(p_client_name, '')
   )
-  returning id into v_run_id;
+  on conflict (library_id, document_key) do update
+  set document_title = excluded.document_title,
+      document_path = excluded.document_path,
+      central_path = excluded.central_path,
+      document_key_source = excluded.document_key_source,
+      entry_count = excluded.entry_count,
+      analytics_row_count = excluded.analytics_row_count,
+      placed_key_count = excluded.placed_key_count,
+      placed_count = excluded.placed_count,
+      user_keynote_count = excluded.user_keynote_count,
+      generic_annotation_count = excluded.generic_annotation_count,
+      sheet_count = excluded.sheet_count,
+      unsheeted_count = excluded.unsheeted_count,
+      orphan_key_count = excluded.orphan_key_count,
+      skipped_count = excluded.skipped_count,
+      client_collected_at = excluded.client_collected_at,
+      collected_by_client_id = excluded.collected_by_client_id,
+      collected_by_client_name = excluded.collected_by_client_name
+  returning id into v_analytics_document_id;
+
+  -- The upsert locks this document row until the transaction completes. This
+  -- explicit lock documents and enforces the serialization boundary for the
+  -- child-row upserts and stale-row cleanup that follow.
+  perform 1
+  from public.keynote_analytics_documents
+  where id = v_analytics_document_id
+  for update;
 
   update public.keynote_libraries
   set document_title = coalesce(p_document_title, ''),
       document_path = coalesce(p_document_path, '')
   where id = v_library_id;
-
-  delete from public.keynote_analytics_current
-  where library_id = v_library_id
-    and document_key = btrim(coalesce(p_document_key, ''));
 
   for v_item in
     select value as data
@@ -1061,6 +1069,10 @@ begin
     v_key := btrim(coalesce(v_item.data ->> 'keynoteKey', ''));
     if v_key = '' then
       continue;
+    end if;
+
+    if not (v_key = any(v_seen_keys)) then
+      v_seen_keys := array_append(v_seen_keys, v_key);
     end if;
 
     v_keynote_text := btrim(coalesce(v_item.data ->> 'keynoteText', ''));
@@ -1077,9 +1089,8 @@ begin
       v_sheets := '[]'::jsonb;
     end if;
 
-    insert into public.keynote_analytics_current (
-      library_id,
-      document_key,
+    insert into public.keynote_analytics_keynotes (
+      analytics_document_id,
       keynote_key,
       keynote_text,
       parent_key,
@@ -1090,12 +1101,10 @@ begin
       generic_annotation_count,
       sheet_count,
       unsheeted_count,
-      sheets,
-      source_run_id
+      sheets
     )
     values (
-      v_library_id,
-      btrim(coalesce(p_document_key, '')),
+      v_analytics_document_id,
       v_key,
       v_keynote_text,
       v_parent_key,
@@ -1106,10 +1115,9 @@ begin
       v_generic_annotation_count,
       v_sheet_count,
       v_unsheeted_count,
-      v_sheets,
-      v_run_id
+      v_sheets
     )
-    on conflict (library_id, document_key, keynote_key) do update
+    on conflict (analytics_document_id, keynote_key) do update
     set keynote_text = excluded.keynote_text,
         parent_key = excluded.parent_key,
         in_library = excluded.in_library,
@@ -1119,17 +1127,24 @@ begin
         generic_annotation_count = excluded.generic_annotation_count,
         sheet_count = excluded.sheet_count,
         unsheeted_count = excluded.unsheeted_count,
-        sheets = excluded.sheets,
-        source_run_id = excluded.source_run_id;
+        sheets = excluded.sheets;
 
     v_synced_count := v_synced_count + 1;
   end loop;
 
+  delete from public.keynote_analytics_keynotes
+  where analytics_document_id = v_analytics_document_id
+    and not (keynote_key = any(v_seen_keys));
+
+  get diagnostics v_deleted_count = row_count;
+
   return jsonb_build_object(
     'status', 'ready',
-    'message', 'Synced keynote analytics to Supabase.',
-    'runId', v_run_id::text,
+    'message', 'Updated keynote analytics in Supabase.',
+    'analyticsDocumentId', v_analytics_document_id::text,
     'entryCount', v_synced_count,
+    'updatedRowCount', v_synced_count,
+    'deletedRowCount', v_deleted_count,
     'libraryId', v_library_id::text,
     'documentKey', btrim(coalesce(p_document_key, ''))
   );
@@ -1139,8 +1154,8 @@ $$;
 alter table public.keynote_libraries enable row level security;
 alter table public.keynote_entries enable row level security;
 alter table public.keynote_edit_claims enable row level security;
-alter table public.keynote_analytics_runs enable row level security;
-alter table public.keynote_analytics_current enable row level security;
+alter table public.keynote_analytics_documents enable row level security;
+alter table public.keynote_analytics_keynotes enable row level security;
 
 drop policy if exists "anon can read keynote libraries" on public.keynote_libraries;
 create policy "anon can read keynote libraries"
@@ -1163,16 +1178,16 @@ for select
 to anon, authenticated
 using (true);
 
-drop policy if exists "anon can read keynote analytics runs" on public.keynote_analytics_runs;
-create policy "anon can read keynote analytics runs"
-on public.keynote_analytics_runs
+drop policy if exists "anon can read keynote analytics documents" on public.keynote_analytics_documents;
+create policy "anon can read keynote analytics documents"
+on public.keynote_analytics_documents
 for select
 to anon, authenticated
 using (true);
 
-drop policy if exists "anon can read keynote analytics current" on public.keynote_analytics_current;
-create policy "anon can read keynote analytics current"
-on public.keynote_analytics_current
+drop policy if exists "anon can read keynote analytics keynotes" on public.keynote_analytics_keynotes;
+create policy "anon can read keynote analytics keynotes"
+on public.keynote_analytics_keynotes
 for select
 to anon, authenticated
 using (true);
@@ -1180,13 +1195,13 @@ using (true);
 revoke all on public.keynote_libraries from anon, authenticated;
 revoke all on public.keynote_entries from anon, authenticated;
 revoke all on public.keynote_edit_claims from anon, authenticated;
-revoke all on public.keynote_analytics_runs from anon, authenticated;
-revoke all on public.keynote_analytics_current from anon, authenticated;
+revoke all on public.keynote_analytics_documents from anon, authenticated;
+revoke all on public.keynote_analytics_keynotes from anon, authenticated;
 grant select on public.keynote_libraries to anon, authenticated;
 grant select on public.keynote_entries to anon, authenticated;
 grant select on public.keynote_edit_claims to anon, authenticated;
-grant select on public.keynote_analytics_runs to anon, authenticated;
-grant select on public.keynote_analytics_current to anon, authenticated;
+grant select on public.keynote_analytics_documents to anon, authenticated;
+grant select on public.keynote_analytics_keynotes to anon, authenticated;
 
 revoke execute on function public.build_keynote_snapshot(uuid) from public;
 revoke execute on function public.build_keynote_snapshot_metadata(uuid) from public;

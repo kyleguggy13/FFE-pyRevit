@@ -252,10 +252,27 @@ def get_client_name():
     return "Unknown User"
 
 
+def looks_like_uri_path(path):
+    value = safe_str(path).strip()
+    marker_index = value.find("://")
+    if marker_index <= 0:
+        return False
+
+    prefix = value[:marker_index]
+    return "/" not in prefix and "\\" not in prefix
+
+
 def normalize_path(path):
-    value = safe_str(path)
+    value = safe_str(path).strip()
     if not value:
         return ""
+
+    # Revit returns cloud resources as URI-like display paths such as
+    # "Autodesk Docs://Project/Model.rvt". os.path.abspath treats those as
+    # relative filesystem paths and incorrectly prefixes the process cwd.
+    if looks_like_uri_path(value):
+        return value
+
     try:
         return os.path.normcase(os.path.abspath(value))
     except:

@@ -103,6 +103,8 @@ Click `Collect Analytics` to scan the active Revit document for keynote placemen
 
 Use this before reviewing unused keynotes, especially after other users have added or removed keynote annotations.
 
+Supabase stores only the latest collected analytics for each keynote library and Revit document. Collecting again updates the existing document summary and keynote rows in place; it does not create a historical analytics run.
+
 ## Warnings and Common Issues
 
 The manager validates the keynote file before saving. Common warnings and errors include:
