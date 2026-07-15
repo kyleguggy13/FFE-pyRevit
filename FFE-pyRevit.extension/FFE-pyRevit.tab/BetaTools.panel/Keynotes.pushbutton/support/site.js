@@ -1438,7 +1438,10 @@
 
     options = options || {};
     button.type = "button";
-    button.className = "row-action-menu-item" + (options.danger ? " is-danger" : "");
+    button.className = 
+    "row-action-menu-item" + 
+    (options.danger ? " is-danger" : "") + 
+    (options.addition ? " is-addition" : "");
     button.textContent = label;
     button.setAttribute("role", "menuitem");
     button.disabled = Boolean(options.disabled);
@@ -1583,7 +1586,7 @@
     menu.appendChild(createRowActionButton("Add Note in Sequence", function () {
       closeRowActionMenu(false);
       addNoteInSequenceForEntry(entry);
-    }, { disabled: sequenceDisabled, title: sequenceDisabledTitle }));
+    }, { disabled: sequenceDisabled, title: sequenceDisabledTitle, addition: true }));
     menu.appendChild(createRowActionButton("UPPER CASE", function () {
       closeRowActionMenu(false);
       uppercaseNoteText(entry);
