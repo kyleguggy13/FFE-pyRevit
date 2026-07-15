@@ -1084,6 +1084,7 @@ def make_empty_model_health(status="notScanned", message="Model health has not b
         "unsheetedCount": 0,
         "skippedCount": 0,
         "placedKeyMap": {},
+        "placedKeynotes": [],
         "issues": [],
     }
 
@@ -2097,6 +2098,7 @@ def make_keynote_analytics_row(key, entry):
         "sheetCount": 0,
         "unsheetedCount": 0,
         "elementIds": [],
+        "placements": [],
         "sheets": [],
         "_elementIdMap": {},
         "_sheetMap": {},
@@ -2172,12 +2174,18 @@ def record_keynote_analytics_placement(rows_by_key, entry_by_key, key, source_ty
     elif source_type == "genericAnnotation":
         row["genericAnnotationCount"] += 1
 
+    sheet_infos, view_info = get_element_sheet_infos(target_doc, element, view_sheet_lookup)
     element_id = safe_str(get_element_id_key(element)).strip()
     if element_id and element_id not in row["_elementIdMap"]:
         row["_elementIdMap"][element_id] = True
         row["elementIds"].append(element_id)
+        row["placements"].append({
+            "elementId": element_id,
+            "sourceType": source_type,
+            "view": view_info or {},
+            "sheets": sheet_infos or [],
+        })
 
-    sheet_infos, view_info = get_element_sheet_infos(target_doc, element, view_sheet_lookup)
     if sheet_infos:
         for sheet_info in sheet_infos:
             record_sheet_analytics(row, sheet_info, source_type, view_info)
@@ -2653,6 +2661,11 @@ def build_model_health_from_analytics(target_doc, keynote_payload, analytics):
         "unsheetedCount": int(analytics.get("unsheetedCount") or 0),
         "skippedCount": int(analytics.get("skippedCount") or 0),
         "placedKeyMap": analytics.get("placedKeyMap") or {},
+        "placedKeynotes": [
+            row
+            for row in analytics.get("analyticsRows") or []
+            if row.get("placed")
+        ],
         "issues": issues,
     })
     health["signature"] = make_model_health_signature(analytics, issues, keynote_payload)

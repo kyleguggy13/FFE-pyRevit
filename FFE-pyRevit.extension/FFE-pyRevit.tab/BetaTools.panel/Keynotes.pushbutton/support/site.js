@@ -33,6 +33,8 @@
     lastAnalyticsResult: null,
     modelHealth: null,
     modelIssuesOpen: false,
+    placedKeynotesOpen: false,
+    placedKeynoteFocusKey: "",
     reviewedModelHealthSignature: "",
     modelIssueResolutions: {},
     remotePending: false,
@@ -215,6 +217,27 @@
       unsheetedCount: Number(value.unsheetedCount || 0),
       skippedCount: Number(value.skippedCount || 0),
       placedKeyMap: normalizeSheetVisibleKeynotes(value.placedKeyMap || {}),
+      placedKeynotes: (value.placedKeynotes || []).map(function (row) {
+        return {
+          key: trim(row.keynoteKey || row.key),
+          text: trim(row.keynoteText || row.text),
+          placedCount: Number(row.placedCount || 0),
+          userKeynoteCount: Number(row.userKeynoteCount || 0),
+          genericAnnotationCount: Number(row.genericAnnotationCount || 0),
+          sheetCount: Number(row.sheetCount || 0),
+          unsheetedCount: Number(row.unsheetedCount || 0),
+          elementIds: (row.elementIds || []).map(text).filter(Boolean),
+          placements: (row.placements || []).map(function (placement) {
+            return {
+              elementId: text(placement.elementId),
+              sourceType: text(placement.sourceType),
+              view: placement.view || {},
+              sheets: placement.sheets || []
+            };
+          }),
+          sheets: row.sheets || []
+        };
+      }),
       issues: (value.issues || []).map(function (issue) {
         return {
           severity: text(issue.severity || "warning"),
@@ -357,12 +380,27 @@
     badge.setAttribute("class", "sheet-visible-marker");
     badge.setAttribute("viewBox", "0 0 16 16");
     badge.setAttribute("fill", "currentColor");
-    badge.setAttribute("focusable", "false");
-    badge.setAttribute("role", "img");
-    badge.setAttribute("aria-label", "Placed keynote annotation");
-    badge.setAttribute("title", "Placed keynote annotation");
+    badge.setAttribute("focusable", "true");
+    badge.setAttribute("tabindex", "0");
+    badge.setAttribute("role", "button");
+    badge.setAttribute("aria-controls", "placed-keynotes-panel");
+    badge.setAttribute("aria-label", "View placed keynote element IDs for " + trim(key));
+    badge.setAttribute("title", "View placed keynote element IDs");
     path.setAttribute("d", "M4 0h5.293A1 1 0 0 1 10 .293L13.707 4a1 1 0 0 1 .293.707V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2m5.5 1.5v2a1 1 0 0 0 1 1h2z");
     badge.appendChild(path);
+    badge.addEventListener("click", function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      setPlacedKeynotesOpen(true, key);
+    });
+    badge.addEventListener("keydown", function (event) {
+      if (event.key !== "Enter" && event.key !== " " && event.key !== "Spacebar") {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      setPlacedKeynotesOpen(true, key);
+    });
     return badge;
   }
 
@@ -2590,7 +2628,118 @@
 
   function setModelIssuesOpen(isOpen) {
     state.modelIssuesOpen = Boolean(isOpen);
+    if (state.modelIssuesOpen) {
+      state.placedKeynotesOpen = false;
+    }
     renderModelHealth();
+    syncSidebarState();
+  }
+
+  function placedKeynoteLocation(placement) {
+    var sheetLabels = (placement.sheets || []).map(function (sheet) {
+      var number = trim(sheet && sheet.number);
+      var name = trim(sheet && sheet.name);
+      return number && name ? number + " - " + name : (number || name);
+    }).filter(Boolean);
+    var viewName = trim(placement.view && placement.view.name);
+
+    if (sheetLabels.length) {
+      return sheetLabels.join(", ");
+    }
+    return viewName ? "Unsheeted - " + viewName : "Unsheeted";
+  }
+
+  function renderPlacedKeynotes() {
+    var health = currentModelHealth();
+    var focusKey = trim(state.placedKeynoteFocusKey);
+    var row = (health.placedKeynotes || []).filter(function (candidate) {
+      return candidate.key === focusKey;
+    })[0] || null;
+    var status = byId("placed-keynotes-status");
+    var stats = byId("placed-keynotes-stats");
+    var list = byId("placed-keynotes-list");
+    var elementCount = row ? row.elementIds.length : 0;
+
+    if (status) {
+      status.textContent = row
+        ? formatNumber(elementCount) + " placed element ID(s) for keynote " + row.key + "."
+        : "No placed keynote element IDs found.";
+    }
+
+    if (stats) {
+      clearElement(stats);
+      stats.appendChild(createModelHealthStat("Keynote keys", row ? "1" : "0"));
+      stats.appendChild(createModelHealthStat("Element IDs", formatNumber(elementCount)));
+      stats.appendChild(createModelHealthStat("User keynotes", formatNumber(row && row.userKeynoteCount)));
+      stats.appendChild(createModelHealthStat("Generic annotations", formatNumber(row && row.genericAnnotationCount)));
+    }
+
+    if (!list) {
+      return;
+    }
+
+    clearElement(list);
+    if (!row) {
+      var empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "No placed keynotes found.";
+      list.appendChild(empty);
+      return;
+    }
+
+    var item = document.createElement("section");
+    var heading = document.createElement("div");
+    var key = document.createElement("strong");
+    var placements = row.placements.length
+      ? row.placements.slice()
+      : row.elementIds.map(function (elementId) {
+        return { elementId: elementId, sheets: [], view: {} };
+      });
+
+    item.className = "placed-keynote-item";
+    heading.className = "placed-keynote-heading";
+    key.textContent = row.key || "(No keynote key)";
+    heading.appendChild(key);
+    item.appendChild(heading);
+
+    placements.sort(function (first, second) {
+      return naturalCompareText(first.elementId, second.elementId);
+    });
+    placements.forEach(function (placement) {
+      var placementRow = document.createElement("div");
+      var pill = document.createElement("span");
+      var location = document.createElement("span");
+
+      placementRow.className = "placed-keynote-element";
+      pill.className = "element-id-pill";
+      pill.textContent = placement.elementId;
+      pill.title = "Revit Element ID " + placement.elementId;
+      location.className = "placed-keynote-location";
+      location.textContent = placedKeynoteLocation(placement);
+      placementRow.appendChild(pill);
+      placementRow.appendChild(location);
+      item.appendChild(placementRow);
+    });
+
+    if (!placements.length) {
+      var unavailable = document.createElement("span");
+      unavailable.className = "validation-detail";
+      unavailable.textContent = "Element IDs are unavailable for this placement scan.";
+      item.appendChild(unavailable);
+    }
+
+    list.appendChild(item);
+  }
+
+  function setPlacedKeynotesOpen(isOpen, focusKey) {
+    state.placedKeynotesOpen = Boolean(isOpen);
+    if (focusKey !== undefined) {
+      state.placedKeynoteFocusKey = trim(focusKey);
+    }
+    if (state.placedKeynotesOpen) {
+      state.modelIssuesOpen = false;
+    }
+    renderPlacedKeynotes();
     syncSidebarState();
   }
 
@@ -2683,6 +2832,7 @@
     var warningPill = byId("warning-pill");
     var modelHealthPill = byId("model-health-pill");
     var modelIssuesOverlay = byId("model-issues-overlay");
+    var placedKeynotesOverlay = byId("placed-keynotes-overlay");
     var validationPanel = byId("validation-panel");
     var divisionsExpanded = !state.divisionsCollapsed;
     var warningsOpen = Boolean(state.warningSidebarOpen);
@@ -2728,6 +2878,10 @@
       modelIssuesOverlay.hidden = !state.modelIssuesOpen;
     }
 
+    if (placedKeynotesOverlay) {
+      placedKeynotesOverlay.hidden = !state.placedKeynotesOpen;
+    }
+
     if (validationPanel) {
       validationPanel.hidden = !warningsOpen;
       validationPanel.setAttribute("aria-hidden", warningsOpen ? "false" : "true");
@@ -2761,6 +2915,7 @@
     renderNotes();
     renderValidation();
     renderModelHealth();
+    renderPlacedKeynotes();
     renderSaveState();
     renderRowActions();
     syncSidebarState();
@@ -3996,6 +4151,8 @@
     state.entries = (state.payload.entries || []).map(normalizeEntry);
     state.modelHealth = normalizeModelHealth(state.payload.modelHealth || {});
     state.modelIssueResolutions = {};
+    state.placedKeynotesOpen = false;
+    state.placedKeynoteFocusKey = "";
     state.sheetVisibleKeynotes = Object.keys(state.modelHealth.placedKeyMap || {}).length
       ? state.modelHealth.placedKeyMap
       : normalizeSheetVisibleKeynotes(state.payload.sheetVisibleKeynotes || {});
@@ -4993,7 +5150,16 @@
       closeRowActionMenu(false);
     });
     document.addEventListener("keydown", function (event) {
-      if (event.key === "Escape" && activeRowActionMenu) {
+      if (event.key !== "Escape") {
+        return;
+      }
+      if (state.placedKeynotesOpen) {
+        event.preventDefault();
+        setPlacedKeynotesOpen(false);
+      } else if (state.modelIssuesOpen) {
+        event.preventDefault();
+        setModelIssuesOpen(false);
+      } else if (activeRowActionMenu) {
         event.preventDefault();
         closeRowActionMenu(true);
       }
@@ -5042,6 +5208,12 @@
     });
     bindClick("model-issues-scrim", function () {
       setModelIssuesOpen(false);
+    });
+    bindClick("close-placed-keynotes", function () {
+      setPlacedKeynotesOpen(false);
+    });
+    bindClick("placed-keynotes-scrim", function () {
+      setPlacedKeynotesOpen(false);
     });
     bindClick("acknowledge-model-health", acknowledgeModelHealthReview);
     bindClick("close-validation-sidebar", function () {

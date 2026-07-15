@@ -343,6 +343,42 @@
           </div>
         </aside>
       </div>
+
+      <div id="placed-keynotes-overlay" class="model-issues-overlay" hidden>
+        <button
+          id="placed-keynotes-scrim"
+          class="model-issues-scrim"
+          type="button"
+          aria-label="Close placed keynotes"
+        ></button>
+        <aside
+          id="placed-keynotes-panel"
+          class="model-issues-panel placed-keynotes-panel"
+          role="dialog"
+          aria-labelledby="placed-keynotes-heading"
+          aria-modal="false"
+        >
+          <div class="model-issues-heading">
+            <div>
+              <h2 id="placed-keynotes-heading">Placed Keynotes</h2>
+              <p id="placed-keynotes-status">No placed keynotes found.</p>
+            </div>
+            <button
+              id="close-placed-keynotes"
+              class="sidebar-toggle model-issues-close"
+              type="button"
+              aria-label="Close placed keynotes"
+              title="Close placed keynotes"
+            >
+              <span aria-hidden="true">x</span>
+            </button>
+          </div>
+          <div id="placed-keynotes-stats" class="model-health-stats"></div>
+          <div id="placed-keynotes-list" class="model-issues-list placed-keynotes-list">
+            <div class="empty-state">No placed keynotes found.</div>
+          </div>
+        </aside>
+      </div>
     </div>
   </body>
 </html>
