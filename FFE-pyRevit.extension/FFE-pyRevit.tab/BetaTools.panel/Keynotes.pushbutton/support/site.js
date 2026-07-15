@@ -227,6 +227,7 @@
           genericAnnotationCount: Number(issue.genericAnnotationCount || 0),
           sheetCount: Number(issue.sheetCount || 0),
           unsheetedCount: Number(issue.unsheetedCount || 0),
+          elementIds: (issue.elementIds || []).map(text).filter(Boolean),
           sheets: issue.sheets || [],
           typeNames: issue.typeNames || [],
           resolution: issue.resolution ? {
@@ -260,6 +261,7 @@
           issue.code,
           issue.key,
           issue.placedCount,
+          issue.elementIds.join(","),
           issue.resolution && issue.resolution.familyTypeName,
           issue.resolution && issue.resolution.familyTypeText,
           issue.resolution && issue.resolution.fileText
@@ -2285,6 +2287,12 @@
     }
     if (issue.unsheetedCount) {
       parts.push(formatNumber(issue.unsheetedCount) + " unsheeted");
+    }
+    if ((issue.elementIds || []).length) {
+      parts.push(
+        (issue.elementIds.length === 1 ? "Element ID: " : "Element IDs: ") +
+        issue.elementIds.join(", ")
+      );
     }
     (issue.sheets || []).slice(0, 4).forEach(function (sheet) {
       var number = trim(sheet && sheet.number);

@@ -2096,7 +2096,9 @@ def make_keynote_analytics_row(key, entry):
         "genericAnnotationCount": 0,
         "sheetCount": 0,
         "unsheetedCount": 0,
+        "elementIds": [],
         "sheets": [],
+        "_elementIdMap": {},
         "_sheetMap": {},
     }
 
@@ -2170,6 +2172,11 @@ def record_keynote_analytics_placement(rows_by_key, entry_by_key, key, source_ty
     elif source_type == "genericAnnotation":
         row["genericAnnotationCount"] += 1
 
+    element_id = safe_str(get_element_id_key(element)).strip()
+    if element_id and element_id not in row["_elementIdMap"]:
+        row["_elementIdMap"][element_id] = True
+        row["elementIds"].append(element_id)
+
     sheet_infos, view_info = get_element_sheet_infos(target_doc, element, view_sheet_lookup)
     if sheet_infos:
         for sheet_info in sheet_infos:
@@ -2194,6 +2201,8 @@ def finalize_keynote_analytics_rows(rows_by_key):
         row["sheetCount"] = len(sheet_values)
         row["sheets"] = sheet_values
         row["placed"] = bool(row.get("placedCount"))
+        row["elementIds"] = sorted(row.get("elementIds") or [])
+        row.pop("_elementIdMap", None)
         row.pop("_sheetMap", None)
         rows.append(row)
 
@@ -2331,6 +2340,11 @@ def make_model_health_issue(severity, code, key, message, row=None, details="", 
         "genericAnnotationCount": int(row.get("genericAnnotationCount") or 0),
         "sheetCount": int(row.get("sheetCount") or 0),
         "unsheetedCount": int(row.get("unsheetedCount") or 0),
+        "elementIds": [
+            safe_str(element_id).strip()
+            for element_id in row.get("elementIds") or []
+            if safe_str(element_id).strip()
+        ],
         "sheets": row.get("sheets") or [],
     }
     if type_names:
@@ -2523,6 +2537,7 @@ def make_model_health_signature(analytics, issues, keynote_payload):
             "key": issue.get("key") or "",
             "placedCount": issue.get("placedCount") or 0,
             "genericAnnotationCount": issue.get("genericAnnotationCount") or 0,
+            "elementIds": issue.get("elementIds") or [],
             "typeNames": issue.get("typeNames") or [],
             "resolution": issue.get("resolution") or {},
         })
