@@ -39,7 +39,6 @@ Author: Kyle Guggenheim"""
 
 """
 TODO:
-- Select placed keynote icon and display list of sheets/views where it is placed.
 - Add realtime updates when a keynote is added or removed.
 - Figure out how to work around Keynote's workset.
 
@@ -89,7 +88,8 @@ clr.AddReference("PresentationCore")
 clr.AddReference("PresentationFramework")
 clr.AddReference("WindowsBase")
 
-from System import Uri
+from System import Int64, Uri
+from System.Collections.Generic import List
 from System.Windows import Clipboard, ResizeMode, Thickness, Visibility, Window, WindowStartupLocation
 from System.Windows.Controls import Grid, TextBlock
 from System.Windows.Interop import WindowInteropHelper
@@ -102,6 +102,7 @@ except:
 from Autodesk.Revit.DB import (
     BuiltInCategory,
     BuiltInParameter,
+    ElementId,
     ElementType,
     Family,
     FilteredElementCollector,
@@ -3488,15 +3489,76 @@ def get_active_uidocument(uiapp, target_doc):
         uidoc = None
 
     if uidoc is None:
-        return None, "No active Revit document is available for Generic Annotation placement."
+        return None, "No active Revit document is available."
 
     try:
         if uidoc.Document != target_doc:
-            return None, "Activate the Revit document associated with this Keynote Manager before placing a Generic Annotation."
+            return None, "Activate the Revit document associated with this Keynote Manager before continuing."
     except:
-        return None, "Could not confirm the active Revit document for Generic Annotation placement."
+        return None, "Could not confirm the active Revit document."
 
     return uidoc, ""
+
+
+def select_revit_element(uiapp, target_doc, select_payload):
+    select_payload = select_payload or {}
+    element_id_text = safe_str(select_payload.get("elementId")).strip()
+    uidoc, active_document_error = get_active_uidocument(uiapp, target_doc)
+
+    if uidoc is None:
+        return {
+            "status": "warning",
+            "message": active_document_error,
+        }
+
+    try:
+        element_id = ElementId(Int64.Parse(element_id_text))
+    except:
+        return {
+            "status": "warning",
+            "message": "Element ID '{0}' is not valid.".format(element_id_text),
+        }
+
+    try:
+        element = target_doc.GetElement(element_id)
+    except:
+        element = None
+
+    if element is None:
+        return {
+            "status": "warning",
+            "message": "Revit element {0} was not found. Refresh the keynote placement scan.".format(
+                element_id_text
+            ),
+        }
+
+    selected_ids = List[ElementId]()
+    selected_ids.Add(element.Id)
+    try:
+        uidoc.Selection.SetElementIds(selected_ids)
+    except Exception as exc:
+        return {
+            "status": "warning",
+            "message": "Could not select Revit element {0}: {1}".format(
+                element_id_text,
+                safe_str(exc)
+            ),
+        }
+
+    try:
+        uidoc.ShowElements(element)
+    except:
+        return {
+            "status": "ready",
+            "message": "Selected Revit element {0}. It could not be brought into the active view.".format(
+                element_id_text
+            ),
+        }
+
+    return {
+        "status": "ready",
+        "message": "Selected Revit element {0}.".format(element_id_text),
+    }
 
 
 def get_valid_generic_annotation_base_symbol(symbols):
@@ -3680,6 +3742,10 @@ class KeynoteManagerEventHandler(IExternalEventHandler):
         self.pending_action = "collectAnalytics"
         self.pending_payload = None
 
+    def queue_select_element(self, payload):
+        self.pending_action = "selectElement"
+        self.pending_payload = payload
+
     def queue_place_user_keynote(self, payload):
         self.pending_action = "placeUserKeynote"
         self.pending_payload = payload
@@ -3718,6 +3784,11 @@ class KeynoteManagerEventHandler(IExternalEventHandler):
         if action == "collectAnalytics":
             result = collect_keynote_analytics_payload(window.document)
             window.send_analytics_result(result)
+            return
+
+        if action == "selectElement":
+            result = select_revit_element(uiapp, window.document, payload)
+            window.send_status(result.get("status"), result.get("message"))
             return
 
         if action == "placeUserKeynote":
@@ -3967,6 +4038,8 @@ class KeynoteManagerWindow(Window):
             }
             if failure_target == "analytics":
                 self.send_analytics_result(result)
+            elif failure_target == "status":
+                self.send_status(result.get("status"), result.get("message"))
             else:
                 self.send_save_result(result)
 
@@ -4033,6 +4106,18 @@ class KeynoteManagerWindow(Window):
             self.event_handler.queue_collect_analytics()
             self.send_status("warning", "Collecting keynote analytics from the active Revit document...")
             self.raise_external_event("collect analytics", "analytics")
+            return
+
+        if message_type == "selectElement":
+            select_payload = {
+                "elementId": safe_str(message.get("elementId")).strip(),
+            }
+            self.event_handler.queue_select_element(select_payload)
+            self.send_status(
+                "warning",
+                "Selecting Revit element {0}...".format(select_payload.get("elementId"))
+            )
+            self.raise_external_event("select element", "status")
             return
 
         if message_type == "placeUserKeynote":

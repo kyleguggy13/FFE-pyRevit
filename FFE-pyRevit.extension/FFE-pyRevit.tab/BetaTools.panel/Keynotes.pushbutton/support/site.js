@@ -368,26 +368,39 @@
     return Boolean(state.sheetVisibleKeynotes[trim(key)]);
   }
 
+  function keyPlacementCount(key) {
+    var targetKey = trim(key);
+    var row = (currentModelHealth().placedKeynotes || []).filter(function (candidate) {
+      return candidate.key === targetKey;
+    })[0] || null;
+
+    if (row) {
+      return Math.max(Number(row.placedCount || row.elementIds.length || 0), 0);
+    }
+    return keyIsPlaced(targetKey) ? 1 : 0;
+  }
+
   function createPlacedKeyBadge(key) {
     var badge;
-    var path;
-    if (!keyIsPlaced(key)) {
+    var placementCount = keyPlacementCount(key);
+    if (!placementCount) {
       return null;
     }
 
-    badge = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    badge = document.createElement("span");
     badge.setAttribute("class", "sheet-visible-marker");
-    badge.setAttribute("viewBox", "0 0 16 16");
-    badge.setAttribute("fill", "currentColor");
-    badge.setAttribute("focusable", "true");
     badge.setAttribute("tabindex", "0");
     badge.setAttribute("role", "button");
     badge.setAttribute("aria-controls", "placed-keynotes-panel");
-    badge.setAttribute("aria-label", "View placed keynote element IDs for " + trim(key));
-    badge.setAttribute("title", "View placed keynote element IDs");
-    path.setAttribute("d", "M4 0h5.293A1 1 0 0 1 10 .293L13.707 4a1 1 0 0 1 .293.707V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2m5.5 1.5v2a1 1 0 0 0 1 1h2z");
-    badge.appendChild(path);
+    badge.setAttribute(
+      "aria-label",
+      formatNumber(placementCount) + " placed keynote element(s) for " + trim(key) + ". View element IDs."
+    );
+    badge.setAttribute(
+      "title",
+      formatNumber(placementCount) + " placed keynote element(s). View element IDs."
+    );
+    badge.textContent = formatNumber(placementCount) + "x";
     badge.addEventListener("click", function (event) {
       event.preventDefault();
       event.stopPropagation();
@@ -2707,13 +2720,26 @@
     });
     placements.forEach(function (placement) {
       var placementRow = document.createElement("div");
-      var pill = document.createElement("span");
+      var pill = document.createElement("button");
       var location = document.createElement("span");
 
       placementRow.className = "placed-keynote-element";
+      pill.type = "button";
       pill.className = "element-id-pill";
       pill.textContent = placement.elementId;
-      pill.title = "Revit Element ID " + placement.elementId;
+      pill.setAttribute("aria-label", "Select Revit element " + placement.elementId);
+      pill.title = "Select Revit element " + placement.elementId;
+      pill.addEventListener("click", function () {
+        if (postWebViewMessage({
+          type: "selectElement",
+          elementId: placement.elementId
+        })) {
+          setStatus({
+            status: "warning",
+            message: "Selecting Revit element " + placement.elementId + "..."
+          });
+        }
+      });
       location.className = "placed-keynote-location";
       location.textContent = placedKeynoteLocation(placement);
       placementRow.appendChild(pill);

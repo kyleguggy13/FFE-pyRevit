@@ -28,6 +28,10 @@
   --negative-soft: #efcfd0;
 
 
+  /* Color - Badge */
+  --count-chip: #15803d;
+  --label-chip: #7e22ce;
+
 
   /* Color - Fill */
   --header-fill:    #ffffff;
@@ -745,7 +749,7 @@ h2 {
   width: fit-content;
   max-width: 100%;
   overflow: visible;
-  padding-right: 17px;
+  padding-right: 34px;
 }
 
 .division-row-copy span {
@@ -888,7 +892,7 @@ h2 {
 }
 
 .division-key-field.sheet-marker-anchor {
-  padding-right: 18px;
+  padding-right: 34px;
 }
 
 .division-key-field input,
@@ -1003,7 +1007,7 @@ h2 {
 }
 
 .division-select-menu .dropdown-item.sheet-marker-anchor {
-  padding-right: 26px;
+  padding-right: 42px;
 }
 
 .division-select-menu .dropdown-item > span {
@@ -1172,7 +1176,7 @@ h2 {
 }
 
 .note-key-wrap.sheet-marker-anchor {
-  padding-right: 20px;
+  padding-right: 36px;
 }
 
 .sheet-marker-anchor {
@@ -1180,21 +1184,34 @@ h2 {
 }
 
 .sheet-visible-marker {
-  width: 13px;
-  height: 13px;
+  min-width: 22px;
+  height: 18px;
   position: absolute;
   top: 50%;
   right: 2px;
   z-index: 2;
-  color: #f77c0a;
-  fill: currentColor;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #e8f7e9;
+  color: #16823b;
+  font-size: var(--t-em-xs);
+  font-weight: var(--w-semibold);
+  line-height: 1;
+  white-space: nowrap;
   pointer-events: auto;
   cursor: pointer;
   transform: translateY(-50%);
 }
 
+.sheet-visible-marker:hover {
+  background: #d9f1dd;
+}
+
 .sheet-visible-marker:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid #16823b;
   outline-offset: 2px;
 }
 
@@ -1699,6 +1716,7 @@ h2 {
 }
 
 .element-id-pill {
+  appearance: none;
   display: inline-flex;
   align-items: center;
   min-height: 24px;
@@ -1711,6 +1729,18 @@ h2 {
   font-size: var(--t-em-xs);
   font-weight: var(--w-medium);
   line-height: 1;
+  cursor: pointer;
+}
+
+.element-id-pill:hover,
+.element-id-pill:focus-visible {
+  border-color: var(--accent);
+  background: var(--page-2);
+  outline: none;
+}
+
+.element-id-pill:focus-visible {
+  box-shadow: 0 0 0 2px rgba(82, 108, 165, 0.22);
 }
 
 .model-issue-group {
