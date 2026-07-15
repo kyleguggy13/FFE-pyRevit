@@ -29,6 +29,7 @@
     syncIssues: [],
     operationIssues: [],
     analyticsCollecting: false,
+    analyticsRequestedOnOpen: false,
     lastAnalyticsResult: null,
     modelHealth: null,
     modelIssuesOpen: false,
@@ -3686,13 +3687,14 @@
       state.dbReady = true;
       state.syncIssues = [];
       if (filePayloadDiffersFromSnapshot(payload, snapshot)) {
-        syncSavedFileSnapshot(
+        return syncSavedFileSnapshot(
           db,
           payload,
           "Loaded shared keynote file.",
           "Supabase mirror recovered from the shared keynote file."
-        );
-        return;
+        ).then(function () {
+          collectAnalyticsOnOpen();
+        });
       }
       applySnapshotMetadata(snapshot);
       subscribeToLibrary(snapshot);
@@ -3703,6 +3705,7 @@
       if (!state.dirty && reason === "load") {
         setStatus({ status: "ready", message: "Loaded shared keynote file and attached Supabase row metadata." });
       }
+      collectAnalyticsOnOpen();
     }).catch(function (error) {
       state.dbInitializing = false;
       state.dbReady = false;
@@ -4668,6 +4671,15 @@
       state.analyticsCollecting = false;
       renderSaveState();
     }
+  }
+
+  function collectAnalyticsOnOpen() {
+    if (state.analyticsRequestedOnOpen || !state.dbReady) {
+      return;
+    }
+
+    state.analyticsRequestedOnOpen = true;
+    collectAnalytics();
   }
 
   function handleAnalyticsResult(result) {

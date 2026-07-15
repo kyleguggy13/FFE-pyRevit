@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 __title__ = "FFE-Keynotes"
-__version__ = "v0.16"
+__version__ = "v0.17"
 __persistentengine__ = True
 __min_revit_ver__ = 2026
-__doc__ = """Version = v0.16
-Date    = 07.14.2026
+__doc__ = """Version = v0.17
+Date    = 07.15.2026
 __________________________________________________________________
 Description:
 Persistent WebView2 keynote manager for the active Revit document's
@@ -32,6 +32,7 @@ Last update:
 - [07.10.2026] - v0.14 Added per-keynote family type/text file conflict resolution in Safe Mode.
 - [07.14.2026] - v0.15 Added per-row ellipsis actions for copying, deleting, moving, sequencing, and uppercasing notes.
 - [07.14.2026] - v0.16 Added note promotion and parent menus with safe demotion and subnote-aware deletion.
+- [07.15.2026] - v0.17 Added automatic keynote analytics collection when the manager opens.
 __________________________________________________________________
 Author: Kyle Guggenheim"""
 
@@ -134,7 +135,7 @@ PATH_SUPPORT = os.path.join(PATH_SCRIPT, "support")
 PATH_INDEX = os.path.join(PATH_SUPPORT, "index.html")
 
 APP_NAME = "FFE Keynote Manager"
-APP_VERSION = "v0.16"
+APP_VERSION = "v0.17"
 LOCAL_APP_NAME = "KeynoteManager"
 GENERIC_KEYNOTE_FAMILY_NAME = "FFE_Symbol_Keynote (Type)"
 GENERIC_KEYNOTE_NUMBER_PARAMETER = "Number"

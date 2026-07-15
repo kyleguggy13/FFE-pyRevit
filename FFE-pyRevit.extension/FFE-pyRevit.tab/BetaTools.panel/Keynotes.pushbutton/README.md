@@ -114,9 +114,9 @@ For `Generic Annotation`, the manager prepares the matching generic annotation k
 
 ## Collecting Analytics
 
-Click `Collect Analytics` to scan the active Revit document for keynote placement information. This updates the placed-keynote markers and helps the `Placed Keynotes` and `Unused Keynotes` filters show useful results.
+The manager automatically scans the active Revit document for keynote placement information when it opens and syncs the results to Supabase. This updates the placed-keynote markers and helps the `Placed Keynotes` and `Unused Keynotes` filters show useful results.
 
-Use this before reviewing unused keynotes, especially after other users have added or removed keynote annotations.
+Click `Collect Analytics` to run the scan again, especially after other users have added or removed keynote annotations while the manager is open.
 
 Supabase stores only the latest collected analytics for each keynote library and Revit document. Collecting again updates the existing document summary and keynote rows in place; it does not create a historical analytics run.
 
