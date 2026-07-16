@@ -140,6 +140,8 @@ Safe Mode pauses editing and saving when the model health scan finds a significa
 
 For a placed Generic Annotation key that is missing from the text file, choose `Use Family Type` to add its key and text to the file. Choose a replacement keynote and `Use Text File` to overwrite the family type and migrate its placed instances to that file entry. Resolve every available missing-key choice, unlock editing, and click `Save` to apply the selections.
 
+When a Generic Annotation family type and its matching text-file keynote have different descriptions, the Model Issues card offers three choices. `Use Family Type` updates the existing file row, `Use Text File` updates the family type, and `Keep Both + New Note` creates the next keynote in sequence from the family description while preserving the existing text-file row. Click `Save` to apply the selected resolution to the file and model.
+
 ## Best Practices
 
 - Save before placing keynotes you have just edited.

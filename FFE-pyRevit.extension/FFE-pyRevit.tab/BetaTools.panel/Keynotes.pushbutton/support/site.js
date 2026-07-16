@@ -327,6 +327,7 @@
     return currentModelHealth().issues.filter(function (issue) {
       return Boolean(
         issue.resolution &&
+        issue.resolution.resolutionType === "missingGenericAnnotationKey" &&
         !state.modelIssueResolutions[modelIssueResolutionId(issue)]
       );
     }).length;
@@ -2400,15 +2401,79 @@
   function applyModelIssueResolution(issue, source, replacementKey) {
     var resolution = issue && issue.resolution;
     var entry = issue && entriesByKey()[issue.key];
+    var resolutionId = modelIssueResolutionId(issue);
+    var previousResolution = state.modelIssueResolutions[resolutionId] || {};
+    var createdEntry;
+    var newKey = "";
+    var originalText;
     var replacementEntry;
 
-    if (!resolution || (source !== "familyType" && source !== "textFile")) {
+    if (!resolution || (source !== "familyType" && source !== "textFile" && source !== "keepBoth")) {
       return;
     }
     if (entry && isEntryRemotelyClaimed(entry)) {
       setStatus({
         status: "warning",
         message: editClaimTitle(entry) || "This keynote is being edited by another user."
+      });
+      renderAll();
+      return;
+    }
+
+    if (previousResolution.createdEntryId) {
+      state.entries = state.entries.filter(function (candidate) {
+        return candidate.id !== previousResolution.createdEntryId;
+      });
+    }
+
+    if (resolution.resolutionType === "genericAnnotationTextMismatch") {
+      entry = entriesByKey()[issue.key];
+      if (!entry) {
+        setStatus({ status: "warning", message: "Keynote " + issue.key + " is no longer in the text file." });
+        renderAll();
+        return;
+      }
+
+      originalText = Object.prototype.hasOwnProperty.call(previousResolution, "originalText")
+        ? previousResolution.originalText
+        : entry.text;
+      entry.text = originalText;
+      if (source === "familyType") {
+        entry.text = text(resolution.familyTypeText);
+      } else if (source === "keepBoth") {
+        newKey = trim(entry.parentKey)
+          ? makeChildKey(entry.parentKey)
+          : makeUniqueKey(issue.key + "-FAMILY");
+        createdEntry = normalizeEntry({
+          id: makeLocalId(),
+          key: newKey,
+          text: resolution.familyTypeText,
+          parentKey: entry.parentKey,
+          sortOrder: state.entries.length,
+          lineNumber: null
+        }, state.entries.length);
+        state.entries.push(createdEntry);
+      }
+
+      state.modelIssueResolutions[resolutionId] = {
+        issueKey: issue.key,
+        source: source,
+        resolutionType: resolution.resolutionType,
+        familyTypeName: resolution.familyTypeName,
+        familyTypeText: resolution.familyTypeText,
+        originalText: originalText,
+        newKey: newKey,
+        createdEntryId: createdEntry ? createdEntry.id : ""
+      };
+      markDirty();
+      syncLocalEditClaims();
+      setStatus({
+        status: "warning",
+        message: source === "familyType"
+          ? "Keynote " + issue.key + " will use the family type text when saved."
+          : (source === "textFile"
+            ? "The family type for keynote " + issue.key + " will use the text-file description when saved."
+            : "Created keynote " + newKey + " from the family type; the existing text-file note will be kept.")
       });
       renderAll();
       return;
@@ -2445,9 +2510,12 @@
       }
     }
 
-    state.modelIssueResolutions[modelIssueResolutionId(issue)] = {
+    state.modelIssueResolutions[resolutionId] = {
       issueKey: issue.key,
       source: source,
+      resolutionType: resolution.resolutionType,
+      familyTypeName: resolution.familyTypeName,
+      familyTypeText: resolution.familyTypeText,
       replacementKey: replacementKey
     };
     markDirty();
@@ -2471,6 +2539,7 @@
     var fileSelect = document.createElement("select");
     var fileButton = document.createElement("button");
     var placeholderOption = document.createElement("option");
+    var keepBothButton;
 
     controls.className = "model-issue-resolution";
     familyButton.type = "button";
@@ -2481,6 +2550,36 @@
     familyButton.addEventListener("click", function () {
       applyModelIssueResolution(issue, "familyType");
     });
+
+    if (resolution.resolutionType === "genericAnnotationTextMismatch") {
+      controls.setAttribute("data-choice-count", "3");
+      familyButton.textContent = "Use Family Type";
+      familyButton.title = "Write the family type text to the existing keynote-file row.";
+
+      fileButton.type = "button";
+      fileButton.className = "model-resolution-button";
+      fileButton.setAttribute("data-selected", selectedSource === "textFile" ? "true" : "false");
+      fileButton.textContent = "Use Text File";
+      fileButton.title = "Update the Generic Annotation family type from the existing keynote-file row.";
+      fileButton.addEventListener("click", function () {
+        applyModelIssueResolution(issue, "textFile");
+      });
+
+      keepBothButton = document.createElement("button");
+      keepBothButton.type = "button";
+      keepBothButton.className = "model-resolution-button";
+      keepBothButton.setAttribute("data-selected", selectedSource === "keepBoth" ? "true" : "false");
+      keepBothButton.textContent = "Keep Both + New Note";
+      keepBothButton.title = "Keep the text-file row and create the next keynote in sequence from the family type.";
+      keepBothButton.addEventListener("click", function () {
+        applyModelIssueResolution(issue, "keepBoth");
+      });
+
+      controls.appendChild(familyButton);
+      controls.appendChild(fileButton);
+      controls.appendChild(keepBothButton);
+      return controls;
+    }
 
     fileChoice.className = "model-resolution-file-choice";
     fileSelect.className = "model-resolution-select";
@@ -2578,7 +2677,7 @@
         var lastGroupTitle = "";
         health.issues.forEach(function (issue) {
           var canJump = Boolean(issue.key && entriesByKey()[issue.key]);
-          var canResolve = Boolean(isSafeMode && issue.resolution);
+          var canResolve = Boolean(issue.resolution);
           var item = document.createElement(canResolve ? "div" : "button");
           var label = document.createElement("span");
           var message = document.createElement("strong");

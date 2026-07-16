@@ -1787,6 +1787,14 @@ h2 {
   margin-top: 4px;
 }
 
+.model-issue-resolution[data-choice-count="3"] {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.model-issue-resolution[data-choice-count="3"] .model-resolution-button {
+  white-space: normal;
+}
+
 .model-resolution-button {
   min-width: 0;
   padding: 8px 10px;

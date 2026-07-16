@@ -1699,7 +1699,7 @@ def delete_generic_annotation_symbol_if_unused(target_doc, symbol, instances_by_
         return False
 
 
-def sync_generic_annotation_types(target_doc, entries, key_renames, deleted_keys):
+def sync_generic_annotation_types(target_doc, entries, key_renames, deleted_keys, model_issue_resolutions=None):
     summary = make_generic_annotation_sync_summary()
     family = get_generic_annotation_keynote_family(target_doc)
     if family is None:
@@ -1735,6 +1735,69 @@ def sync_generic_annotation_types(target_doc, entries, key_renames, deleted_keys
 
     try:
         transaction.Start()
+
+        # "Keep both" text-mismatch resolutions preserve the keynote-file row on
+        # its existing key and move the placed family type to the newly-created
+        # keynote key before the normal file-to-family synchronization runs.
+        for resolution in model_issue_resolutions or []:
+            if (
+                safe_str(resolution.get("source")).strip() != "keepBoth" or
+                safe_str(resolution.get("resolutionType")).strip() != "genericAnnotationTextMismatch"
+            ):
+                continue
+
+            old_key = safe_unicode(resolution.get("issueKey")).strip()
+            new_key = safe_unicode(resolution.get("newKey")).strip()
+            family_type_name = safe_unicode(resolution.get("familyTypeName")).strip()
+            family_type_text = safe_unicode(resolution.get("familyTypeText")).strip()
+            if not old_key or not new_key or new_key not in active_keys:
+                record_generic_annotation_sync_failure(
+                    summary,
+                    "Could not keep both Generic Annotation texts for keynote '{0}' because the new keynote key was unavailable.".format(
+                        old_key
+                    )
+                )
+                continue
+
+            source_symbol = None
+            for symbol in symbols:
+                if family_type_name and get_element_name(symbol) != family_type_name:
+                    continue
+                if generic_annotation_symbol_matches_key(symbol, old_key):
+                    source_symbol = symbol
+                    break
+
+            if source_symbol is None:
+                record_generic_annotation_sync_failure(
+                    summary,
+                    "Could not find Generic Annotation type '{0}' for keynote '{1}' to create keynote '{2}'.".format(
+                        family_type_name or old_key,
+                        old_key,
+                        new_key
+                    )
+                )
+                continue
+
+            try:
+                changed, migrated = set_generic_annotation_symbol_values(
+                    source_symbol,
+                    new_key,
+                    family_type_text,
+                    leader_arrowhead_type
+                )
+                if changed:
+                    summary["updatedCount"] += 1
+                if migrated:
+                    summary["migratedCount"] += 1
+            except Exception as exc:
+                record_generic_annotation_sync_failure(
+                    summary,
+                    "Could not migrate Generic Annotation type '{0}' to keynote '{1}': {2}".format(
+                        family_type_name or old_key,
+                        new_key,
+                        exc
+                    )
+                )
 
         for entry in entries or []:
             key = safe_unicode(entry.get("key")).strip()
@@ -2506,7 +2569,14 @@ def append_generic_annotation_model_health_issues(target_doc, entry_by_key, issu
                     symbol_key,
                     "Generic Annotation type '{0}' text does not match the keynote file.".format(type_name),
                     row,
-                    "Family type text: {0} | Text file: {1}".format(current_text, expected_text)
+                    "Family type text: {0} | Text file: {1}".format(current_text, expected_text),
+                    None,
+                    {
+                        "resolutionType": "genericAnnotationTextMismatch",
+                        "familyTypeName": type_name,
+                        "familyTypeText": current_text,
+                        "fileText": expected_text,
+                    }
                 ))
 
     for symbol_key, key_symbols in symbols_by_key.items():
@@ -3232,7 +3302,8 @@ def save_keynote_payload(target_doc, save_payload):
                 target_doc,
                 merged_entries,
                 key_renames,
-                deleted_keys
+                deleted_keys,
+                save_payload.get("modelIssueResolutions") or []
             )
         except Exception as exc:
             generic_annotation_sync = make_generic_annotation_sync_summary()
