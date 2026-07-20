@@ -2650,6 +2650,7 @@
     var status = byId("model-health-status");
     var stats = byId("model-health-stats");
     var list = byId("model-issues-list");
+    var listScrollTop = list ? list.scrollTop : 0;
     var acknowledge = byId("acknowledge-model-health");
     var severity = isSafeMode ? "error" : (issueCount ? "warning" : "none");
 
@@ -2746,6 +2747,7 @@
           list.appendChild(item);
         });
       }
+      list.scrollTop = listScrollTop;
     }
 
     if (acknowledge) {

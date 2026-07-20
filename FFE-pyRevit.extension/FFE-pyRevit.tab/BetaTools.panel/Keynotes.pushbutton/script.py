@@ -2,7 +2,7 @@
 __title__ = "FFE-Keynotes"
 __version__ = "v0.17"
 __persistentengine__ = True
-__min_revit_ver__ = 2026
+__min_revit_ver__ = 2025
 __doc__ = """Version = v0.17
 Date    = 07.15.2026
 __________________________________________________________________
