@@ -41,6 +41,9 @@ Author: Kyle Guggenheim"""
 TODO:
 - Add realtime updates when a keynote is added or removed.
 - Figure out how to work around Keynote's workset.
+- When user 1 deletes note and saves it deletes the note for user 2 without refresh.
+- If user 1 is editing note prevent other users from placing that note until it's released.
+- Look into having an undo/redo.
 
 
 Key behaviors:
@@ -58,7 +61,7 @@ Key behaviors:
 - Supports promoting notes to parents and demoting parents while preserving their descendant hierarchy.
 
 Revit API notes:
-- Targets Revit 2026.
+- Targets Revit 2026. Works with 2025.
 - Modeless refresh/save requests are routed through ExternalEvent so
   document API calls run in a valid Revit API context.
 
