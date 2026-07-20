@@ -30,7 +30,9 @@
 
   /* Color - Badge */
   --count-chip: #15803d;
+  --count-chip-background: #e6f5eb;
   --label-chip: #7e22ce;
+  --label-chip-background: #f5e9fb;
 
 
   /* Color - Fill */
@@ -823,7 +825,83 @@ h2 {
   text-transform: uppercase;
 }
 
-.placement-mode-field select,
+.placement-mode-control {
+  --placement-mode-background: var(--count-chip-background);
+  min-width: 158px;
+}
+
+.placement-mode-control[data-placement-mode="genericAnnotation"] {
+  --placement-mode-background: var(--label-chip-background);
+}
+
+.placement-mode-control .placement-mode-button,
+.placement-mode-control .placement-mode-toggle {
+  min-height: 30px;
+  border: 0;
+  background-color: var(--placement-mode-background);
+  color: var(--ink-1);
+  font-size: var(--t-em-sm);
+  text-transform: none;
+  box-shadow: inset 0 0 0 1px var(--divider-soft);
+}
+
+.placement-mode-control .placement-mode-button {
+  flex: 1 1 auto;
+  text-align: left;
+}
+
+.placement-mode-control .placement-mode-toggle {
+  flex: 0 0 auto;
+}
+
+.placement-mode-control .placement-mode-button:hover,
+.placement-mode-control .placement-mode-button:focus,
+.placement-mode-control .placement-mode-button:active,
+.placement-mode-control .placement-mode-button.show,
+.placement-mode-control .placement-mode-toggle:hover,
+.placement-mode-control .placement-mode-toggle:focus,
+.placement-mode-control .placement-mode-toggle:active,
+.placement-mode-control .placement-mode-toggle.show {
+  background-color: var(--placement-mode-background);
+  color: var(--ink-1);
+}
+
+.placement-mode-control .placement-mode-button:focus,
+.placement-mode-control .placement-mode-button:focus-visible,
+.placement-mode-control .placement-mode-toggle:focus,
+.placement-mode-control .placement-mode-toggle:focus-visible {
+  outline: 2px solid rgba(82, 108, 165, 0.26);
+  outline-offset: 1px;
+  box-shadow: none;
+}
+
+.placement-mode-menu {
+  min-width: 100%;
+  padding: 4px 0;
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--page-3);
+  box-shadow: 0 10px 24px var(--accent-wash), inset 0 0 0 1px var(--divider-soft);
+}
+
+.placement-mode-menu .dropdown-item {
+  padding: 7px 10px;
+  color: var(--ink-1);
+  font-size: var(--t-em-sm);
+}
+
+.placement-mode-menu .dropdown-item:hover,
+.placement-mode-menu .dropdown-item:focus {
+  background: var(--divider-soft);
+  color: var(--ink-1);
+}
+
+.placement-mode-menu .dropdown-item.active,
+.placement-mode-menu .dropdown-item:active {
+  background: var(--accent-wash);
+  color: var(--ink-1);
+}
+
 .placement-filter-field select {
   width: auto;
   min-width: 158px;
@@ -841,7 +919,6 @@ h2 {
   min-width: 142px;
 }
 
-.placement-mode-field select:focus,
 .placement-filter-field select:focus {
   outline: 2px solid rgba(82, 108, 165, 0.26);
   border-color: var(--accent);

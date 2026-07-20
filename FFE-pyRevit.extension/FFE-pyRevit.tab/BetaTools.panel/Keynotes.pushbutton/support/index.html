@@ -192,13 +192,36 @@
                 <option value="unused">Unused Keynotes</option>
               </select>
             </label>
-            <label class="placement-mode-field" for="placement-mode-select">
-              <span>Place As</span>
-              <select id="placement-mode-select" class="form-select form-select-sm">
-                <option value="userKeynote" selected>User Keynote</option>
-                <option value="genericAnnotation">Generic Annotation</option>
-              </select>
-            </label>
+            <div class="placement-mode-field">
+              <span id="placement-mode-label">Place As</span>
+              <div
+                id="placement-mode-control"
+                class="btn-group placement-mode-control"
+                data-placement-mode="userKeynote"
+                role="group"
+                aria-labelledby="placement-mode-label"
+              >
+                <button
+                  id="placement-mode-button"
+                  class="btn btn-sm placement-mode-button"
+                  type="button"
+                  data-bs-toggle="dropdown"
+                  aria-expanded="false"
+                >User Keynote</button>
+                <button
+                  class="btn btn-sm dropdown-toggle dropdown-toggle-split placement-mode-toggle"
+                  type="button"
+                  data-bs-toggle="dropdown"
+                  aria-expanded="false"
+                >
+                  <span class="visually-hidden">Select placement mode</span>
+                </button>
+                <ul id="placement-mode-menu" class="dropdown-menu dropdown-menu-end placement-mode-menu">
+                  <li><button class="dropdown-item active" type="button" data-placement-mode="userKeynote" aria-current="true">User Keynote</button></li>
+                  <li><button class="dropdown-item" type="button" data-placement-mode="genericAnnotation">Generic Annotation</button></li>
+                </ul>
+              </div>
+            </div>
           </div>
 
           <div class="selected-division-card">

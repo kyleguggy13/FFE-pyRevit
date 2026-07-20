@@ -1895,10 +1895,29 @@
     return state.placementMode === "genericAnnotation" ? "Generic Annotation keynote" : "User Keynote";
   }
 
-  function syncPlacementModeSelect() {
-    var placementModeSelect = byId("placement-mode-select");
-    if (placementModeSelect) {
-      placementModeSelect.value = state.placementMode;
+  function syncPlacementModeControl() {
+    var placementModeControl = byId("placement-mode-control");
+    var placementModeButton = byId("placement-mode-button");
+    var placementModeMenu = byId("placement-mode-menu");
+    var modeLabel = state.placementMode === "genericAnnotation" ? "Generic Annotation" : "User Keynote";
+
+    if (placementModeControl) {
+      placementModeControl.setAttribute("data-placement-mode", state.placementMode);
+    }
+    if (placementModeButton) {
+      placementModeButton.textContent = modeLabel;
+      placementModeButton.setAttribute("aria-label", "Placement mode: " + modeLabel + ". Select placement mode");
+    }
+    if (placementModeMenu) {
+      Array.prototype.forEach.call(placementModeMenu.querySelectorAll("[data-placement-mode]"), function (option) {
+        var isSelected = option.getAttribute("data-placement-mode") === state.placementMode;
+        option.classList.toggle("active", isSelected);
+        if (isSelected) {
+          option.setAttribute("aria-current", "true");
+        } else {
+          option.removeAttribute("aria-current");
+        }
+      });
     }
   }
 
@@ -1915,7 +1934,7 @@
       state.payload.preferences = state.payload.preferences || {};
       state.payload.preferences.placementMode = state.placementMode;
     }
-    syncPlacementModeSelect();
+    syncPlacementModeControl();
   }
 
   function setPlacementFilter(value) {
@@ -5230,7 +5249,7 @@
     var searchInput = byId("search-input");
     var divisionSelectMenu = byId("division-select-menu");
     var placementFilterSelect = byId("placement-filter-select");
-    var placementModeSelect = byId("placement-mode-select");
+    var placementModeMenu = byId("placement-mode-menu");
 
     if (searchInput) {
       searchInput.addEventListener("input", function () {
@@ -5251,10 +5270,17 @@
       });
     }
 
-    if (placementModeSelect) {
-      syncPlacementModeSelect();
-      placementModeSelect.addEventListener("change", function () {
-        setPlacementMode(placementModeSelect.value);
+    if (placementModeMenu) {
+      syncPlacementModeControl();
+      placementModeMenu.addEventListener("click", function (event) {
+        var option = event.target.closest
+          ? event.target.closest("[data-placement-mode]")
+          : null;
+        if (!option) {
+          return;
+        }
+        event.preventDefault();
+        setPlacementMode(option.getAttribute("data-placement-mode"));
         postWebViewMessage({
           type: "placementModeChanged",
           placementMode: state.placementMode
