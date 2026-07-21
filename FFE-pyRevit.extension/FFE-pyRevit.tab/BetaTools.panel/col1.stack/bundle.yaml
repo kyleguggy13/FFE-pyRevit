@@ -1,4 +1,4 @@
 layout:
   - KeynoteUpdate
-  - DuctEstimation
+  - KeynoteToSymbol
   - CollectFamilyParameters

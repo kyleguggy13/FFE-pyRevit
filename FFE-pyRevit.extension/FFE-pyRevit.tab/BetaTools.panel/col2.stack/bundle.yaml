@@ -1,4 +1,4 @@
 layout:
-  - FileSize
-  - KeynoteToSymbol
-  - HVAC_CalculatedValues
+  - BIMGraph
+  - LineageViewer
+  - HVAC
