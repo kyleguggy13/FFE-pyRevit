@@ -62,3 +62,6 @@
 
 ### v1.14.2 - 06.30.2026
 - LineageViewer v0.2: Added WebView2 viewer.
+
+### v1.15.0 - 07.22.2026
+- FFE-Keynotes v1.0: Graduating to v1.0 with a stable feature set and improved performance.

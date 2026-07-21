@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 __title__ = "FFE-Keynotes"
-__version__ = "v0.17"
+__version__ = "v1.0"
 __persistentengine__ = True
 __min_revit_ver__ = 2025
-__doc__ = """Version = v0.17
-Date    = 07.15.2026
+__doc__ = """Version = v1.0
+Date    = 07.22.2026
 __________________________________________________________________
 Description:
 Persistent WebView2 keynote manager for the active Revit document's
@@ -33,6 +33,7 @@ Last update:
 - [07.14.2026] - v0.15 Added per-row ellipsis actions for copying, deleting, moving, sequencing, and uppercasing notes.
 - [07.14.2026] - v0.16 Added note promotion and parent menus with safe demotion and subnote-aware deletion.
 - [07.15.2026] - v0.17 Added automatic keynote analytics collection when the manager opens.
+- [07.22.2026] - v1.0 Graduating to v1.0 with a stable feature set and improved performance.
 __________________________________________________________________
 Author: Kyle Guggenheim"""
 
@@ -44,6 +45,8 @@ TODO:
 - When user 1 deletes note and saves it deletes the note for user 2 without refresh.
 - If user 1 is editing note prevent other users from placing that note until it's released.
 - Look into having an undo/redo.
+- When done placing generic annotation keynotes, app thinks user aborted: "Could not place Generic Annotation keynote '4.05': The user aborted the pick operation." 
+- Refresh the view after keynote placement.
 
 
 Key behaviors:
@@ -139,7 +142,7 @@ PATH_SUPPORT = os.path.join(PATH_SCRIPT, "support")
 PATH_INDEX = os.path.join(PATH_SUPPORT, "index.html")
 
 APP_NAME = "FFE Keynote Manager"
-APP_VERSION = "v0.17"
+APP_VERSION = "v1.0"
 LOCAL_APP_NAME = "KeynoteManager"
 GENERIC_KEYNOTE_FAMILY_NAME = "FFE_Symbol_Keynote (Type)"
 GENERIC_KEYNOTE_NUMBER_PARAMETER = "Number"

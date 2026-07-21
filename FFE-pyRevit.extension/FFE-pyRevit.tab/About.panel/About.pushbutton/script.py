@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-__title__   = "FFE-pyRevit \nv1.14.2"
-__version__ = "Version = v1.14.2"
+__title__   = "FFE-pyRevit \nv1.15.0"
+__version__ = "Version = v1.15.0"
 __persistentengine__ = True
-__doc__ = """Version = v1.14.2
-Date    = 06.30.2026
+__doc__ = """Version = v1.15.0
+Date    = 07.22.2026
 __________________________________________________________________
 Description:
 pyRevit About Form
@@ -34,6 +34,7 @@ Last update:
 - [05.29.2026] - v1.14.0 Added FFE-Keynotes to Beta tab.
 - [06.30.2026] - v1.14.1 Updated UserAnalytics v1.1: Updated Activity Over Time graph and Contribution Graph.
 - [06.30.2026] - v1.14.2 LineageViewer v0.2: Added WebView2 viewer.
+- [07.22.2026] - v1.15.0 Added FFE-Keynotes to DesignTools panel.
 __________________________________________________________________
 Author: Kyle Guggenheim from FFE Inc."""
 
@@ -65,7 +66,7 @@ PATH_SUPPORT = os.path.join(PATH_SCRIPT, "support")
 PATH_INDEX = os.path.join(PATH_SUPPORT, "index.html")
 
 ABOUT_NAME = "FFE-pyRevit"
-ABOUT_VERSION = "v1.14.2"
+ABOUT_VERSION = "v1.15.0"
 ABOUT_YEAR = "2026"
 
 try:
