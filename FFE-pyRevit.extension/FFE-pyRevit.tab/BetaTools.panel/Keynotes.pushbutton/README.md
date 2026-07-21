@@ -10,6 +10,19 @@ Open the tool from the FFE-pyRevit ribbon. The manager opens in its own window a
 
 At the top of the window, confirm that the correct Revit document is listed. If the wrong document is active, switch back to Revit, activate the correct model, and reopen or refresh the manager.
 
+
+## TODO:
+- Add realtime updates when a keynote is added or removed.
+- Figure out how to work around Keynote's workset.
+- When user 1 deletes note and saves it deletes the note for user 2 without refresh.
+- If user 1 is editing note prevent other users from placing that note until it's released.
+- Look into having an undo/redo.
+
+### Future Features:
+- Tagging/Reference System
+    - Connect Sheet Numbers, Note Numbers, View ID Numbers to automatically update in the keynotes.
+
+
 ## Main Areas
 
 ### Status and Warnings
