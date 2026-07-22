@@ -26,7 +26,7 @@
       <header class="title-card">
         <div class="brand-copy">
           <p class="eyebrow">FFE-PYREVIT v1.15.0</p>
-          <h1>KEYNOTE MANAGER v1.0</h1>
+          <h1>KEYNOTE MANAGER v1.1</h1>
           <p class="meta-line">
             <span id="doc-title">Waiting for Revit document</span>
             <span id="dirty-state" data-dirty="false">NO CHANGES</span>
@@ -66,6 +66,56 @@
             title="Collect keynote placement analytics and sync to Supabase"
           >
             Collect Analytics
+          </button>
+          <button
+            id="undo-change"
+            class="utility-button history-icon-button"
+            type="button"
+            title="Nothing to undo"
+            aria-label="Nothing to undo"
+            disabled
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path d="M9 14 4 9l5-5"></path>
+              <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"></path>
+            </svg>
+          </button>
+          <button
+            id="redo-change"
+            class="utility-button history-icon-button"
+            type="button"
+            title="Nothing to redo"
+            aria-label="Nothing to redo"
+            disabled
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <path d="m15 14 5-5-5-5"></path>
+              <path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"></path>
+            </svg>
           </button>
           <button
             id="save-data"

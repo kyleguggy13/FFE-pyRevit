@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 __title__ = "FFE-Keynotes"
-__version__ = "v1.0"
+__version__ = "v1.1"
 __persistentengine__ = True
 __min_revit_ver__ = 2025
-__doc__ = """Version = v1.0
+__doc__ = """Version = v1.1
 Date    = 07.22.2026
 __________________________________________________________________
 Description:
@@ -34,6 +34,7 @@ Last update:
 - [07.14.2026] - v0.16 Added note promotion and parent menus with safe demotion and subnote-aware deletion.
 - [07.15.2026] - v0.17 Added automatic keynote analytics collection when the manager opens.
 - [07.22.2026] - v1.0 Graduating to v1.0 with a stable feature set and improved performance.
+- [07.22.2026] - v1.1 Added bounded undo/redo history for unsaved keynote edits.
 __________________________________________________________________
 Author: Kyle Guggenheim"""
 
@@ -44,7 +45,6 @@ TODO:
 - Figure out how to work around Keynote's workset.
 - When user 1 deletes note and saves it deletes the note for user 2 without refresh.
 - If user 1 is editing note prevent other users from placing that note until it's released.
-- Look into having an undo/redo.
 - When done placing generic annotation keynotes, app thinks user aborted: "Could not place Generic Annotation keynote '4.05': The user aborted the pick operation." 
 - Refresh the view after keynote placement.
 
@@ -3918,7 +3918,7 @@ class KeynoteManagerWindow(Window):
         self.Title = self.get_window_title()
         self.Width = 1320
         self.Height = 860
-        self.MinWidth = 420
+        self.MinWidth = 480
         self.MinHeight = 620
         self.WindowStartupLocation = WindowStartupLocation.CenterScreen
         self.ResizeMode = ResizeMode.CanResize

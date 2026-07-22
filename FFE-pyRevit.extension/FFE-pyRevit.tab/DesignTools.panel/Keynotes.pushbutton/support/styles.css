@@ -267,6 +267,19 @@ h2 {
   color: var(--ink-1);
 }
 
+.history-icon-button {
+  width: 26px;
+  padding: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.history-icon-button svg {
+  display: block;
+  flex: 0 0 auto;
+}
+
 .save-button {
   background: var(--accent);
   color: var(--white);

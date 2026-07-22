@@ -4,6 +4,7 @@
   var UNGROUPED_ID = "__ungrouped__";
   var REMOTE_ENTRY_REFRESH_DELAY_MS = 600;
   var EDIT_CLAIM_HEARTBEAT_MS = 60000;
+  var HISTORY_LIMIT = 50;
   var activeRowActionMenu = null;
 
   var state = {
@@ -45,7 +46,11 @@
     placementFilter: "all",
     divisionsCollapsed: false,
     warningSidebarOpen: false,
-    nextLocalId: 1
+    nextLocalId: 1,
+    undoHistory: [],
+    redoHistory: [],
+    activeFieldEdit: null,
+    historyBaselineSignature: ""
   };
 
   var STATUS_TITLES = {
@@ -1192,6 +1197,242 @@
     setDirty(true);
   }
 
+  function cloneHistoryValue(value, fallback) {
+    if (value === undefined || value === null) {
+      return fallback;
+    }
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  function captureEditorState() {
+    return {
+      entries: cloneHistoryValue(state.entries, []),
+      selectedDivisionId: state.selectedDivisionId,
+      selectedNoteId: state.selectedNoteId,
+      selectedId: state.selectedId,
+      collapsedEntryIds: cloneHistoryValue(state.collapsedEntryIds, {}),
+      modelIssueResolutions: cloneHistoryValue(state.modelIssueResolutions, {}),
+      reviewedModelHealthSignature: state.reviewedModelHealthSignature
+    };
+  }
+
+  function historyContentSignature(snapshot) {
+    var resolutions = snapshot.modelIssueResolutions || {};
+    var orderedResolutions = {};
+
+    Object.keys(resolutions).sort().forEach(function (key) {
+      orderedResolutions[key] = resolutions[key];
+    });
+
+    return JSON.stringify({
+      entries: (snapshot.entries || []).map(function (entry) {
+        return {
+          id: text(entry.id),
+          key: text(entry.key),
+          text: text(entry.text),
+          parentKey: text(entry.parentKey),
+          lineNumber: entry.lineNumber || null
+        };
+      }),
+      modelIssueResolutions: orderedResolutions
+    });
+  }
+
+  function historyStatesEqual(first, second) {
+    return historyContentSignature(first) === historyContentSignature(second);
+  }
+
+  function updateDirtyFromEditorState() {
+    state.allowNextLoad = false;
+    setDirty(historyContentSignature(captureEditorState()) !== state.historyBaselineSignature);
+  }
+
+  function trimHistoryStack(stack) {
+    while (stack.length > HISTORY_LIMIT) {
+      stack.shift();
+    }
+  }
+
+  function historyLabelForField(fieldName) {
+    if (fieldName === "key") {
+      return "Edit keynote key";
+    }
+    if (fieldName === "parentKey") {
+      return "Edit keynote parent";
+    }
+    return "Edit keynote text";
+  }
+
+  function renderHistoryState() {
+    var undoButton = byId("undo-change");
+    var redoButton = byId("redo-change");
+    var activeEdit = state.activeFieldEdit;
+    var undoItem = state.undoHistory[state.undoHistory.length - 1];
+    var redoItem = state.redoHistory[state.redoHistory.length - 1];
+    var undoLabel = activeEdit && activeEdit.changed
+      ? activeEdit.label
+      : (undoItem && undoItem.label);
+    var redoLabel = redoItem && redoItem.label;
+
+    if (undoButton) {
+      undoButton.disabled = state.saving || !undoLabel;
+      undoButton.setAttribute("title", undoLabel ? "Undo " + undoLabel : "Nothing to undo");
+      undoButton.setAttribute("aria-label", undoLabel ? "Undo " + undoLabel : "Nothing to undo");
+    }
+    if (redoButton) {
+      redoButton.disabled = state.saving || !redoLabel;
+      redoButton.setAttribute("title", redoLabel ? "Redo " + redoLabel : "Nothing to redo");
+      redoButton.setAttribute("aria-label", redoLabel ? "Redo " + redoLabel : "Nothing to redo");
+    }
+  }
+
+  function resetHistory() {
+    state.undoHistory = [];
+    state.redoHistory = [];
+    state.activeFieldEdit = null;
+    state.historyBaselineSignature = historyContentSignature(captureEditorState());
+    renderHistoryState();
+  }
+
+  function commitHistorySnapshot(label, beforeState) {
+    var afterState = captureEditorState();
+
+    if (!beforeState || historyStatesEqual(beforeState, afterState)) {
+      updateDirtyFromEditorState();
+      renderHistoryState();
+      return false;
+    }
+
+    state.undoHistory.push({
+      label: label || "Change",
+      snapshot: beforeState
+    });
+    trimHistoryStack(state.undoHistory);
+    state.redoHistory = [];
+    updateDirtyFromEditorState();
+    renderHistoryState();
+    return true;
+  }
+
+  function finishActiveFieldEdit() {
+    var activeEdit = state.activeFieldEdit;
+
+    state.activeFieldEdit = null;
+    if (!activeEdit || !activeEdit.changed) {
+      renderHistoryState();
+      return false;
+    }
+    return commitHistorySnapshot(activeEdit.label, activeEdit.snapshot);
+  }
+
+  function beginFieldEdit(entryId, fieldName) {
+    var activeEdit = state.activeFieldEdit;
+
+    if (
+      activeEdit &&
+      activeEdit.entryId === entryId &&
+      activeEdit.fieldName === fieldName
+    ) {
+      return;
+    }
+
+    finishActiveFieldEdit();
+    state.activeFieldEdit = {
+      entryId: entryId,
+      fieldName: fieldName,
+      label: historyLabelForField(fieldName),
+      snapshot: captureEditorState(),
+      changed: false
+    };
+    renderHistoryState();
+  }
+
+  function noteFieldEditMutation(entryId, fieldName) {
+    var activeEdit = state.activeFieldEdit;
+
+    if (
+      !activeEdit ||
+      activeEdit.entryId !== entryId ||
+      activeEdit.fieldName !== fieldName
+    ) {
+      beginFieldEdit(entryId, fieldName);
+      activeEdit = state.activeFieldEdit;
+    }
+
+    if (activeEdit && !activeEdit.changed) {
+      activeEdit.changed = true;
+      state.redoHistory = [];
+    }
+    renderHistoryState();
+  }
+
+  function beginHistoryMutation() {
+    finishActiveFieldEdit();
+    return captureEditorState();
+  }
+
+  function completeHistoryMutation(label, beforeState) {
+    return commitHistorySnapshot(label, beforeState);
+  }
+
+  function restoreEditorState(snapshot) {
+    state.entries = cloneHistoryValue(snapshot.entries, []);
+    state.selectedDivisionId = snapshot.selectedDivisionId;
+    state.selectedNoteId = snapshot.selectedNoteId;
+    state.selectedId = snapshot.selectedId;
+    state.collapsedEntryIds = cloneHistoryValue(snapshot.collapsedEntryIds, {});
+    state.modelIssueResolutions = cloneHistoryValue(snapshot.modelIssueResolutions, {});
+    state.reviewedModelHealthSignature = text(snapshot.reviewedModelHealthSignature);
+    ensureSelection();
+    updateDirtyFromEditorState();
+    renderAll();
+    syncLocalEditClaims();
+  }
+
+  function undoEditorChange() {
+    var item;
+    var currentState;
+
+    if (state.saving) {
+      return;
+    }
+
+    finishActiveFieldEdit();
+    item = state.undoHistory.pop();
+    if (!item) {
+      renderHistoryState();
+      return;
+    }
+
+    currentState = captureEditorState();
+    state.redoHistory.push({ label: item.label, snapshot: currentState });
+    trimHistoryStack(state.redoHistory);
+    restoreEditorState(item.snapshot);
+    setStatus({ status: "ready", message: "Undid " + item.label + "." });
+  }
+
+  function redoEditorChange() {
+    var item;
+    var currentState;
+
+    if (state.saving) {
+      return;
+    }
+
+    finishActiveFieldEdit();
+    item = state.redoHistory.pop();
+    if (!item) {
+      renderHistoryState();
+      return;
+    }
+
+    currentState = captureEditorState();
+    state.undoHistory.push({ label: item.label, snapshot: currentState });
+    trimHistoryStack(state.undoHistory);
+    restoreEditorState(item.snapshot);
+    setStatus({ status: "ready", message: "Redid " + item.label + "." });
+  }
+
   function renderMeta() {
     var payload = state.payload || {};
     setText("doc-title", payload.docTitle || "No Revit document");
@@ -2233,6 +2474,17 @@
         unlockKeyInput(keyInput);
       });
 
+      keyInput.addEventListener("focus", function () {
+        beginFieldEdit(entry.id, "key");
+      });
+
+      textInput.addEventListener("focus", function () {
+        beginFieldEdit(entry.id, "text");
+      });
+
+      keyInput.addEventListener("blur", finishActiveFieldEdit);
+      textInput.addEventListener("blur", finishActiveFieldEdit);
+
       keyInput.addEventListener("input", function () {
         updateEntryField(entry.id, "key", keyInput.value, false);
       });
@@ -2426,6 +2678,7 @@
     var newKey = "";
     var originalText;
     var replacementEntry;
+    var historyState;
 
     if (!resolution || (source !== "familyType" && source !== "textFile" && source !== "keepBoth")) {
       return;
@@ -2439,6 +2692,8 @@
       return;
     }
 
+    historyState = beginHistoryMutation();
+
     if (previousResolution.createdEntryId) {
       state.entries = state.entries.filter(function (candidate) {
         return candidate.id !== previousResolution.createdEntryId;
@@ -2449,6 +2704,7 @@
       entry = entriesByKey()[issue.key];
       if (!entry) {
         setStatus({ status: "warning", message: "Keynote " + issue.key + " is no longer in the text file." });
+        completeHistoryMutation("Resolve model issue", historyState);
         renderAll();
         return;
       }
@@ -2486,6 +2742,7 @@
       };
       markDirty();
       syncLocalEditClaims();
+      completeHistoryMutation("Resolve model issue", historyState);
       setStatus({
         status: "warning",
         message: source === "familyType"
@@ -2539,6 +2796,7 @@
     };
     markDirty();
     syncLocalEditClaims();
+    completeHistoryMutation("Resolve model issue", historyState);
     setStatus({
       status: "warning",
       message: source === "familyType"
@@ -2968,6 +3226,7 @@
       analyticsButton.disabled = state.analyticsCollecting || !state.payload || !state.payload.libraryKey;
       analyticsButton.textContent = state.analyticsCollecting ? "Collecting..." : "Collect Analytics";
     }
+    renderHistoryState();
   }
 
   function syncSidebarState() {
@@ -4325,6 +4584,7 @@
 
     setDirty(false);
     rememberBaseline();
+    resetHistory();
     setStatusFromPayload(state.payload);
     renderAll();
   }
@@ -4353,53 +4613,63 @@
     attachSupabaseLibrary(state.payload, "load");
   }
 
-  function updateEntryField(entryId, fieldName, value, shouldRender) {
+  function updateEntryField(entryId, fieldName, value, shouldRender, trackFieldHistory) {
     var entry = findEntryById(entryId);
     var oldKey;
+    var nextValue;
 
     if (!entry) {
-      return;
+      return false;
     }
     if (blockForSafeMode("Editing")) {
-      return;
+      return false;
     }
     if (isEntryRemotelyClaimed(entry)) {
       setStatus({ status: "warning", message: editClaimTitle(entry) || "This keynote is being edited by another user." });
       renderAll();
-      return;
+      return false;
+    }
+
+    nextValue = fieldName === "text" ? text(value) : trim(value);
+    if (text(entry[fieldName]) === nextValue) {
+      return false;
+    }
+
+    if (trackFieldHistory !== false) {
+      noteFieldEditMutation(entryId, fieldName);
     }
 
     if (fieldName === "key") {
-      value = trim(value);
       oldKey = entry.key;
-      entry.key = value;
-      if (oldKey && oldKey !== value) {
+      entry.key = nextValue;
+      if (oldKey && oldKey !== nextValue) {
         state.entries.forEach(function (candidate) {
           if (candidate.parentKey === oldKey) {
-            candidate.parentKey = value;
+            candidate.parentKey = nextValue;
           }
         });
       }
     } else if (fieldName === "text") {
-      entry.text = text(value);
+      entry.text = nextValue;
     } else if (fieldName === "parentKey") {
-      entry.parentKey = trim(value);
+      entry.parentKey = nextValue;
     }
 
-    markDirty();
+    updateDirtyFromEditorState();
     if (fieldName === "key" || fieldName === "text") {
       syncLocalEditClaims();
     }
 
     if (shouldRender) {
       renderAll();
-      return;
+      return true;
     }
 
     renderMeta();
     renderValidation();
     renderSaveState();
     syncSelectionClasses();
+    return true;
   }
 
   function addRemoteReservedKeys(map) {
@@ -4537,10 +4807,13 @@
   }
 
   function addRoot() {
+    var historyState;
+
     if (blockForSafeMode("Adding keynotes")) {
       return;
     }
 
+    historyState = beginHistoryMutation();
     var entry = {
       id: makeLocalId(),
       key: makeRootKey(),
@@ -4555,6 +4828,7 @@
     state.selectedId = entry.id;
     markDirty();
     syncLocalEditClaims();
+    completeHistoryMutation("Add parent", historyState);
     renderAll();
   }
 
@@ -4572,6 +4846,7 @@
 
   function addNoteUnderParent(parent, missingParentMessage) {
     var entry;
+    var historyState;
 
     if (blockForSafeMode("Adding keynotes")) {
       return;
@@ -4590,6 +4865,7 @@
       return;
     }
 
+    historyState = beginHistoryMutation();
     entry = {
       id: makeLocalId(),
       key: makeChildKey(parent.key),
@@ -4602,6 +4878,7 @@
     setSelectionForEntry(entry);
     markDirty();
     syncLocalEditClaims();
+    completeHistoryMutation("Add keynote", historyState);
     renderAll();
   }
 
@@ -4646,6 +4923,7 @@
   function duplicateSelected() {
     var entry = actionTargetEntry();
     var copy;
+    var historyState;
 
     if (!entry) {
       return;
@@ -4659,6 +4937,7 @@
       return;
     }
 
+    historyState = beginHistoryMutation();
     copy = {
       id: makeLocalId(),
       key: makeUniqueKey(entry.key + "-COPY"),
@@ -4671,10 +4950,13 @@
     setSelectionForEntry(copy);
     markDirty();
     syncLocalEditClaims();
+    completeHistoryMutation("Duplicate keynote", historyState);
     renderAll();
   }
 
   function deleteEntry(entry) {
+    var historyState;
+
     if (!entry) {
       return;
     }
@@ -4695,6 +4977,7 @@
       return;
     }
 
+    historyState = beginHistoryMutation();
     state.entries = state.entries.filter(function (candidate) {
       return candidate.id !== entry.id;
     });
@@ -4710,6 +4993,7 @@
     ensureSelection();
     markDirty();
     syncLocalEditClaims();
+    completeHistoryMutation("Delete keynote", historyState);
     renderAll();
   }
 
@@ -4725,6 +5009,8 @@
   }
 
   function moveNoteToDivision(entry, division) {
+    var historyState;
+
     if (!entry || !division || trim(division.parentKey)) {
       setStatus({ status: "error", message: "Select a valid division before moving this keynote." });
       return;
@@ -4745,10 +5031,12 @@
       return;
     }
 
+    historyState = beginHistoryMutation();
     entry.parentKey = division.key;
     setSelectionForEntry(entry);
     markDirty();
     syncLocalEditClaims();
+    completeHistoryMutation("Move keynote", historyState);
     renderAll();
     setStatus({
       status: "ready",
@@ -4757,6 +5045,8 @@
   }
 
   function promoteNoteToParent(entry) {
+    var historyState;
+
     if (!entry || !trim(entry.parentKey)) {
       setStatus({ status: "warning", message: "This keynote is already a parent." });
       return;
@@ -4770,10 +5060,12 @@
       return;
     }
 
+    historyState = beginHistoryMutation();
     entry.parentKey = "";
     setSelectionForEntry(entry);
     markDirty();
     syncLocalEditClaims();
+    completeHistoryMutation("Promote keynote", historyState);
     renderAll();
     setStatus({
       status: "ready",
@@ -4782,6 +5074,8 @@
   }
 
   function demoteParentToNote(entry, destination) {
+    var historyState;
+
     if (!entry || trim(entry.parentKey) || !destination || trim(destination.parentKey) || entry.id === destination.id) {
       setStatus({ status: "error", message: "Select another valid parent before demoting this parent." });
       return;
@@ -4795,10 +5089,12 @@
       return;
     }
 
+    historyState = beginHistoryMutation();
     entry.parentKey = destination.key;
     setSelectionForEntry(entry);
     markDirty();
     syncLocalEditClaims();
+    completeHistoryMutation("Demote parent", historyState);
     renderAll();
     setStatus({
       status: "ready",
@@ -4810,6 +5106,7 @@
     var entriesToDelete;
     var claimedEntry;
     var deleteIds = {};
+    var historyState;
 
     if (!entry || trim(entry.parentKey)) {
       return;
@@ -4829,6 +5126,7 @@
       return;
     }
 
+    historyState = beginHistoryMutation();
     entriesToDelete.forEach(function (candidate) {
       deleteIds[candidate.id] = true;
       delete state.collapsedEntryIds[candidate.id];
@@ -4846,6 +5144,7 @@
     ensureSelection();
     markDirty();
     syncLocalEditClaims();
+    completeHistoryMutation("Delete parent and subnotes", historyState);
     renderAll();
     setStatus({
       status: "ready",
@@ -4857,6 +5156,7 @@
   function deleteParentAndMoveSubnotes(entry, destination) {
     var directChildren;
     var claimedEntry;
+    var historyState;
 
     if (
       !entry ||
@@ -4883,6 +5183,7 @@
       return;
     }
 
+    historyState = beginHistoryMutation();
     directChildren.forEach(function (child) {
       child.parentKey = destination.key;
     });
@@ -4893,6 +5194,7 @@
     setSelectionForEntry(destination);
     markDirty();
     syncLocalEditClaims();
+    completeHistoryMutation("Delete parent and move subnotes", historyState);
     renderAll();
     setStatus({
       status: "ready",
@@ -4903,6 +5205,7 @@
 
   function uppercaseNoteText(entry) {
     var upperText;
+    var historyState;
 
     if (!entry) {
       return;
@@ -4916,7 +5219,11 @@
       return;
     }
 
-    updateEntryField(entry.id, "text", upperText, true);
+    historyState = beginHistoryMutation();
+    if (!updateEntryField(entry.id, "text", upperText, true, false)) {
+      return;
+    }
+    completeHistoryMutation("Convert keynote text to uppercase", historyState);
     setStatus({
       status: "ready",
       message: "Converted text for keynote '" + (entry.key || "new keynote") + "' to uppercase."
@@ -5219,6 +5526,13 @@
       return;
     }
 
+    input.addEventListener("focus", function () {
+      var entry = selectedDivisionEntry();
+      if (entry) {
+        beginFieldEdit(entry.id, fieldName);
+      }
+    });
+
     if (fieldName === "key") {
       input.addEventListener("dblclick", function (event) {
         event.preventDefault();
@@ -5236,6 +5550,7 @@
       if (fieldName === "key") {
         lockKeyInput(input);
       }
+      finishActiveFieldEdit();
       deferRenderAllWhenEditingSettles();
     });
   }
@@ -5375,9 +5690,12 @@
     bindClick("configure-supabase", configureSupabase);
     bindClick("refresh-data", refreshData);
     bindClick("collect-analytics", collectAnalytics);
+    bindClick("undo-change", undoEditorChange);
+    bindClick("redo-change", redoEditorChange);
     bindClick("save-data", saveData);
     bindClick("close-window", closeWindow);
 
+    resetHistory();
     renderAll();
     postWebViewMessage({ type: "appReady" });
   }
