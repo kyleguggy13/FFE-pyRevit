@@ -47,6 +47,8 @@ TODO:
 - If user 1 is editing note prevent other users from placing that note until it's released.
 - When done placing generic annotation keynotes, app thinks user aborted: "Could not place Generic Annotation keynote '4.05': The user aborted the pick operation." 
 - Refresh the view after keynote placement.
+- Establish safeguards for using the correct Generic Annotation family type and leader arrowhead.
+- Establish safeguards for using the correct keynote schedule for Revit Keynotes and Generic Annotations.
 
 
 Key behaviors:

@@ -16,7 +16,6 @@ At the top of the window, confirm that the correct Revit document is listed. If 
 - Figure out how to work around Keynote's workset.
 - When user 1 deletes note and saves it deletes the note for user 2 without refresh.
 - If user 1 is editing note prevent other users from placing that note until it's released.
-- Look into having an undo/redo.
 
 ### Future Features:
 - Tagging/Reference System
