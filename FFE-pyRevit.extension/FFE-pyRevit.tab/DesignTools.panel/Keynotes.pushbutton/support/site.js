@@ -5,6 +5,10 @@
   var REMOTE_ENTRY_REFRESH_DELAY_MS = 600;
   var EDIT_CLAIM_HEARTBEAT_MS = 60000;
   var HISTORY_LIMIT = 50;
+  var NOTE_KEY_COLUMN_DEFAULT_WIDTH = 120;
+  var NOTE_KEY_COLUMN_MIN_WIDTH = 96;
+  var NOTE_DESCRIPTION_COLUMN_MIN_WIDTH = 180;
+  var NOTE_ACTION_COLUMN_WIDTH = 64;
   var activeRowActionMenu = null;
 
   var state = {
@@ -50,7 +54,8 @@
     undoHistory: [],
     redoHistory: [],
     activeFieldEdit: null,
-    historyBaselineSignature: ""
+    historyBaselineSignature: "",
+    noteKeyColumnWidth: NOTE_KEY_COLUMN_DEFAULT_WIDTH
   };
 
   var STATUS_TITLES = {
@@ -5562,6 +5567,116 @@
     }
   }
 
+  function noteKeyColumnMaxWidth() {
+    var shell = byId("notes-section-body");
+    var availableWidth = shell ? shell.clientWidth : 0;
+
+    if (!availableWidth) {
+      return NOTE_KEY_COLUMN_DEFAULT_WIDTH;
+    }
+
+    return Math.max(
+      NOTE_KEY_COLUMN_MIN_WIDTH,
+      availableWidth - NOTE_ACTION_COLUMN_WIDTH - NOTE_DESCRIPTION_COLUMN_MIN_WIDTH
+    );
+  }
+
+  function setNoteKeyColumnWidth(width) {
+    var table = document.querySelector(".note-table");
+    var handle = byId("note-key-resize-handle");
+    var maxWidth = noteKeyColumnMaxWidth();
+    var nextWidth = Math.max(
+      NOTE_KEY_COLUMN_MIN_WIDTH,
+      Math.min(maxWidth, Math.round(Number(width) || NOTE_KEY_COLUMN_DEFAULT_WIDTH))
+    );
+
+    state.noteKeyColumnWidth = nextWidth;
+    if (table) {
+      table.style.setProperty("--note-key-column-width", nextWidth + "px");
+    }
+    if (handle) {
+      handle.setAttribute("aria-valuemax", String(maxWidth));
+      handle.setAttribute("aria-valuenow", String(nextWidth));
+    }
+  }
+
+  function bindNoteKeyColumnResize() {
+    var handle = byId("note-key-resize-handle");
+    var resizeState = null;
+
+    if (!handle) {
+      return;
+    }
+
+    function finishResize(event) {
+      if (!resizeState) {
+        return;
+      }
+      if (event && event.pointerId !== undefined && handle.hasPointerCapture(event.pointerId)) {
+        handle.releasePointerCapture(event.pointerId);
+      }
+      resizeState = null;
+      handle.classList.remove("is-active");
+      document.body.classList.remove("is-resizing-note-column");
+    }
+
+    handle.addEventListener("pointerdown", function (event) {
+      if (event.button !== 0) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      resizeState = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startWidth: state.noteKeyColumnWidth
+      };
+      handle.setPointerCapture(event.pointerId);
+      handle.classList.add("is-active");
+      document.body.classList.add("is-resizing-note-column");
+    });
+
+    handle.addEventListener("pointermove", function (event) {
+      if (!resizeState || event.pointerId !== resizeState.pointerId) {
+        return;
+      }
+      setNoteKeyColumnWidth(resizeState.startWidth + event.clientX - resizeState.startX);
+    });
+
+    handle.addEventListener("pointerup", finishResize);
+    handle.addEventListener("pointercancel", finishResize);
+    handle.addEventListener("lostpointercapture", finishResize);
+
+    handle.addEventListener("dblclick", function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      setNoteKeyColumnWidth(NOTE_KEY_COLUMN_DEFAULT_WIDTH);
+    });
+
+    handle.addEventListener("keydown", function (event) {
+      var step = event.shiftKey ? 25 : 10;
+      var nextWidth;
+
+      if (event.key === "ArrowLeft") {
+        nextWidth = state.noteKeyColumnWidth - step;
+      } else if (event.key === "ArrowRight") {
+        nextWidth = state.noteKeyColumnWidth + step;
+      } else if (event.key === "Home") {
+        nextWidth = NOTE_KEY_COLUMN_MIN_WIDTH;
+      } else if (event.key === "End") {
+        nextWidth = noteKeyColumnMaxWidth();
+      } else {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      setNoteKeyColumnWidth(nextWidth);
+    });
+
+    setNoteKeyColumnWidth(state.noteKeyColumnWidth);
+  }
+
   function init() {
     var searchInput = byId("search-input");
     var divisionSelectMenu = byId("division-select-menu");
@@ -5634,6 +5749,7 @@
     });
     globalScope.addEventListener("resize", function () {
       closeRowActionMenu(false);
+      setNoteKeyColumnWidth(state.noteKeyColumnWidth);
     });
     if (byId("notes-section-body")) {
       byId("notes-section-body").addEventListener("scroll", function () {
@@ -5648,6 +5764,7 @@
 
     bindDivisionInput("division-key-input", "key");
     bindDivisionInput("division-text-input", "text");
+    bindNoteKeyColumnResize();
 
     bindClick("division-more-button", function (event) {
       var entry = selectedDivisionEntry();
