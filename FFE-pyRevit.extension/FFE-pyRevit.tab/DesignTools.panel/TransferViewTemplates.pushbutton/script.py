@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-__title__     = "Transfer ViewTemplates"
+__title__     = "Transfer View \nTemplates"
 __version__   = 'Version = v1.0'
 __doc__       = """Version = v1.0
 Date    = 03.25.2025
