@@ -60,6 +60,8 @@ Use `Show` to control which keynotes are visible:
 
 The placed and unused filters use placement information collected from the model. Use `Collect Analytics` when you need the filters to reflect current model placement.
 
+Keynote keys show a green `Nx` badge when they are placed in the active model. If the same library is tracked in other Revit models, a blue `NM` badge marks keys placed in those other models; hover over that badge to see the model names and placement counts. Other-model usage is informational and does not change the `Placed Keynotes` or `Unused Keynotes` filters.
+
 Use `Place As` to choose how the place button in the keynote table behaves:
 
 - `User Keynote` places a standard Revit user keynote.
@@ -130,7 +132,7 @@ The manager automatically scans the active Revit document for keynote placement 
 
 Click `Collect Analytics` to run the scan again, especially after other users have added or removed keynote annotations while the manager is open.
 
-Supabase stores only the latest collected analytics for each keynote library and Revit document. Collecting again updates the existing document summary and keynote rows in place; it does not create a historical analytics run.
+Supabase stores only the latest collected analytics for each keynote library and Revit document. Collecting again updates the existing document summary and keynote rows in place; it does not create a historical analytics run. After syncing, the manager also compares the library's other document snapshots and marks keys placed in those models.
 
 ## Warnings and Common Issues
 

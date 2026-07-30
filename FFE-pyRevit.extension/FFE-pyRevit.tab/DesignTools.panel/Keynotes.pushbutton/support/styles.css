@@ -770,6 +770,10 @@ h2 {
   padding-right: 34px;
 }
 
+.division-row-copy strong.sheet-marker-anchor.has-multiple-usage-markers {
+  padding-right: 70px;
+}
+
 .division-row-copy span {
   font-size: var(--t-em-xs);
 }
@@ -988,6 +992,10 @@ h2 {
   padding-right: 34px;
 }
 
+.division-key-field.sheet-marker-anchor.has-multiple-usage-markers {
+  padding-right: 70px;
+}
+
 .division-key-field input,
 .division-text-field input {
   width: 100%;
@@ -1101,6 +1109,10 @@ h2 {
 
 .division-select-menu .dropdown-item.sheet-marker-anchor {
   padding-right: 42px;
+}
+
+.division-select-menu .dropdown-item.sheet-marker-anchor.has-multiple-usage-markers {
+  padding-right: 78px;
 }
 
 .division-select-menu .dropdown-item > span {
@@ -1317,31 +1329,47 @@ body.is-resizing-note-column * {
   padding-right: 36px;
 }
 
+.note-key-wrap.sheet-marker-anchor.has-multiple-usage-markers {
+  padding-right: 72px;
+}
+
 .sheet-marker-anchor {
   position: relative;
 }
 
-.sheet-visible-marker {
-  min-width: 22px;
-  height: 18px;
+.keynote-usage-markers {
   position: absolute;
   top: 50%;
   right: 2px;
   z-index: 2;
   display: inline-flex;
   align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+  pointer-events: auto;
+  transform: translateY(-50%);
+}
+
+.sheet-visible-marker,
+.other-model-marker {
+  min-width: 22px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
   padding: 2px 6px;
   border-radius: 999px;
-  background: #e8f7e9;
-  color: #16823b;
   font-size: var(--t-em-xs);
   font-weight: var(--w-semibold);
   line-height: 1;
   white-space: nowrap;
   pointer-events: auto;
+}
+
+.sheet-visible-marker {
+  background: #e8f7e9;
+  color: #16823b;
   cursor: pointer;
-  transform: translateY(-50%);
 }
 
 .sheet-visible-marker:hover {
@@ -1350,6 +1378,21 @@ body.is-resizing-note-column * {
 
 .sheet-visible-marker:focus-visible {
   outline: 2px solid #16823b;
+  outline-offset: 2px;
+}
+
+.other-model-marker {
+  background: #e8f1fb;
+  color: #235f9e;
+  cursor: help;
+}
+
+.other-model-marker:hover {
+  background: #dceafa;
+}
+
+.other-model-marker:focus-visible {
+  outline: 2px solid #235f9e;
   outline-offset: 2px;
 }
 

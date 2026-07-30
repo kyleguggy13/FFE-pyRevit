@@ -131,6 +131,10 @@ create table if not exists public.keynote_analytics_keynotes (
 create index if not exists keynote_analytics_keynotes_document_placed_idx
   on public.keynote_analytics_keynotes (analytics_document_id, placed, keynote_key);
 
+create index if not exists keynote_analytics_keynotes_placed_key_document_idx
+  on public.keynote_analytics_keynotes (keynote_key, analytics_document_id)
+  where placed;
+
 create or replace function public.touch_keynote_updated_at()
 returns trigger
 language plpgsql
@@ -411,6 +415,76 @@ begin
 
   return public.build_keynote_snapshot(v_library_id)
     || jsonb_build_object('status', 'ready', 'message', 'Loaded keynote library from Supabase.');
+end;
+$$;
+
+create or replace function public.get_keynote_other_model_usage(
+  p_library_key text,
+  p_document_key text default ''
+)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public
+set statement_timeout = '60s'
+as $$
+declare
+  v_library_id uuid;
+  v_usage jsonb;
+begin
+  select id into v_library_id
+  from public.keynote_libraries
+  where library_key = p_library_key;
+
+  if v_library_id is null then
+    return jsonb_build_object(
+      'status', 'error',
+      'message', 'Keynote library was not found.',
+      'otherModelUsage', '[]'::jsonb
+    );
+  end if;
+
+  select coalesce(jsonb_agg(
+    jsonb_build_object(
+      'keynoteKey', usage.keynote_key,
+      'documentCount', usage.document_count,
+      'placedCount', usage.placed_count,
+      'models', usage.models
+    )
+    order by usage.keynote_key
+  ), '[]'::jsonb)
+  into v_usage
+  from (
+    select
+      k.keynote_key,
+      count(*)::integer as document_count,
+      coalesce(sum(k.placed_count), 0)::integer as placed_count,
+      jsonb_agg(
+        jsonb_build_object(
+          'documentKey', d.document_key,
+          'documentTitle', coalesce(nullif(btrim(d.document_title), ''), d.document_key),
+          'placedCount', k.placed_count,
+          'collectedAt', coalesce(nullif(d.client_collected_at, ''), d.updated_at::text)
+        )
+        order by coalesce(nullif(btrim(d.document_title), ''), d.document_key), d.document_key
+      ) as models
+    from public.keynote_analytics_documents d
+    join public.keynote_analytics_keynotes k
+      on k.analytics_document_id = d.id
+    where d.library_id = v_library_id
+      and d.document_key <> btrim(coalesce(p_document_key, ''))
+      and k.placed
+    group by k.keynote_key
+  ) usage;
+
+  return jsonb_build_object(
+    'status', 'ready',
+    'message', 'Loaded keynote usage from other models.',
+    'libraryId', v_library_id::text,
+    'documentKey', btrim(coalesce(p_document_key, '')),
+    'otherModelUsage', v_usage
+  );
 end;
 $$;
 
@@ -1140,7 +1214,10 @@ begin
 
   get diagnostics v_deleted_count = row_count;
 
-  return jsonb_build_object(
+  return public.get_keynote_other_model_usage(
+    p_library_key,
+    btrim(coalesce(p_document_key, ''))
+  ) || jsonb_build_object(
     'status', 'ready',
     'message', 'Updated keynote analytics in Supabase.',
     'analyticsDocumentId', v_analytics_document_id::text,
@@ -1211,6 +1288,7 @@ revoke execute on function public.build_keynote_edit_claims(uuid) from public;
 revoke execute on function public.validate_keynote_library(uuid) from public;
 revoke execute on function public.ensure_keynote_library(text, text, text, text, jsonb, text, text) from public;
 revoke execute on function public.get_keynote_snapshot(text) from public;
+revoke execute on function public.get_keynote_other_model_usage(text, text) from public;
 revoke execute on function public.get_keynote_edit_claims(text) from public;
 revoke execute on function public.replace_keynote_edit_claims(text, text, text, jsonb) from public;
 revoke execute on function public.sync_keynote_file_snapshot(text, text, text, text, text, double precision, jsonb, text, text) from public;
@@ -1219,6 +1297,7 @@ revoke execute on function public.sync_keynote_analytics(text, text, text, text,
 
 grant execute on function public.ensure_keynote_library(text, text, text, text, jsonb, text, text) to anon, authenticated;
 grant execute on function public.get_keynote_snapshot(text) to anon, authenticated;
+grant execute on function public.get_keynote_other_model_usage(text, text) to anon, authenticated;
 grant execute on function public.get_keynote_edit_claims(text) to anon, authenticated;
 grant execute on function public.replace_keynote_edit_claims(text, text, text, jsonb) to anon, authenticated;
 grant execute on function public.sync_keynote_file_snapshot(text, text, text, text, text, double precision, jsonb, text, text) to anon, authenticated;
@@ -1255,6 +1334,16 @@ begin
       and tablename = 'keynote_edit_claims'
   ) then
     alter publication supabase_realtime add table public.keynote_edit_claims;
+  end if;
+
+  if not exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'keynote_analytics_documents'
+  ) then
+    alter publication supabase_realtime add table public.keynote_analytics_documents;
   end if;
 end;
 $$;

@@ -8,6 +8,8 @@
   var currentEntriesLibraryId = "";
   var activeClaimsChannel = null;
   var currentClaimsLibraryId = "";
+  var activeAnalyticsChannel = null;
+  var currentAnalyticsLibraryId = "";
 
   function text(value) {
     if (value === null || value === undefined) {
@@ -178,6 +180,13 @@
     }, { raw: true });
   }
 
+  function getOtherModelUsage(libraryKey, documentKey) {
+    return rpc("get_keynote_other_model_usage", {
+      p_library_key: libraryKey,
+      p_document_key: documentKey || ""
+    }, { raw: true });
+  }
+
   function getEditClaims(libraryKey) {
     return rpc("get_keynote_edit_claims", {
       p_library_key: libraryKey
@@ -204,16 +213,20 @@
     var channel = activeChannel;
     var entriesChannel = activeEntriesChannel;
     var claimsChannel = activeClaimsChannel;
+    var analyticsChannel = activeAnalyticsChannel;
     activeChannel = null;
     activeEntriesChannel = null;
     activeClaimsChannel = null;
+    activeAnalyticsChannel = null;
     currentLibraryId = "";
     currentEntriesLibraryId = "";
     currentClaimsLibraryId = "";
+    currentAnalyticsLibraryId = "";
 
     removeChannel(channel);
     removeChannel(entriesChannel);
     removeChannel(claimsChannel);
+    removeChannel(analyticsChannel);
   }
 
   function subscribeLibrary(libraryId, clientId, handlers) {
@@ -356,6 +369,40 @@
     return activeClaimsChannel;
   }
 
+  function subscribeAnalyticsDocuments(libraryId, clientId, handlers) {
+    handlers = handlers || {};
+    libraryId = text(libraryId);
+
+    if (!supabaseClient || !libraryId) {
+      return null;
+    }
+    if (currentAnalyticsLibraryId === libraryId && activeAnalyticsChannel) {
+      return activeAnalyticsChannel;
+    }
+
+    removeChannel(activeAnalyticsChannel);
+    activeAnalyticsChannel = null;
+    currentAnalyticsLibraryId = libraryId;
+    activeAnalyticsChannel = supabaseClient.channel("keynote-analytics-" + libraryId)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "keynote_analytics_documents",
+          filter: "library_id=eq." + libraryId
+        },
+        function (payload) {
+          if (typeof handlers.onAnalyticsChanged === "function") {
+            handlers.onAnalyticsChanged(payload || {});
+          }
+        }
+      )
+      .subscribe();
+
+    return activeAnalyticsChannel;
+  }
+
   globalScope.ffeKeynoteDb = {
     configure: configure,
     ensureLibrary: ensureLibrary,
@@ -363,11 +410,13 @@
     syncFileSnapshot: syncFileSnapshot,
     saveChanges: saveChanges,
     syncAnalytics: syncAnalytics,
+    getOtherModelUsage: getOtherModelUsage,
     getEditClaims: getEditClaims,
     setEditClaims: setEditClaims,
     subscribeLibrary: subscribeLibrary,
     subscribeEntries: subscribeEntries,
     subscribeEditClaims: subscribeEditClaims,
+    subscribeAnalyticsDocuments: subscribeAnalyticsDocuments,
     unsubscribe: unsubscribe
   };
 }(typeof window !== "undefined" ? window : this));

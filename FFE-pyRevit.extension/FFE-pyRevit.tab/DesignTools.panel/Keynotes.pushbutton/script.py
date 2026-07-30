@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 __title__ = "FFE-Keynotes"
-__version__ = "v1.1"
+__version__ = "v1.2"
 __persistentengine__ = True
 __min_revit_ver__ = 2025
-__doc__ = """Version = v1.1
-Date    = 07.22.2026
+__doc__ = """Version = v1.2
+Date    = 07.30.2026
 __________________________________________________________________
 Description:
 Persistent WebView2 keynote manager for the active Revit document's
@@ -35,6 +35,7 @@ Last update:
 - [07.15.2026] - v0.17 Added automatic keynote analytics collection when the manager opens.
 - [07.22.2026] - v1.0 Graduating to v1.0 with a stable feature set and improved performance.
 - [07.22.2026] - v1.1 Added bounded undo/redo history for unsaved keynote edits.
+- [07.30.2026] - v1.2 Marked keynotes placed in other Revit models that share the library.
 __________________________________________________________________
 Author: Kyle Guggenheim"""
 
@@ -144,7 +145,7 @@ PATH_SUPPORT = os.path.join(PATH_SCRIPT, "support")
 PATH_INDEX = os.path.join(PATH_SUPPORT, "index.html")
 
 APP_NAME = "FFE Keynote Manager"
-APP_VERSION = "v1.0"
+APP_VERSION = "v1.2"
 LOCAL_APP_NAME = "KeynoteManager"
 GENERIC_KEYNOTE_FAMILY_NAME = "FFE_Symbol_Keynote (Type)"
 GENERIC_KEYNOTE_NUMBER_PARAMETER = "Number"
@@ -1099,7 +1100,7 @@ def make_empty_model_health(status="notScanned", message="Model health has not b
 
 
 def build_base_payload(target_doc, status, message):
-    return {
+    payload = {
         "name": APP_NAME,
         "version": APP_VERSION,
         "docTitle": get_document_title(target_doc),
@@ -1125,6 +1126,8 @@ def build_base_payload(target_doc, status, message):
         "sheetVisibleKeynotes": {},
         "modelHealth": make_empty_model_health(),
     }
+    payload.update(get_document_analytics_identity(target_doc))
+    return payload
 
 
 def build_keynote_payload(target_doc, include_model_health=True):

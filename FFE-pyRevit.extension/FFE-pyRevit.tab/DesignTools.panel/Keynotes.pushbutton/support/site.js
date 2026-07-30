@@ -46,6 +46,7 @@
     allowNextLoad: false,
     collapsedEntryIds: {},
     sheetVisibleKeynotes: {},
+    otherModelKeynotes: {},
     placementMode: "userKeynote",
     placementFilter: "all",
     divisionsCollapsed: false,
@@ -391,6 +392,35 @@
     return keyIsPlaced(targetKey) ? 1 : 0;
   }
 
+  function normalizeOtherModelUsage(rows) {
+    var map = {};
+    (rows || []).forEach(function (row) {
+      var key = trim(row && (row.keynoteKey || row.keynote_key));
+      var models;
+      if (!key) {
+        return;
+      }
+      models = (row.models || []).map(function (model) {
+        return {
+          documentKey: text(model.documentKey || model.document_key),
+          documentTitle: trim(model.documentTitle || model.document_title) || "Untitled model",
+          placedCount: Math.max(Number(model.placedCount || model.placed_count || 0), 0),
+          collectedAt: text(model.collectedAt || model.collected_at)
+        };
+      });
+      map[key] = {
+        documentCount: Math.max(Number(row.documentCount || row.document_count || models.length), models.length),
+        placedCount: Math.max(Number(row.placedCount || row.placed_count || 0), 0),
+        models: models
+      };
+    });
+    return map;
+  }
+
+  function otherModelUsageForKey(key) {
+    return state.otherModelKeynotes[trim(key)] || null;
+  }
+
   function createPlacedKeyBadge(key) {
     var badge;
     var placementCount = keyPlacementCount(key);
@@ -428,13 +458,69 @@
     return badge;
   }
 
-  function appendPlacedKeyBadge(parent, key) {
-    var badge = createPlacedKeyBadge(key);
-    if (badge && parent) {
-      parent.classList.add("sheet-marker-anchor");
-      parent.appendChild(badge);
+  function createOtherModelKeyBadge(key) {
+    var usage = otherModelUsageForKey(key);
+    var modelCount = usage ? Number(usage.documentCount || 0) : 0;
+    var placedCount = usage ? Number(usage.placedCount || 0) : 0;
+    var modelDetails;
+    var description;
+    var badge;
+
+    if (!usage || !modelCount) {
+      return null;
     }
+
+    modelDetails = (usage.models || []).map(function (model) {
+      return model.documentTitle + " — " + formatNumber(model.placedCount) + "x";
+    });
+    description = "Used in " + formatNumber(modelCount) +
+      (modelCount === 1 ? " other model" : " other models") +
+      " (" + formatNumber(placedCount) + " placement" + (placedCount === 1 ? "" : "s") + ")";
+
+    badge = document.createElement("span");
+    badge.setAttribute("class", "other-model-marker");
+    badge.setAttribute("tabindex", "0");
+    badge.setAttribute("aria-label", description + (modelDetails.length ? ": " + modelDetails.join("; ") : "."));
+    badge.setAttribute("title", description + (modelDetails.length ? ":\n" + modelDetails.join("\n") : "."));
+    badge.textContent = formatNumber(modelCount) + "M";
     return badge;
+  }
+
+  function clearKeyUsageBadges(parent) {
+    var markers = parent ? parent.querySelector(".keynote-usage-markers") : null;
+    if (markers && markers.parentNode) {
+      markers.parentNode.removeChild(markers);
+    }
+    if (parent) {
+      parent.classList.remove("sheet-marker-anchor");
+      parent.classList.remove("has-multiple-usage-markers");
+    }
+  }
+
+  function appendPlacedKeyBadge(parent, key) {
+    var placedBadge = createPlacedKeyBadge(key);
+    var otherModelBadge = createOtherModelKeyBadge(key);
+    var markers;
+
+    if (!parent || (!placedBadge && !otherModelBadge)) {
+      return null;
+    }
+
+    markers = document.createElement("span");
+    markers.className = "keynote-usage-markers";
+    markers.setAttribute("aria-label", "Keynote usage");
+    if (placedBadge) {
+      markers.appendChild(placedBadge);
+    }
+    if (otherModelBadge) {
+      markers.appendChild(otherModelBadge);
+    }
+    parent.classList.add("sheet-marker-anchor");
+    if (placedBadge && otherModelBadge) {
+      parent.classList.add("has-multiple-usage-markers");
+    }
+    parent.appendChild(markers);
+    return markers;
   }
 
   function sourceIssueBlocksSave(issue) {
@@ -1577,13 +1663,8 @@
     var safeMode = isModelSafeModeActive();
     var card = document.querySelector(".selected-division-card");
     var keyField = document.querySelector(".division-key-field");
-    var existingBadge = keyField ? keyField.querySelector(".sheet-visible-marker") : null;
-
-    if (existingBadge) {
-      existingBadge.parentNode.removeChild(existingBadge);
-    }
     if (keyField) {
-      keyField.classList.remove("sheet-marker-anchor");
+      clearKeyUsageBadges(keyField);
     }
 
     if (card) {
@@ -3446,6 +3527,40 @@
     return map;
   }
 
+  function applyOtherModelUsageResult(result, shouldRender) {
+    state.otherModelKeynotes = normalizeOtherModelUsage(
+      (result && (result.otherModelUsage || result.other_model_usage)) || []
+    );
+    if (shouldRender) {
+      renderAll();
+    }
+  }
+
+  function refreshOtherModelUsage() {
+    var db = dbManager();
+    var libraryKey = text(state.payload && state.payload.libraryKey);
+    var documentKey = text(state.payload && state.payload.documentKey);
+
+    if (!db || typeof db.getOtherModelUsage !== "function" || !libraryKey || !documentKey) {
+      return Promise.resolve(null);
+    }
+
+    return db.getOtherModelUsage(libraryKey, documentKey).then(function (result) {
+      if (
+        !state.payload ||
+        text(state.payload.libraryKey) !== libraryKey ||
+        text(state.payload.documentKey) !== documentKey
+      ) {
+        return result;
+      }
+      applyOtherModelUsageResult(result, true);
+      return result;
+    }).catch(function () {
+      // Analytics collection still works against older schema deployments.
+      return null;
+    });
+  }
+
   function analyticsSummary(analytics) {
     analytics = analytics || {};
     return {
@@ -4186,6 +4301,21 @@
     });
   }
 
+  function subscribeToAnalytics(snapshot) {
+    var db = dbManager();
+    var client = currentClient();
+
+    if (!db || !snapshot || !snapshot.libraryId || typeof db.subscribeAnalyticsDocuments !== "function") {
+      return;
+    }
+
+    db.subscribeAnalyticsDocuments(snapshot.libraryId, client.clientId, {
+      onAnalyticsChanged: function () {
+        refreshOtherModelUsage();
+      }
+    });
+  }
+
   function filePayloadDiffersFromSnapshot(payload, snapshot) {
     var fileEntries = (payload && payload.entries) || [];
     var snapshotEntries = (snapshot && snapshot.entries) || [];
@@ -4269,15 +4399,18 @@
           "Loaded shared keynote file.",
           "Supabase mirror recovered from the shared keynote file."
         ).then(function () {
+          refreshOtherModelUsage();
           collectAnalyticsOnOpen();
         });
       }
       applySnapshotMetadata(snapshot);
       subscribeToLibrary(snapshot);
       subscribeToEntries(snapshot);
+      subscribeToAnalytics(snapshot);
       subscribeToEditClaims(snapshot);
       refreshEditClaims();
       syncLocalEditClaims();
+      refreshOtherModelUsage();
       if (!state.dirty && reason === "load") {
         setStatus({ status: "ready", message: "Loaded shared keynote file and attached Supabase row metadata." });
       }
@@ -4351,6 +4484,7 @@
     applySnapshotMetadata(result);
     subscribeToLibrary(result);
     subscribeToEntries(result);
+    subscribeToAnalytics(result);
     subscribeToEditClaims(result);
     refreshEditClaims();
     syncLocalEditClaims();
@@ -4566,6 +4700,7 @@
     state.sheetVisibleKeynotes = Object.keys(state.modelHealth.placedKeyMap || {}).length
       ? state.modelHealth.placedKeyMap
       : normalizeSheetVisibleKeynotes(state.payload.sheetVisibleKeynotes || {});
+    state.otherModelKeynotes = {};
     state.sourceIssues = (state.payload.issues || []).filter(sourceIssueBlocksSave);
     state.operationIssues = [];
     state.collapsedEntryIds = {};
@@ -5339,6 +5474,7 @@
     syncAnalyticsResult(analytics).then(function (syncResult) {
       state.analyticsCollecting = false;
       state.operationIssues = [];
+      applyOtherModelUsageResult(syncResult, true);
       renderValidation();
       renderSaveState();
       setStatus({
