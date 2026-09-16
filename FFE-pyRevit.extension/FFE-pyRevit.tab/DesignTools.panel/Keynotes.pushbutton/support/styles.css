@@ -176,9 +176,13 @@ h2 {
   margin: 6px 6px;
   padding: 8px;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   gap: 12px;
   background: var(--page-3);
+}
+
+.app-shell:has(.safe-mode-strip:not([hidden])) {
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
 }
 
 .title-card {
@@ -438,7 +442,82 @@ h2 {
 }
 
 .file-strip {
+  flex-wrap: wrap;
+  display: flex;
+  align-items: center;
+  gap: 8px 12px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.settings-field select,
+.settings-field input {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--divider);
+  border-radius: var(--r-sm);
+  color: var(--ink-1);
+  background: var(--page-3);
+}
+
+.settings-dialog {
+  width: min(440px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  margin: auto;
+  padding: 0;
+  overflow: auto;
+  border: 1px solid var(--divider);
+  border-radius: var(--r-md);
+  color: var(--ink-1);
+  background: var(--page-3);
+  box-shadow: 0 18px 40px rgba(4, 26, 51, 0.22);
+}
+
+.settings-dialog::backdrop {
+  background: rgba(4, 26, 51, 0.25);
+}
+
+.settings-body {
+  display: grid;
+  gap: 20px;
+  padding: 16px;
+}
+
+.settings-field {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+}
+
+.settings-field label {
+  font-weight: 600;
+}
+
+.settings-field p {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--t-em-xs);
+  line-height: 1.4;
+}
+
+.settings-connection {
+  width: 100%;
+  padding-top: 16px;
+  border-top: 1px solid var(--divider-soft);
+}
+
+#supabase-settings-message:empty {
   display: none;
+}
+
+#supabase-settings-message[data-error="true"] {
+  color: #a32929;
+}
+
+#keynote-path {
+  flex: 1 1 240px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .safe-mode-strip {

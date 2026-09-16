@@ -44,6 +44,7 @@
     snapshot.displayPath = text(snapshot.displayPath || snapshot.display_path);
     snapshot.documentTitle = text(snapshot.documentTitle || snapshot.document_title);
     snapshot.documentPath = text(snapshot.documentPath || snapshot.document_path);
+    snapshot.sourceType = text(snapshot.sourceType || snapshot.source_type || "file");
     snapshot.encoding = text(snapshot.encoding || "utf-8");
     snapshot.lineEnding = snapshot.lineEnding || snapshot.line_ending || "\r\n";
     return snapshot;
@@ -178,6 +179,20 @@
       p_client_id: payload.clientId || "",
       p_client_name: payload.clientName || ""
     }, { raw: true });
+  }
+
+  function getTemplate() {
+    return rpc("get_keynote_template", { p_template_key: "ffe-divisions" }, { raw: true });
+  }
+
+  function saveAnnotationChanges(payload) {
+    return rpc("save_annotation_keynote_changes", {
+      p_library_key: payload.libraryKey,
+      p_client_id: payload.clientId || "",
+      p_client_name: payload.clientName || "",
+      p_base_dataset_version: payload.baseDatasetVersion || 0,
+      p_changes: payload.changes || {}
+    });
   }
 
   function getOtherModelUsage(libraryKey, documentKey) {
@@ -407,6 +422,8 @@
     configure: configure,
     ensureLibrary: ensureLibrary,
     getSnapshot: getSnapshot,
+    getTemplate: getTemplate,
+    saveAnnotationChanges: saveAnnotationChanges,
     syncFileSnapshot: syncFileSnapshot,
     saveChanges: saveChanges,
     syncAnalytics: syncAnalytics,

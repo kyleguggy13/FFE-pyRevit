@@ -1,21 +1,23 @@
 # -*- coding: utf-8 -*-
 __title__ = "FFE-Keynotes"
-__version__ = "v1.2"
+__version__ = "v1.3"
 __persistentengine__ = True
 __min_revit_ver__ = 2025
-__doc__ = """Version = v1.2
-Date    = 07.30.2026
+__doc__ = """Version = v1.3
+Date    = 09.16.2026
 __________________________________________________________________
 Description:
-Persistent WebView2 keynote manager for the active Revit document's
-external keynote text file.
+Persistent WebView2 keynote manager for an external text file or a Generic Annotation
+library stored in Supabase.
 __________________________________________________________________
 How-To:
 - Click the button to open the keynote manager.
 - Edit structured Key, Text, and Parent values.
 - Click Save to merge edits into the assigned keynote file and reload Revit keynotes.
+- Choose Generic Annotation Only mode for Generic Annotation keynotes without a text file.
 __________________________________________________________________
 Last update:
+- [09.16.2026] - v1.3 Added Supabase annotation libraries and Supabase template setup.
 - [05.19.2026] - v0.1 WebView2 keynote manager
 - [05.20.2026] - v0.2 Refactor to support future features and simplify code maintenance.
 - [05.20.2026] - v0.3 Made window stay on top of Revit and show in taskbar to prevent it from getting lost behind the main UI.
@@ -72,10 +74,10 @@ Revit API notes:
   document API calls run in a valid Revit API context.
 
 Design decisions:
-- V1 only manages the keynote file already assigned to the model. It
-  does not repoint the project to a different keynote file.
-- The shared text file is canonical. Supabase/Postgres is a coordination and
-  realtime mirror layer, not the source of truth.
+- Text File mode uses the assigned file, with explicit template-based creation.
+- Generic Annotation Only mode stores its library exclusively in Supabase.
+- Revit holds placed annotations and family types, not a library snapshot or identity.
+- Text File mode retains the shared-file source of truth and Supabase mirror.
 - Malformed source lines are shown and block save because the structured
   editor cannot safely preserve or repair arbitrary tab layouts.
 """
@@ -113,13 +115,18 @@ from Autodesk.Revit.DB import (
     BuiltInParameter,
     ElementId,
     ElementType,
+    ExternalResourceReference,
+    ExternalResourceTypes,
     Family,
     FilteredElementCollector,
     KeyBasedTreeEntriesLoadResults,
     KeynoteTable,
     Material,
     ModelPathUtils,
+    PathType,
     Transaction,
+    TransactionGroup,
+    TransactionStatus,
     Viewport,
     ViewSheet,
     WorksetKind,
@@ -145,7 +152,7 @@ PATH_SUPPORT = os.path.join(PATH_SCRIPT, "support")
 PATH_INDEX = os.path.join(PATH_SUPPORT, "index.html")
 
 APP_NAME = "FFE Keynote Manager"
-APP_VERSION = "v1.2"
+APP_VERSION = "v1.3"
 LOCAL_APP_NAME = "KeynoteManager"
 GENERIC_KEYNOTE_FAMILY_NAME = "FFE_Symbol_Keynote (Type)"
 GENERIC_KEYNOTE_NUMBER_PARAMETER = "Number"
@@ -370,20 +377,6 @@ def save_placement_mode_setting(value):
     return placement_mode
 
 
-def ask_for_supabase_value(prompt, default_value=""):
-    try:
-        value = forms.ask_for_string(
-            prompt=prompt,
-            default=default_value or "",
-            title="Supabase Keynote Settings"
-        )
-        if value is None:
-            return None
-        return safe_str(value).strip()
-    except:
-        return None
-
-
 def normalize_supabase_config_key(key):
     value = safe_str(key).strip().lower()
     value = value.replace(" ", "")
@@ -458,7 +451,8 @@ def load_shared_supabase_settings():
     return {}
 
 
-def load_supabase_settings(prompt_if_missing=True, force_prompt=False):
+def load_supabase_settings():
+    """Load saved/shared connection settings without opening native input forms."""
     settings_path = get_supabase_settings_path()
     settings = read_json_file(settings_path) or {}
 
@@ -479,22 +473,6 @@ def load_supabase_settings(prompt_if_missing=True, force_prompt=False):
                 anon_key = safe_str(shared_settings.get("anonKey")).strip()
             settings_source_path = safe_str(shared_settings.get("settingsSourcePath")).strip() or settings_source_path
 
-    if force_prompt or (prompt_if_missing and not url):
-        next_url = ask_for_supabase_value(
-            "Enter the Supabase project URL for the FFE Keynote Manager:",
-            url
-        )
-        if next_url is not None:
-            url = next_url
-
-    if force_prompt or (prompt_if_missing and url and not anon_key):
-        next_anon_key = ask_for_supabase_value(
-            "Enter the Supabase publishable/anon key for the FFE Keynote Manager:",
-            anon_key
-        )
-        if next_anon_key is not None:
-            anon_key = next_anon_key
-
     payload = {
         "url": url,
         "anonKey": anon_key,
@@ -505,7 +483,7 @@ def load_supabase_settings(prompt_if_missing=True, force_prompt=False):
         "configured": bool(url and anon_key),
     }
 
-    if force_prompt or url or anon_key:
+    if url or anon_key:
         settings.update({
             "url": url,
             "anonKey": anon_key,
@@ -516,6 +494,36 @@ def load_supabase_settings(prompt_if_missing=True, force_prompt=False):
         write_json_file(settings_path, settings)
 
     return payload
+
+
+def save_supabase_settings(values):
+    """Validate popup values and persist both fields together in the existing user config."""
+    try:
+        from urllib.parse import urlparse
+    except ImportError:
+        from urlparse import urlparse
+    url = safe_str(values.get("url")).strip().rstrip("/")
+    anon_key = safe_str(values.get("anonKey")).strip()
+    try:
+        parsed = urlparse(url)
+        valid_url = (parsed.scheme in ("http", "https") and parsed.hostname and
+                     not parsed.username and not parsed.password and not parsed.query and not parsed.fragment and
+                     not any(char.isspace() for char in url))
+    except ValueError:
+        valid_url = False
+    if not valid_url:
+        raise Exception("Enter a valid Supabase project URL beginning with https:// or http://.")
+    if not anon_key or any(char.isspace() for char in anon_key):
+        raise Exception("Enter a Supabase publishable key or legacy anon key without spaces.")
+    settings_path = get_supabase_settings_path()
+    settings = read_json_file(settings_path) or {}
+    settings.update({"url": url, "anonKey": anon_key,
+                     "clientId": settings.get("clientId") or safe_str(uuid.uuid4()),
+                     "clientName": get_client_name(), "settingsSourcePath": settings_path})
+    write_json_file(settings_path, settings)
+    saved = read_json_file(settings_path) or {}
+    if saved.get("url") != url or saved.get("anonKey") != anon_key:
+        raise Exception("Could not save Supabase settings. Check access to your local settings folder and retry.")
 
 
 # ____________________________________________________________________ WEBVIEW HELPERS
@@ -1099,12 +1107,259 @@ def make_empty_model_health(status="notScanned", message="Model health has not b
     }
 
 
+# ____________________________________________________________________ SUPABASE ANNOTATION LIBRARY
+def get_storage_mode(target_doc):
+    settings = read_user_settings()
+    key = get_document_analytics_identity(target_doc)["documentKey"]
+    mode = (settings.get("storageModes") or {}).get(key, "file")
+    # Retain the user's selection from the unreleased RVT-storage implementation.
+    return "annotation" if mode in ("model", "annotation") else "file"
+
+
+def save_storage_mode(target_doc, mode):
+    settings = read_user_settings()
+    modes = settings.get("storageModes") or {}
+    modes[get_document_analytics_identity(target_doc)["documentKey"]] = mode
+    settings["storageModes"] = modes
+    write_json_file(get_settings_path(), settings)
+
+
+def annotation_library_key(target_doc):
+    """Use the central/cloud path for all worksharing locals; store no identity in RVT."""
+    identity = get_document_analytics_identity(target_doc)
+    if identity["documentKeySource"] == "title":
+        raise Exception("Save the Revit project before setting up Generic Annotation Only mode.")
+    return "annotation:" + identity["documentKey"]
+
+
+def keynote_supabase_rpc(name, arguments):
+    """Fetch canonical cloud data in the Revit event; credentials never enter status messages."""
+    from System.Net import WebRequest
+    from System.Text import Encoding
+    from System.IO import StreamReader
+    settings = load_supabase_settings()
+    if not settings.get("configured"):
+        raise Exception("Configure Supabase before using Generic Annotation Only mode.")
+    request = WebRequest.Create(settings["url"].rstrip("/") + "/rest/v1/rpc/" + name)
+    request.Method = "POST"
+    request.ContentType = "application/json"
+    request.Headers["apikey"] = settings["anonKey"]
+    if settings["anonKey"].startswith("eyJ"):
+        request.Headers["Authorization"] = "Bearer " + settings["anonKey"]
+    request.Timeout = 15000
+    request.ReadWriteTimeout = 15000
+    data = Encoding.UTF8.GetBytes(json_dumps(arguments))
+    request.ContentLength = data.Length
+    stream = None
+    response = None
+    reader = None
+    try:
+        stream = request.GetRequestStream()
+        stream.Write(data, 0, data.Length)
+        stream.Close()
+        stream = None
+        response = request.GetResponse()
+        reader = StreamReader(response.GetResponseStream())
+        result = json_loads(reader.ReadToEnd()) or {}
+    except Exception:
+        raise Exception("Could not access the Supabase keynote library. Check the connection, configuration, and database migration, then retry.")
+    finally:
+        if reader is not None:
+            reader.Close()
+        if response is not None:
+            response.Close()
+        if stream is not None:
+            stream.Close()
+    if result.get("status") == "error":
+        raise Exception(result.get("message") or "Supabase rejected the request.")
+    return result
+
+
+def build_annotation_keynote_payload(target_doc, include_model_health=True, allow_converted_source=False):
+    payload = build_base_payload(target_doc, "ready", "")
+    payload.update({"storageMode": "annotation", "displayPath": "Supabase: " + get_document_title(target_doc)})
+    payload["preferences"]["placementMode"] = "genericAnnotation"
+    try:
+        payload["libraryKey"] = annotation_library_key(target_doc)
+        snapshot = keynote_supabase_rpc("get_annotation_keynote_snapshot", {"p_library_key": payload["libraryKey"]})
+        if not snapshot.get("libraryId"):
+            raise Exception("Initialize the Supabase library using the storage selector.")
+        payload.update(snapshot)
+        if snapshot.get("sourceType") == "file" and not allow_converted_source:
+            raise Exception("This library was converted to Text File mode. Select Text File in Settings to export and assign it in this document.")
+        payload["entryCount"] = len(payload.get("entries") or [])
+        payload["writeAvailable"] = True
+        payload["issues"] = validate_entries(payload["entries"])
+        payload["status"] = "invalidFormat" if has_error_issues(payload["issues"]) else "ready"
+        payload["message"] = "Loaded {0} keynote entries from Supabase.".format(payload["entryCount"])
+        if include_model_health:
+            payload["modelHealth"] = build_model_health(target_doc, payload)
+            payload["sheetVisibleKeynotes"] = payload["modelHealth"].get("placedKeyMap") or {}
+    except Exception as exc:
+        payload.update({"status": "error", "message": safe_str(exc), "writeAvailable": False,
+                        "issues": [make_issue("error", safe_str(exc), code="loadError")]})
+    return payload
+
+
+def sync_annotation_family_payload(target_doc, request):
+    """Supabase has already committed. Roll back only failed Revit family updates."""
+    group = None
+    try:
+        if get_storage_mode(target_doc) != "annotation":
+            raise Exception("Switch to Generic Annotation Only mode before updating family types.")
+        payload = build_annotation_keynote_payload(target_doc, include_model_health=False)
+        if payload["status"] != "ready":
+            raise Exception(payload["message"])
+        if (payload["libraryKey"] != request.get("libraryKey") or
+                payload.get("datasetVersion") != request.get("datasetVersion")):
+            raise Exception("The Supabase library changed again. Refresh before updating family types.")
+        baseline = request.get("baselineEntries") or []
+        entries = payload["entries"]
+        renames = make_key_rename_map(baseline, entries)
+        renames.update(make_model_issue_key_rename_map(request.get("modelIssueResolutions"), entries))
+        deleted = make_deleted_key_set(baseline, entries)
+        group = TransactionGroup(target_doc, "Update Supabase Keynote Family Types")
+        group.Start()
+        summary = sync_generic_annotation_types(target_doc, entries, renames, deleted,
+                                                request.get("modelIssueResolutions"), skip_unmatched=True)
+        if summary.get("failedCount"):
+            raise Exception(" ".join(summary.get("failures") or []))
+        if group.Assimilate() != TransactionStatus.Committed:
+            raise Exception("Revit did not commit the family updates.")
+        group = None
+        return {"status": "ready", "message": "Supabase library saved. Revit family types are up to date.",
+                "libraryKey": payload["libraryKey"], "datasetVersion": payload["datasetVersion"]}
+    except Exception as exc:
+        if group is not None and group.GetStatus() == TransactionStatus.Started:
+            group.RollBack()
+        return {"status": "warning", "message": "The Supabase library remains saved. Family updates failed: " + safe_str(exc)}
+
+
+def template_entries(setup_payload):
+    """The template comes from the read-only Supabase template endpoint."""
+    content = (setup_payload.get("template") or {}).get("content")
+    if not content:
+        return None
+    entries, issues = parse_keynote_text(safe_unicode(content))
+    issues = validate_entries(entries, issues)
+    if not entries or has_error_issues(issues):
+        raise Exception("The Supabase keynote template is empty or invalid.")
+    return entries
+
+
+def write_and_assign_keynote_file(target_doc, path, entries):
+    """Create a UTF-16 library and verify Revit assignment before changing modes."""
+    if os.path.exists(path):
+        raise Exception("Choose a new filename. Existing keynote files are not overwritten during setup.")
+    content = canonicalize_entries(entries, "\r\n", path, "utf-16")
+    raw_bytes = encode_keynote_text(content, "utf-16")
+    stream = None
+    try:
+        from System.IO import FileMode, FileStream, FileAccess
+        from System import Array, Byte
+        stream = FileStream(path, FileMode.CreateNew, FileAccess.Write)
+        data = Array[Byte](bytearray(raw_bytes))
+        stream.Write(data, 0, len(data))
+    finally:
+        if stream is not None:
+            stream.Dispose()
+    transaction = Transaction(target_doc, "Assign Keynote Text File")
+    try:
+        transaction.Start()
+        table = KeynoteTable.GetKeynoteTable(target_doc)
+        reference = ExternalResourceReference.CreateLocalResource(
+            target_doc, ExternalResourceTypes.BuiltInExternalResourceTypes.KeynoteTable,
+            ModelPathUtils.ConvertUserVisiblePathToModelPath(path), PathType.Absolute)
+        results = KeyBasedTreeEntriesLoadResults()
+        result = table.LoadFrom(reference, results)
+        if safe_str(result) != "Success" or list(results.GetFailureMessages()):
+            raise Exception("Revit could not load the new keynote file ({0}).".format(result))
+        if transaction.Commit() != TransactionStatus.Committed:
+            raise Exception("Revit did not commit the keynote file assignment.")
+    except Exception as exc:
+        if transaction.GetStatus() == TransactionStatus.Started:
+            transaction.RollBack()
+        raise Exception("The keynote file was created at '{0}', but assignment failed: {1}".format(path, exc))
+
+
+def sync_converted_keynote_file(payload, source, annotation_key):
+    """Convert the existing library record, preserving its IDs and associated data."""
+    if payload.get("status") != "ready":
+        raise Exception(payload.get("message") or "Could not read the assigned file.")
+    client = payload.get("supabase") or {}
+    result = keynote_supabase_rpc("convert_annotation_keynote_library_to_file", {
+        "p_annotation_key": annotation_key, "p_base_dataset_version": source["datasetVersion"],
+        "p_file_key": payload["libraryKey"], "p_display_path": payload["keynotePath"],
+        "p_encoding": payload["encoding"], "p_line_ending": payload["lineEnding"],
+        "p_file_hash": payload["fileHash"], "p_last_write_utc": payload["lastWriteUtc"],
+        "p_client_id": client.get("clientId", ""),
+        "p_client_name": client.get("clientName", ""),
+    })
+    if result.get("status") != "ready" or result.get("libraryId") != source.get("libraryId"):
+        raise Exception("Supabase did not confirm conversion of the existing library.")
+
+
+def setup_keynote_storage(target_doc, setup_payload):
+    """Export the full cloud library when changing from annotation-only to text file."""
+    mode = setup_payload.get("storageMode")
+    create_file = bool(setup_payload.get("createFile"))
+    conversion_group = None
+    exported_path = None
+    try:
+        if mode not in ("file", "annotation"):
+            raise Exception("Unknown keynote storage mode.")
+        converting_annotation = mode == "file" and get_storage_mode(target_doc) == "annotation"
+        if mode == "annotation":
+            key = annotation_library_key(target_doc)
+            file_payload = build_keynote_payload(target_doc, include_model_health=False, storage_mode="file")
+            seed = file_payload["entries"] if file_payload["status"] == "ready" else None
+            keynote_supabase_rpc("ensure_annotation_keynote_library", {
+                "p_library_key": key, "p_display_path": "Supabase: " + get_document_title(target_doc),
+                "p_seed_entries": seed,
+            })
+        elif create_file or converting_annotation:
+            entries = None if converting_annotation else template_entries(setup_payload)
+            if entries is None and not converting_annotation:
+                return {"status": "needsTemplate", "request": setup_payload}
+            path = forms.save_file(file_ext="txt", default_name="RevitKeynotes.txt",
+                                   title="Export Keynote Library to Text File" if converting_annotation else "Create Keynote Text File")
+            if not path:
+                return {"status": "canceled", "message": "Text file creation canceled."}
+            if converting_annotation:
+                # Read after Save As so the export includes edits saved while the dialog was open.
+                source = build_annotation_keynote_payload(target_doc, include_model_health=False, allow_converted_source=True)
+                if source.get("status") != "ready":
+                    raise Exception(source.get("message") or "Could not load the Supabase library for export.")
+                entries = source["entries"]
+                conversion_group = TransactionGroup(target_doc, "Convert Keynote Library to Text File")
+                conversion_group.Start()
+            write_and_assign_keynote_file(target_doc, path, entries)
+            exported_path = path
+        payload = build_keynote_payload(target_doc, storage_mode=mode)
+        if converting_annotation:
+            sync_converted_keynote_file(payload, source, annotation_library_key(target_doc))
+            if conversion_group.Assimilate() != TransactionStatus.Committed:
+                raise Exception("Supabase was updated, but Revit did not commit the file assignment. Refresh and retry conversion.")
+            conversion_group = None
+            payload["message"] = "Exported the complete library to '{0}', assigned it to Revit, and converted the existing Supabase library record.".format(path)
+        save_storage_mode(target_doc, mode)
+        return {"status": "ready", "payload": payload, "message": payload["message"]}
+    except Exception as exc:
+        if conversion_group is not None and conversion_group.GetStatus() == TransactionStatus.Started:
+            conversion_group.RollBack()
+        message = safe_str(exc)
+        if exported_path and conversion_group is not None:
+            message += " The export remains at '{0}', but Revit assignment was rolled back and the mode was not changed. Refresh before retrying to check the Supabase outcome.".format(exported_path)
+        return {"status": "error", "message": message}
+
+
 def build_base_payload(target_doc, status, message):
     payload = {
         "name": APP_NAME,
         "version": APP_VERSION,
         "docTitle": get_document_title(target_doc),
         "keynotePath": "",
+        "storageMode": "file",
         "displayPath": "",
         "libraryKey": "",
         "encoding": "",
@@ -1114,7 +1369,7 @@ def build_base_payload(target_doc, status, message):
         "writeAvailable": False,
         "writeMessage": "",
         "generatedAt": get_generated_at(),
-        "supabase": load_supabase_settings(prompt_if_missing=True),
+        "supabase": load_supabase_settings(),
         "preferences": {
             "placementMode": get_saved_placement_mode(),
         },
@@ -1130,7 +1385,9 @@ def build_base_payload(target_doc, status, message):
     return payload
 
 
-def build_keynote_payload(target_doc, include_model_health=True):
+def build_keynote_payload(target_doc, include_model_health=True, storage_mode=None):
+    if (storage_mode or get_storage_mode(target_doc)) == "annotation":
+        return build_annotation_keynote_payload(target_doc, include_model_health)
     payload = build_base_payload(target_doc, "error", "")
 
     try:
@@ -1710,7 +1967,7 @@ def delete_generic_annotation_symbol_if_unused(target_doc, symbol, instances_by_
         return False
 
 
-def sync_generic_annotation_types(target_doc, entries, key_renames, deleted_keys, model_issue_resolutions=None):
+def sync_generic_annotation_types(target_doc, entries, key_renames, deleted_keys, model_issue_resolutions=None, skip_unmatched=False):
     summary = make_generic_annotation_sync_summary()
     family = get_generic_annotation_keynote_family(target_doc)
     if family is None:
@@ -1718,6 +1975,14 @@ def sync_generic_annotation_types(target_doc, entries, key_renames, deleted_keys
 
     summary["familyFound"] = True
     symbols = get_family_symbols(target_doc, family)
+    if skip_unmatched:
+        affected_keys = set(safe_unicode(entry.get("key")).strip() for entry in entries or [])
+        affected_keys.update((key_renames or {}).keys())
+        affected_keys.update(deleted_keys or [])
+        affected_keys.update(safe_unicode(item.get("issueKey")).strip() for item in model_issue_resolutions or [])
+        if not any(get_generic_annotation_symbol_key(symbol) in affected_keys or
+                   get_element_name(symbol) in affected_keys for symbol in symbols):
+            return summary
     if not symbols:
         record_generic_annotation_sync_failure(
             summary,
@@ -1900,7 +2165,8 @@ def sync_generic_annotation_types(target_doc, entries, key_renames, deleted_keys
                 ):
                     deleted_symbol_keys.add(symbol_key)
 
-        transaction.Commit()
+        if transaction.Commit() != TransactionStatus.Committed:
+            raise Exception("Revit did not commit Generic Annotation synchronization.")
     except Exception as exc:
         try:
             transaction.RollBack()
@@ -2354,7 +2620,7 @@ def collect_keynote_analytics(target_doc, keynote_payload):
         .OfCategory(BuiltInCategory.OST_KeynoteTags)
         .WhereElementIsNotElementType()
     )
-    for tag in tags:
+    for tag in ([] if keynote_payload.get("storageMode") == "annotation" else tags):
         key = safe_unicode(get_keynote_tag_key(tag)).strip()
         if record_keynote_analytics_placement(
             rows_by_key,
@@ -2389,6 +2655,8 @@ def collect_keynote_analytics(target_doc, keynote_payload):
     identity = get_document_analytics_identity(target_doc)
 
     analytics = {
+        "datasetVersion": keynote_payload.get("datasetVersion", 0),
+        "storageMode": keynote_payload.get("storageMode", "file"),
         "libraryKey": keynote_payload.get("libraryKey") or "",
         "displayPath": keynote_payload.get("displayPath") or keynote_payload.get("keynotePath") or "",
         "keynotePath": keynote_payload.get("keynotePath") or "",
@@ -2705,6 +2973,18 @@ def build_model_health_from_analytics(target_doc, keynote_payload, analytics):
             None,
             resolution
         ))
+
+    if keynote_payload.get("storageMode") == "annotation":
+        for key, source in generic_annotation_sources.items():
+            if key in entry_by_key or source.get("instanceCount"):
+                continue
+            resolution = dict(source)
+            resolution["resolutionType"] = "unplacedGenericAnnotationKey"
+            issues.append(make_model_health_issue(
+                "warning", "genericAnnotationUnlistedType", key,
+                "Generic Annotation type '{0}' is not in the Supabase library.".format(source["familyTypeName"]),
+                None, "Use Family Type to add this unused keynote, or choose a replacement from the Supabase library.",
+                None, resolution))
 
     append_generic_annotation_model_health_issues(target_doc, entry_by_key, issues)
     issues = sorted(issues, key=model_health_issue_sort_key)
@@ -3194,6 +3474,11 @@ def merge_keynote_entries(current_entries, baseline_entries, desired_entries):
 
 def save_keynote_payload(target_doc, save_payload):
     save_payload = save_payload or {}
+    mode = get_storage_mode(target_doc)
+    if save_payload.get("storageMode", "file") != mode:
+        return {"status": "error", "message": "The active storage mode changed. Refresh before saving."}
+    if mode == "annotation":
+        return {"status": "error", "message": "Generic Annotation Only libraries must be saved directly to Supabase."}
 
     try:
         source_has_malformed = bool(save_payload.get("sourceHasMalformed"))
@@ -3469,6 +3754,8 @@ def get_keynote_tag_default_type(target_doc):
 
 
 def place_user_keynote(uiapp, target_doc, place_payload, keynote_payload):
+    if keynote_payload.get("storageMode") == "annotation":
+        return {"status": "warning", "message": "Supabase libraries support Generic Annotation placement only."}
     place_payload = place_payload or {}
     entry_id = safe_str(place_payload.get("id")).strip()
     key = safe_unicode(place_payload.get("key")).strip()
@@ -3732,6 +4019,12 @@ def ensure_generic_annotation_keynote_symbol(target_doc, key, text):
 
 def place_generic_annotation_keynote(uiapp, target_doc, place_payload, keynote_payload):
     place_payload = place_payload or {}
+    if keynote_payload.get("storageMode") == "annotation" and (
+        keynote_payload.get("status") != "ready" or
+        place_payload.get("datasetVersion") != keynote_payload.get("datasetVersion") or
+        place_payload.get("libraryKey") != keynote_payload.get("libraryKey")
+    ):
+        return {"status": "warning", "message": "Supabase is unavailable or the note changed. Refresh before placing."}
     entry_id = safe_str(place_payload.get("id")).strip()
     key = safe_unicode(place_payload.get("key")).strip()
 
@@ -3847,6 +4140,29 @@ class KeynoteManagerEventHandler(IExternalEventHandler):
         self.clear_pending()
 
         if window is None:
+            return
+
+        if action == "configureSupabase":
+            try:
+                save_supabase_settings(payload or {})
+            except Exception as exc:
+                window.call_keynote_app("handleSupabaseSettingsResult", {"status": "error", "message": safe_str(exc)})
+                return
+            keynote_payload = build_keynote_payload(window.document)
+            window.set_payload(keynote_payload)
+            window.call_keynote_app("handleSupabaseSettingsResult", {"status": "ready", "payload": keynote_payload})
+            return
+
+        if action == "setupStorage":
+            result = setup_keynote_storage(window.document, payload or {})
+            if result.get("payload"):
+                window.set_payload(result["payload"])
+            window.call_keynote_app("handleStorageResult", result)
+            return
+
+        if action == "syncAnnotationFamily":
+            result = sync_annotation_family_payload(window.document, payload or {})
+            window.call_keynote_app("handleFamilySyncResult", result)
             return
 
         if action == "refresh":
@@ -4120,6 +4436,12 @@ class KeynoteManagerWindow(Window):
             }
             if failure_target == "analytics":
                 self.send_analytics_result(result)
+            elif failure_target == "family":
+                self.call_keynote_app("handleFamilySyncResult", result)
+            elif failure_target == "storage":
+                self.call_keynote_app("handleStorageResult", result)
+            elif failure_target == "settings":
+                self.call_keynote_app("handleSupabaseSettingsResult", result)
             elif failure_target == "status":
                 self.send_status(result.get("status"), result.get("message"))
             else:
@@ -4169,13 +4491,22 @@ class KeynoteManagerWindow(Window):
             self.raise_external_event("refresh")
             return
 
+        if message_type == "syncAnnotationFamily":
+            self.event_handler.pending_action = "syncAnnotationFamily"
+            self.event_handler.pending_payload = message.get("payload") or {}
+            self.raise_external_event("update keynote family types", "family")
+            return
+
+        if message_type == "setupStorage":
+            self.event_handler.pending_action = "setupStorage"
+            self.event_handler.pending_payload = message.get("payload") or {}
+            self.raise_external_event("set up keynote storage", "storage")
+            return
+
         if message_type == "configureSupabase":
-            settings = load_supabase_settings(prompt_if_missing=True, force_prompt=True)
-            keynote_payload = build_keynote_payload(self.document)
-            keynote_payload["supabase"] = settings
-            self.set_payload(keynote_payload)
-            self.send_keynote_payload(force=True)
-            self.send_status(keynote_payload.get("status"), keynote_payload.get("message"))
+            self.event_handler.pending_action = "configureSupabase"
+            self.event_handler.pending_payload = message.get("payload") or {}
+            self.raise_external_event("save Supabase settings", "settings")
             return
 
         if message_type == "saveKeynotes":

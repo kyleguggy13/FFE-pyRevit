@@ -20,6 +20,10 @@
     selectedId: null,
     dirty: false,
     saving: false,
+    storageBusy: false,
+    familySyncing: false,
+    pendingFamilySync: null,
+    loadGeneration: 0,
     dbReady: false,
     dbInitializing: false,
     dbSnapshot: null,
@@ -364,6 +368,10 @@
   }
 
   function blockForSafeMode(actionLabel) {
+    if (state.storageBusy || state.saving) {
+      setStatus({ status: "warning", message: "Wait for the current keynote operation to finish." });
+      return true;
+    }
     if (!isModelSafeModeActive()) {
       return false;
     }
@@ -390,6 +398,206 @@
       return Math.max(Number(row.placedCount || row.elementIds.length || 0), 0);
     }
     return keyIsPlaced(targetKey) ? 1 : 0;
+  }
+
+  function isAnnotationOnly(payload) {
+    return (payload || state.payload || {}).storageMode === "annotation";
+  }
+
+  function sourceAvailable() {
+    return Boolean(state.payload && (isAnnotationOnly() ? state.payload.libraryId : state.payload.keynotePath));
+  }
+
+  function sourceText(value) {
+    if (!isAnnotationOnly()) { return value; }
+    return text(value).replace(/Use Text File/g, "Use Supabase Library")
+      .replace(/text-file|keynote-file/g, "Supabase library")
+      .replace(/shared keynote file|keynote file|text file/g, "Supabase library");
+  }
+
+  function attachAnnotationSupabase(payload) {
+    var db = dbManager();
+    try {
+      db.configure(payload.supabase || {});
+      // The Python bridge loaded this snapshot from Supabase, never from RVT.
+      state.dbReady = true;
+      applySnapshotMetadata(payload);
+      subscribeToLibrary(payload);
+      subscribeToEntries(payload);
+      subscribeToAnalytics(payload);
+      subscribeToEditClaims(payload);
+      refreshEditClaims();
+      syncLocalEditClaims();
+      refreshOtherModelUsage();
+      collectAnalyticsOnOpen();
+    } catch (error) {
+      state.dbReady = false;
+      upsertSyncIssue(makeIssue("warning", "Supabase is unavailable: " + error.message, "", "supabaseUnavailable"));
+      renderAll();
+    }
+  }
+
+  function requestFamilySync(request) {
+    if (!isAnnotationOnly() || state.saving || state.familySyncing || state.dirty) { return; }
+    request = request || state.pendingFamilySync || {
+      libraryKey: state.payload.libraryKey,
+      datasetVersion: state.payload.datasetVersion,
+      baselineEntries: state.baselineEntries,
+      modelIssueResolutions: []
+    };
+    // A refresh may advance the cloud revision while family changes still need retrying.
+    request = Object.assign({}, request, { datasetVersion: state.payload.datasetVersion });
+    state.pendingFamilySync = request;
+    state.familySyncing = true;
+    renderSaveState();
+    if (!postWebViewMessage({ type: "syncAnnotationFamily", payload: request })) {
+      state.familySyncing = false;
+      renderSaveState();
+    }
+  }
+
+  function handleFamilySyncResult(result) {
+    state.familySyncing = false;
+    if (result.status === "ready") {
+      state.pendingFamilySync = null;
+      clearSyncIssueCode("familySyncFailed");
+      collectAnalytics();
+    } else {
+      upsertSyncIssue(makeIssue("warning", result.message || "Family updates failed. Use Update Family Types to retry.", "", "familySyncFailed"));
+    }
+    setStatus(result);
+    renderAll();
+  }
+
+  function saveAnnotationLibrary() {
+    var issues = validateAll();
+    if (blockForSafeMode("Save") || hasErrorIssues(issues) || hasBlockingSourceIssue()) {
+      renderValidation();
+      return;
+    }
+    if (!state.dbReady || !state.dbSnapshot || !sourceAvailable()) {
+      setStatus({ status: "error", message: "Connect to Supabase and Refresh before saving. Your unsaved edits are retained." });
+      return;
+    }
+    var db = dbManager();
+    var client = currentClient();
+    var payload = state.payload;
+    var generation = state.loadGeneration;
+    var pending = state.pendingFamilySync;
+    var baseline = ((pending && pending.baselineEntries) || state.baselineEntries)
+      .map(function (entry) { return Object.assign({}, entry); });
+    var resolutions = ((pending && pending.modelIssueResolutions) || []).concat(
+      Object.keys(state.modelIssueResolutions).map(function (key) { return state.modelIssueResolutions[key]; }));
+    state.saving = true;
+    renderSaveState();
+    setStatus({ status: "syncing", message: "Saving keynote library to Supabase..." });
+    db.saveAnnotationChanges({
+      libraryKey: payload.libraryKey, clientId: client.clientId, clientName: client.clientName,
+      baseDatasetVersion: state.dbSnapshot.datasetVersion, changes: buildPendingDbChanges()
+    }).then(function (snapshot) {
+      if (generation !== state.loadGeneration) { return; }
+      state.saving = false;
+      if (snapshot.status === "conflict") {
+        state.syncIssues = makeSupabaseConflictIssues(snapshot);
+        setStatus({ status: "conflict", message: snapshot.message || "The library changed in Supabase. Your edits are retained; Refresh before retrying." });
+        renderAll();
+        return;
+      }
+      if (snapshot.status !== "ready" || !snapshot.entries || !snapshot.libraryId) {
+        throw new Error("Supabase did not return a saved library snapshot. Refresh to check the result before retrying.");
+      }
+      // Commit the editor baseline only after the authoritative database save.
+      var nextPayload = Object.assign({}, payload, snapshot);
+      clearLocalEditClaims();
+      applyData(nextPayload);
+      state.syncIssues = [];
+      state.dbReady = true;
+      applySnapshotMetadata(snapshot);
+      requestFamilySync({ libraryKey: snapshot.libraryKey, datasetVersion: snapshot.datasetVersion,
+        baselineEntries: baseline, modelIssueResolutions: resolutions });
+    }).catch(function (error) {
+      if (generation !== state.loadGeneration) { return; }
+      state.saving = false;
+      upsertSyncIssue(makeIssue("warning", "Supabase save could not be confirmed: " + error.message + ". Your edits are retained; Refresh to check the server before retrying.", "", "supabaseSaveFailed"));
+      setStatus({ status: "error", message: "Supabase save could not be confirmed. No local library was saved." });
+      renderAll();
+    });
+  }
+
+  function setSettingsOpen(open) {
+    var dialog = byId("settings-dialog");
+    if (!dialog) { return; }
+    if (open) {
+      if (!dialog.open) {
+        var settings = (state.payload && state.payload.supabase) || {};
+        byId("supabase-project-url").value = settings.url || "";
+        byId("supabase-publishable-key").value = settings.anonKey || "";
+        setSupabaseSettingsMessage("");
+      }
+      renderMeta();
+      if (!dialog.open) { dialog.showModal(); }
+    } else if (dialog.open) {
+      dialog.close();
+    }
+  }
+
+  function requestStorage(mode, createFile) {
+    if (state.saving || state.storageBusy || state.familySyncing || state.dbInitializing || state.analyticsCollecting) {
+      renderMeta();
+      return;
+    }
+    var converting = isAnnotationOnly() && mode === "file";
+    if (!confirmDiscardChanges(converting
+      ? "Export the saved Supabase library and discard unsaved edits? Cancel and Save first to include your edits."
+      : "Changing keynote storage will discard unsaved edits. Continue?")) {
+      renderMeta();
+      return;
+    }
+    setSettingsOpen(false);
+    state.storageBusy = true;
+    renderMeta();
+    clearLocalEditClaims().then(function () {
+      if (!postWebViewMessage({ type: "setupStorage", payload: { storageMode: mode, createFile: Boolean(createFile) } })) {
+        state.storageBusy = false;
+        renderMeta();
+      }
+    });
+  }
+
+  function handleStorageResult(result) {
+    result = result || {};
+    if (result.status === "needsTemplate") {
+      var db = dbManager();
+      try {
+        if (!state.dbReady) { db.configure((state.payload && state.payload.supabase) || {}); }
+      } catch (error) {
+        handleStorageResult({ status: "error", message: "Supabase is required to initialize a new library: " + error.message });
+        return;
+      }
+      setStatus({ status: "syncing", message: "Loading keynote divisions from Supabase..." });
+      db.getTemplate().then(function (template) {
+        if (!template || !template.content) { throw new Error("The keynote template has not been deployed to Supabase."); }
+        var request = result.request || {};
+        request.template = template;
+        if (!postWebViewMessage({ type: "setupStorage", payload: request })) {
+          handleStorageResult({ status: "error", message: "Could not initialize keynote storage." });
+        }
+      }).catch(function (error) {
+        handleStorageResult({ status: "error", message: error.message || text(error) });
+      });
+      return;
+    }
+    state.storageBusy = false;
+    if (result.status === "ready" && result.payload) {
+      state.allowNextLoad = true;
+      loadData(result.payload);
+      state.operationIssues = result.issues || [];
+      renderValidation();
+    } else {
+      setStatus({ status: result.status === "canceled" ? "ready" : "error", message: result.message || "Could not change keynote storage." });
+      syncLocalEditClaims({ force: true });
+      renderMeta();
+    }
   }
 
   function normalizeOtherModelUsage(rows) {
@@ -1256,7 +1464,7 @@
     }
 
     setText("state-title", STATUS_TITLES[status] || "Status");
-    setText("state-message", statusState.message || "");
+    setText("state-message", sourceText(statusState.message || ""));
   }
 
   function confirmDiscardChanges(message) {
@@ -1366,12 +1574,12 @@
     var redoLabel = redoItem && redoItem.label;
 
     if (undoButton) {
-      undoButton.disabled = state.saving || !undoLabel;
+      undoButton.disabled = state.saving || state.storageBusy || !undoLabel;
       undoButton.setAttribute("title", undoLabel ? "Undo " + undoLabel : "Nothing to undo");
       undoButton.setAttribute("aria-label", undoLabel ? "Undo " + undoLabel : "Nothing to undo");
     }
     if (redoButton) {
-      redoButton.disabled = state.saving || !redoLabel;
+      redoButton.disabled = state.saving || state.storageBusy || !redoLabel;
       redoButton.setAttribute("title", redoLabel ? "Redo " + redoLabel : "Nothing to redo");
       redoButton.setAttribute("aria-label", redoLabel ? "Redo " + redoLabel : "Nothing to redo");
     }
@@ -1481,6 +1689,7 @@
   }
 
   function undoEditorChange() {
+    if (state.storageBusy || state.saving) { return; }
     var item;
     var currentState;
 
@@ -1503,6 +1712,7 @@
   }
 
   function redoEditorChange() {
+    if (state.storageBusy || state.saving) { return; }
     var item;
     var currentState;
 
@@ -1526,9 +1736,37 @@
 
   function renderMeta() {
     var payload = state.payload || {};
+    var workspace = document.querySelector(".workspace");
+    if (workspace) { workspace.inert = Boolean(state.saving || state.storageBusy); }
+    var storageSelect = byId("storage-mode");
+    var createFile = byId("create-keynote-file");
+    var familyButton = byId("sync-annotation-family");
+    if (familyButton) {
+      familyButton.hidden = !isAnnotationOnly();
+      familyButton.disabled = state.saving || state.storageBusy || state.familySyncing || state.dirty || !state.dbReady;
+    }
+    var busy = state.storageBusy || state.saving || state.familySyncing || state.dbInitializing || state.analyticsCollecting;
+    if (storageSelect) {
+      storageSelect.value = payload.storageMode || "file";
+      storageSelect.disabled = Boolean(busy);
+    }
+    if (createFile) {
+      createFile.disabled = Boolean(busy);
+      createFile.textContent = isAnnotationOnly() ? "Export Library to Text File" : "Create Text File";
+    }
+    setText("create-keynote-file-help", isAnnotationOnly()
+      ? "Export all saved keynotes, assign the file in Revit, and switch to Text File mode."
+      : "Create and assign a new file from the division template.");
+    var configureButton = byId("configure-supabase");
+    if (configureButton) {
+      configureButton.disabled = Boolean(busy);
+    }
+    ["supabase-project-url", "supabase-publishable-key"].forEach(function (id) {
+      if (byId(id)) { byId(id).disabled = Boolean(busy); }
+    });
     setText("doc-title", payload.docTitle || "No Revit document");
     setText("keynote-path", payload.displayPath || payload.keynotePath || "No keynote file loaded");
-    setText("encoding-label", payload.encoding || "-");
+    setText("encoding-label", isAnnotationOnly() ? "Supabase library" : (payload.encoding || "-"));
     setText("entry-count", formatNumber(state.entries.length));
   }
 
@@ -2237,6 +2475,7 @@
     }
     if (placementModeMenu) {
       Array.prototype.forEach.call(placementModeMenu.querySelectorAll("[data-placement-mode]"), function (option) {
+        option.disabled = isAnnotationOnly() && option.getAttribute("data-placement-mode") === "userKeynote";
         var isSelected = option.getAttribute("data-placement-mode") === state.placementMode;
         option.classList.toggle("active", isSelected);
         if (isSelected) {
@@ -2256,7 +2495,7 @@
   }
 
   function setPlacementMode(value) {
-    state.placementMode = normalizePlacementMode(value);
+    state.placementMode = isAnnotationOnly() ? "genericAnnotation" : normalizePlacementMode(value);
     if (state.payload) {
       state.payload.preferences = state.payload.preferences || {};
       state.payload.preferences.placementMode = state.placementMode;
@@ -2275,6 +2514,7 @@
 
     return Boolean(
       key &&
+      !state.storageBusy && !state.saving && (!isAnnotationOnly() || state.dbReady) &&
       baselineEntry &&
       entryFieldsEqual(entry, baselineEntry) &&
       remoteSnapshotAllowsPlacement(entry)
@@ -2358,7 +2598,9 @@
       type: messageType,
       payload: {
         id: entry.id,
-        key: key
+        key: key,
+        libraryKey: state.payload && state.payload.libraryKey,
+        datasetVersion: state.payload && state.payload.datasetVersion
       }
     })) {
       setStatus({
@@ -2649,7 +2891,7 @@
 
       label.className = "validation-label";
       label.textContent = text(issue.severity || "error").toUpperCase();
-      message.textContent = issue.message || "";
+      message.textContent = sourceText(issue.message || "");
       detail.className = "validation-detail";
       detail.textContent = issue.key ? "Key: " + issue.key : issue.lineNumber ? "Line: " + issue.lineNumber : "";
 
@@ -2749,6 +2991,9 @@
     if (code === "genericAnnotationDuplicateTypes") {
       return "Duplicate Generic Annotation Types";
     }
+    if (code === "genericAnnotationUnlistedType") {
+      return "Unlisted Family Types";
+    }
     if (code.indexOf("genericAnnotation") === 0) {
       return "Generic Annotation Setup";
     }
@@ -2756,6 +3001,7 @@
   }
 
   function applyModelIssueResolution(issue, source, replacementKey) {
+    if (state.storageBusy || state.saving) { return; }
     var resolution = issue && issue.resolution;
     var entry = issue && entriesByKey()[issue.key];
     var resolutionId = modelIssueResolutionId(issue);
@@ -2909,7 +3155,7 @@
     familyButton.className = "model-resolution-button";
     familyButton.setAttribute("data-selected", selectedSource === "familyType" ? "true" : "false");
     familyButton.textContent = "Use Family Type: " + (resolution.familyTypeText || "(blank)");
-    familyButton.title = "Write the family type text to the keynote file.";
+    familyButton.title = sourceText("Write the family type text to the keynote file.");
     familyButton.addEventListener("click", function () {
       applyModelIssueResolution(issue, "familyType");
     });
@@ -2917,13 +3163,13 @@
     if (resolution.resolutionType === "genericAnnotationTextMismatch") {
       controls.setAttribute("data-choice-count", "3");
       familyButton.textContent = "Use Family Type";
-      familyButton.title = "Write the family type text to the existing keynote-file row.";
+      familyButton.title = sourceText("Write the family type text to the existing keynote-file row.");
 
       fileButton.type = "button";
       fileButton.className = "model-resolution-button";
       fileButton.setAttribute("data-selected", selectedSource === "textFile" ? "true" : "false");
-      fileButton.textContent = "Use Text File";
-      fileButton.title = "Update the Generic Annotation family type from the existing keynote-file row.";
+      fileButton.textContent = sourceText("Use Text File");
+      fileButton.title = sourceText("Update the Generic Annotation family type from the existing keynote-file row.");
       fileButton.addEventListener("click", function () {
         applyModelIssueResolution(issue, "textFile");
       });
@@ -2933,7 +3179,7 @@
       keepBothButton.className = "model-resolution-button";
       keepBothButton.setAttribute("data-selected", selectedSource === "keepBoth" ? "true" : "false");
       keepBothButton.textContent = "Keep Both + New Note";
-      keepBothButton.title = "Keep the text-file row and create the next keynote in sequence from the family type.";
+      keepBothButton.title = sourceText("Keep the text-file row and create the next keynote in sequence from the family type.");
       keepBothButton.addEventListener("click", function () {
         applyModelIssueResolution(issue, "keepBoth");
       });
@@ -2948,7 +3194,7 @@
     fileSelect.className = "model-resolution-select";
     fileSelect.setAttribute("aria-label", "Replacement keynote from text file for " + issue.key);
     placeholderOption.value = "";
-    placeholderOption.textContent = "Choose text-file keynote...";
+    placeholderOption.textContent = sourceText("Choose text-file keynote...");
     fileSelect.appendChild(placeholderOption);
     state.baselineEntries.slice().sort(compareEntriesByKey).forEach(function (entry) {
       var option;
@@ -2965,9 +3211,9 @@
     fileButton.type = "button";
     fileButton.className = "model-resolution-button";
     fileButton.setAttribute("data-selected", selectedSource === "textFile" ? "true" : "false");
-    fileButton.textContent = "Use Text File";
+    fileButton.textContent = sourceText("Use Text File");
     fileButton.disabled = !fileSelect.value;
-    fileButton.title = "Overwrite the family type and migrate its placed instances to the selected text-file keynote.";
+    fileButton.title = sourceText("Overwrite the family type and migrate its placed instances to the selected text-file keynote.");
     fileSelect.addEventListener("change", function () {
       fileButton.disabled = !fileSelect.value;
     });
@@ -3005,21 +3251,21 @@
       pill.setAttribute("data-severity", severity);
       pill.setAttribute("aria-expanded", state.modelIssuesOpen ? "true" : "false");
       pill.setAttribute("aria-pressed", state.modelIssuesOpen ? "true" : "false");
-      pill.setAttribute("title", health.message || "Show model issues");
+      pill.setAttribute("title", sourceText(health.message || "Show model issues"));
     }
 
     if (safeStrip) {
       safeStrip.hidden = !isSafeMode;
     }
     if (safeMessage) {
-      safeMessage.textContent = modelSafeModeMessage();
+      safeMessage.textContent = sourceText(modelSafeModeMessage());
     }
 
     if (overlay) {
       overlay.hidden = !state.modelIssuesOpen;
     }
     if (status) {
-      status.textContent = health.message || "Model health has not been scanned.";
+      status.textContent = sourceText(health.message || "Model health has not been scanned.");
     }
 
     if (stats) {
@@ -3071,9 +3317,9 @@
 
           label.className = "validation-label";
           label.textContent = text(issue.severity || "warning").toUpperCase();
-          message.textContent = issue.message || "";
+          message.textContent = sourceText(issue.message || "");
           detail.className = "validation-detail";
-          detail.textContent = modelIssueDetail(issue);
+          detail.textContent = sourceText(modelIssueDetail(issue));
 
           item.appendChild(label);
           item.appendChild(message);
@@ -3292,9 +3538,11 @@
     var safeMode = isModelSafeModeActive();
     var canSave = Boolean(
       state.payload &&
-      state.payload.keynotePath &&
+      sourceAvailable() &&
       state.dirty &&
       !state.saving &&
+      !state.storageBusy && !state.familySyncing &&
+      (!isAnnotationOnly() || state.dbReady) &&
       !safeMode &&
       !hasBlockingSourceIssue() &&
       !hasErrorIssues(issues)
@@ -3305,7 +3553,7 @@
       saveButton.textContent = state.saving ? "Saving..." : "Save";
       saveButton.setAttribute(
         "title",
-        safeMode ? "Review model issues before saving." : "Save data to Keynote file"
+        safeMode ? "Review model issues before saving." : (isAnnotationOnly() ? "Save keynotes to Supabase" : "Save data to Keynote file")
       );
     }
     if (analyticsButton) {
@@ -3313,6 +3561,7 @@
       analyticsButton.textContent = state.analyticsCollecting ? "Collecting..." : "Collect Analytics";
     }
     renderHistoryState();
+    renderMeta();
   }
 
   function syncSidebarState() {
@@ -3609,6 +3858,15 @@
 
   function ensureLibraryBeforeAnalyticsSync(db, analytics) {
     var client = currentClient();
+
+    if (isAnnotationOnly(analytics)) {
+      return db.getSnapshot(analytics.libraryKey).then(function (snapshot) {
+        if (!snapshot.libraryId || snapshot.datasetVersion !== analytics.datasetVersion) {
+          throw new Error("The Supabase library changed. Refresh and collect analytics again.");
+        }
+        return snapshot;
+      });
+    }
 
     if (!db || typeof db.ensureLibrary !== "function") {
       return Promise.reject(new Error("The Supabase library API was not available."));
@@ -4223,7 +4481,7 @@
   function processRemoteEntryChange() {
     state.remoteEntriesTimer = null;
 
-    if (state.saving || state.pendingDbChanges) {
+    if (state.saving || state.familySyncing || state.pendingDbChanges) {
       return;
     }
 
@@ -4238,7 +4496,7 @@
   }
 
   function scheduleRemoteEntryChange() {
-    if (state.saving || state.pendingDbChanges) {
+    if (state.saving || state.familySyncing || state.pendingDbChanges) {
       return;
     }
 
@@ -4259,6 +4517,10 @@
 
     db.subscribeLibrary(snapshot.libraryId, client.clientId, {
       onRemoteChange: function () {
+        if (isAnnotationOnly()) {
+          scheduleRemoteEntryChange();
+          return;
+        }
         if (state.dirty) {
           state.remotePending = true;
           upsertSyncIssue(makeIssue(
@@ -4325,6 +4587,10 @@
     if (!snapshot || fileEntries.length !== snapshotEntries.length) {
       return true;
     }
+    // Repair file metadata as well as rows when reattaching the file.
+    if (payload.fileHash && payload.fileHash !== snapshot.fileHash) {
+      return true;
+    }
 
     snapshotByKey = indexEntriesByKey(snapshotEntries);
     fileEntries.forEach(function (entry) {
@@ -4343,6 +4609,18 @@
 
     if (!payload || !payload.libraryKey) {
       state.dbReady = false;
+      return;
+    }
+
+    // Missing or malformed sources are not empty libraries. Never mirror a
+    // partial/error payload over a previously valid shared snapshot.
+    if (hasErrorIssues(payload.issues || [])) {
+      state.dbReady = false;
+      return;
+    }
+
+    if (isAnnotationOnly(payload)) {
+      attachAnnotationSupabase(payload);
       return;
     }
 
@@ -4689,6 +4967,7 @@
     var selected = null;
     var preferences;
 
+    state.loadGeneration += 1;
     state.payload = payload || {};
     preferences = state.payload.preferences || {};
     setPlacementMode(preferences.placementMode || state.payload.placementMode || state.placementMode);
@@ -4742,6 +5021,14 @@
     }
 
     clearLocalEditClaims();
+    if (dbManager()) { dbManager().unsubscribe(); }
+    state.dbReady = false;
+    state.dbSnapshot = null;
+    state.dbInitializing = false;
+    state.familySyncing = false;
+    if (!payload || !state.pendingFamilySync || state.pendingFamilySync.libraryKey !== payload.libraryKey) { state.pendingFamilySync = null; }
+    state.analyticsRequestedOnOpen = false;
+    state.lastAnalyticsResult = null;
     state.syncIssues = [];
     state.operationIssues = [];
     state.remotePending = false;
@@ -5371,6 +5658,7 @@
   }
 
   function refreshData() {
+    if (state.saving || state.storageBusy || state.familySyncing || state.analyticsCollecting) { return; }
     var shouldAllowLoad = state.dirty;
 
     if (!confirmDiscardChanges("Refresh will discard unsaved keynote edits in this window. Continue?")) {
@@ -5395,7 +5683,7 @@
     var settings = (state.payload && state.payload.supabase) || {};
     var db = dbManager();
 
-    if (state.analyticsCollecting) {
+    if (state.analyticsCollecting || state.saving || state.storageBusy) {
       return;
     }
 
@@ -5469,6 +5757,12 @@
     }
 
     applyAnalyticsResultToUi(analytics, result.modelHealth || (analytics && analytics.modelHealth));
+    if (isAnnotationOnly(analytics) && (!state.dbReady || state.familySyncing)) {
+      state.analyticsCollecting = false;
+      renderSaveState();
+      setStatus({ status: "warning", message: (result.message || "Collected local analytics.") + " Supabase analytics sync is unavailable. Refresh and retry." });
+      return;
+    }
     setStatus({ status: "syncing", message: "Syncing keynote analytics to Supabase..." });
 
     syncAnalyticsResult(analytics).then(function (syncResult) {
@@ -5500,6 +5794,12 @@
   }
 
   function saveData() {
+    if (state.saving || state.storageBusy || state.familySyncing) { return; }
+    if (isAnnotationOnly()) { saveAnnotationLibrary(); }
+    else { saveDataToSource(); }
+  }
+
+  function saveDataToSource() {
     var issues = validateAll();
     var payload;
 
@@ -5519,14 +5819,15 @@
       return;
     }
 
-    if (!state.payload || !state.payload.keynotePath) {
-      setStatus({ status: "error", message: "No keynote file is available to save." });
+    if (!sourceAvailable()) {
+      setStatus({ status: "error", message: "No keynote library is available to save." });
       return;
     }
 
-    state.pendingDbChanges = buildPendingDbChanges();
+    state.pendingDbChanges = isAnnotationOnly() ? null : buildPendingDbChanges();
 
     payload = {
+      storageMode: state.payload.storageMode || "file",
       keynotePath: state.payload.keynotePath,
       encoding: state.payload.encoding || "utf-8",
       lineEnding: state.payload.lineEnding || "\r\n",
@@ -5629,6 +5930,10 @@
   }
 
   function closeWindow() {
+    if (state.saving || state.storageBusy || state.familySyncing) {
+      setStatus({ status: "warning", message: "Wait for the current keynote operation to finish before closing." });
+      return;
+    }
     var discardConfirmed = state.dirty;
 
     if (!confirmDiscardChanges("Close the manager and discard unsaved keynote edits in this window?")) {
@@ -5648,16 +5953,59 @@
     });
   }
 
+  function setSupabaseSettingsMessage(message, isError) {
+    var element = byId("supabase-settings-message");
+    if (element) {
+      element.textContent = message;
+      element.setAttribute("data-error", isError ? "true" : "false");
+    }
+  }
+
+  function handleSupabaseSettingsResult(result) {
+    state.storageBusy = false;
+    result = result || {};
+    if (result.status === "ready" && result.payload) {
+      state.allowNextLoad = true;
+      setSettingsOpen(false);
+      loadData(result.payload);
+    } else {
+      setSupabaseSettingsMessage(result.message || "Could not save the Supabase connection. Try again.", true);
+      syncLocalEditClaims({ force: true });
+      renderMeta();
+    }
+  }
+
   function configureSupabase() {
+    if (state.saving || state.storageBusy || state.familySyncing || state.dbInitializing || state.analyticsCollecting) { return; }
+    var form = byId("supabase-settings-form");
+    var url = trim(byId("supabase-project-url").value).replace(/\/+$/, "");
+    var key = trim(byId("supabase-publishable-key").value);
+    if (!form.reportValidity()) { return; }
+    try {
+      var parsed = new URL(url);
+      if (!/^https?:$/.test(parsed.protocol) || !parsed.hostname || parsed.username || parsed.password ||
+          parsed.search || parsed.hash || /\s/.test(url)) { throw new Error(); }
+    } catch (error) {
+      setSupabaseSettingsMessage("Enter a valid Supabase project URL beginning with https:// or http://.", true);
+      return;
+    }
+    if (!key || /\s/.test(key)) {
+      setSupabaseSettingsMessage("Enter a publishable key or legacy anon key without spaces.", true);
+      return;
+    }
     if (state.dirty && !confirmDiscardChanges("Changing Supabase settings will reload keynote data and discard unsaved edits. Continue?")) {
       return;
     }
 
-    setStatus({ status: "warning", message: "Opening Supabase settings..." });
+    state.storageBusy = true;
+    renderMeta();
+    setSupabaseSettingsMessage("Saving connection and reloading the library...");
     clearLocalEditClaims().then(function () {
-      if (postWebViewMessage({ type: "configureSupabase" })) {
-        state.allowNextLoad = state.dirty;
+      if (!postWebViewMessage({ type: "configureSupabase", payload: { url: url, anonKey: key } })) {
+        handleSupabaseSettingsResult({ status: "error", message: "Could not send settings to Revit. Try again." });
       }
+    }).catch(function () {
+      handleSupabaseSettingsResult({ status: "error", message: "Could not prepare the connection change. Try again." });
     });
   }
 
@@ -5814,6 +6162,21 @@
   }
 
   function init() {
+    bindClick("open-settings", function () { setSettingsOpen(true); });
+    bindClick("close-settings", function () { setSettingsOpen(false); });
+    var settingsForm = byId("supabase-settings-form");
+    if (settingsForm) {
+      settingsForm.addEventListener("submit", function (event) {
+        event.preventDefault();
+        configureSupabase();
+      });
+    }
+    var storageSelect = byId("storage-mode");
+    if (storageSelect) {
+      storageSelect.addEventListener("change", function () { requestStorage(storageSelect.value, false); });
+    }
+    bindClick("sync-annotation-family", function () { requestFamilySync(); });
+    bindClick("create-keynote-file", function () { requestStorage("file", true); });
     var searchInput = byId("search-input");
     var divisionSelectMenu = byId("division-select-menu");
     var placementFilterSelect = byId("placement-filter-select");
@@ -5869,6 +6232,8 @@
       closeRowActionMenu(false);
     });
     document.addEventListener("keydown", function (event) {
+      // The native dialog handles Escape and keeps keyboard focus in Settings.
+      if (byId("settings-dialog") && byId("settings-dialog").open) { return; }
       if (event.key !== "Escape") {
         return;
       }
@@ -5940,7 +6305,6 @@
     bindClick("close-validation-sidebar", function () {
       setWarningSidebarOpen(false);
     });
-    bindClick("configure-supabase", configureSupabase);
     bindClick("refresh-data", refreshData);
     bindClick("collect-analytics", collectAnalytics);
     bindClick("undo-change", undoEditorChange);
@@ -5958,6 +6322,9 @@
     setStatus: setStatus,
     handleSaveResult: handleSaveResult,
     handleAnalyticsResult: handleAnalyticsResult,
+    handleStorageResult: handleStorageResult,
+    handleFamilySyncResult: handleFamilySyncResult,
+    handleSupabaseSettingsResult: handleSupabaseSettingsResult,
     requestRefresh: requestRefresh
   };
 
