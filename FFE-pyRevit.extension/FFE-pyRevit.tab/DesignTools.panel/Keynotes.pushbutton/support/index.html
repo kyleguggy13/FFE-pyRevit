@@ -400,27 +400,37 @@
           </button>
         </div>
         <div class="settings-body">
-          <div class="settings-field">
-            <label for="storage-mode">Storage Mode</label>
-            <select id="storage-mode" aria-describedby="storage-mode-help">
-              <option value="file">Text File</option>
-              <option value="annotation">Generic Annotation Only</option>
-            </select>
-            <p id="storage-mode-help">Use an assigned text file, or store Generic Annotation keynotes in Supabase.</p>
-          </div>
-          <div class="settings-field">
-            <button id="create-keynote-file" class="utility-button" type="button">Create Text File</button>
-            <p id="create-keynote-file-help">Create and assign a new file from the division template.</p>
-          </div>
-          <form id="supabase-settings-form" class="settings-field settings-connection">
-            <label for="supabase-project-url">Supabase Project URL</label>
-            <input id="supabase-project-url" type="url" placeholder="https://your-project.supabase.co" required autocomplete="off" spellcheck="false" />
-            <label for="supabase-publishable-key">Supabase Publishable Key</label>
-            <input id="supabase-publishable-key" type="password" required autocomplete="off" spellcheck="false" aria-describedby="supabase-key-help" />
-            <p id="supabase-key-help">A legacy anon key is also supported.</p>
-            <p id="supabase-settings-message" role="status" aria-live="polite"></p>
-            <button id="configure-supabase" class="utility-button" type="submit">Save Connection</button>
-          </form>
+          <details class="settings-section" open>
+            <summary>Keynote Storage</summary>
+            <div class="settings-section-body">
+              <div class="settings-field">
+                <label for="storage-mode">Storage Mode</label>
+                <select id="storage-mode" aria-describedby="storage-mode-help">
+                  <option value="file">Text File</option>
+                  <option value="annotation">Generic Annotation Only</option>
+                </select>
+                <p id="storage-mode-help">Use an assigned text file, or store Generic Annotation keynotes in Supabase.</p>
+              </div>
+              <div class="settings-field">
+                <button id="create-keynote-file" class="utility-button" type="button">Create Text File</button>
+                <p id="create-keynote-file-help">Create and assign a new file from the division template.</p>
+              </div>
+            </div>
+          </details>
+          <details class="settings-section">
+            <summary>Supabase Connection</summary>
+            <div class="settings-section-body">
+              <form id="supabase-settings-form" class="settings-field settings-connection">
+                <label for="supabase-project-url">Supabase Project URL</label>
+                <input id="supabase-project-url" type="url" placeholder="https://your-project.supabase.co" required autocomplete="off" spellcheck="false" />
+                <label for="supabase-publishable-key">Supabase Publishable Key</label>
+                <input id="supabase-publishable-key" type="password" required autocomplete="off" spellcheck="false" aria-describedby="supabase-key-help" />
+                <p id="supabase-key-help">A legacy anon key is also supported.</p>
+                <p id="supabase-settings-message" role="status" aria-live="polite"></p>
+                <button id="configure-supabase" class="utility-button" type="submit">Save Connection</button>
+              </form>
+            </div>
+          </details>
         </div>
       </dialog>
 
