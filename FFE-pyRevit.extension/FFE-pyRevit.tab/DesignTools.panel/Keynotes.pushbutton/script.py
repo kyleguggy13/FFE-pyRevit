@@ -581,8 +581,10 @@ def make_file_uri(path):
 
 
 # ____________________________________________________________________ KEYNOTE PATH HELPERS
-def iterate_external_resource_references(refs):
+def iterate_external_resource_references(refs, strict=False):
     if refs is None:
+        if strict:
+            raise Exception("Could not read the keynote table external references.")
         return []
 
     try:
@@ -601,14 +603,15 @@ def iterate_external_resource_references(refs):
         while enumerator.MoveNext():
             current = enumerator.Current
             items.append((current.Key, current.Value))
-        if items:
-            return items
+        return items
     except:
         pass
 
     try:
         return list(refs.Items)
     except:
+        if strict:
+            raise Exception("Could not enumerate the keynote table external references.")
         return []
 
 
@@ -617,33 +620,62 @@ def get_reference_path(resource_ref):
         return ""
 
     try:
-        path = safe_str(resource_ref.InSessionPath)
+        path = safe_str(resource_ref.InSessionPath).strip()
         if path:
             return path
-    except:
-        pass
-
-    try:
-        model_path = resource_ref.GetAbsolutePath()
-        if model_path:
-            path = safe_str(ModelPathUtils.ConvertModelPathToUserVisiblePath(model_path))
-            if path:
-                return path
-    except:
-        pass
-
-    try:
-        if resource_ref.HasValidDisplayPath():
-            path = safe_str(resource_ref.GetResourceShortDisplayName())
-            if path:
-                return path
     except:
         pass
 
     return ""
 
 
-def get_keynote_reference(target_doc):
+def get_keynote_file_reference_path(keynote_table):
+    """Read the stored local/network path when the resource has no session path."""
+    if not keynote_table.IsExternalFileReference():
+        return ""
+    file_ref = keynote_table.GetExternalFileReference()
+    model_path = file_ref.GetPath()
+    stored_path = safe_str(ModelPathUtils.ConvertModelPathToUserVisiblePath(model_path)).strip() if model_path else ""
+    if not stored_path:
+        return ""
+    try:
+        absolute_path = file_ref.GetAbsolutePath()
+        if absolute_path:
+            path = safe_str(ModelPathUtils.ConvertModelPathToUserVisiblePath(absolute_path)).strip()
+            if path:
+                return path
+    except Exception:
+        pass
+    if os.path.isabs(stored_path) or looks_like_remote_resource(stored_path):
+        return stored_path
+    # Do not resolve relative/content paths against the manager's working directory.
+    raise Exception("Could not resolve the assigned keynote file path: {0}".format(stored_path))
+
+
+def is_empty_keynote_reference(resource_ref, resource_type):
+    """Recognize an empty built-in reference; unknown or broken servers stay configured."""
+    if resource_ref is None:
+        return True
+    try:
+        if safe_str(resource_ref.InSessionPath).strip() or resource_ref.HasValidDisplayPath():
+            return False
+        info = iterate_external_resource_references(resource_ref.GetReferenceInformation(), strict=True)
+        # Revit's built-in file server stores Path and PathType. PathType alone is
+        # not an assignment: a new table can retain the default file path mode.
+        # https://static.au-uw2-prd.autodesk.com/Class_Handout_SD125671_Get_Your_Linked_Data_from_Anywhere_with_the_Revit_API_Rahul_Bhobe_2.pdf
+        if any(safe_str(value).strip() for key, value in info if safe_str(key) != "PathType"):
+            return False
+        server_id = safe_str(resource_ref.ServerId).lower()
+        if server_id == "bd4f0f53-394a-4468-b37e-1e7949013382":
+            return True
+        # Revit can also supply a default reference without an assigned server.
+        return (server_id == "00000000-0000-0000-0000-000000000000" and
+                not resource_ref.IsValidReference(resource_type))
+    except Exception:
+        return False
+
+
+def get_keynote_reference(target_doc, allow_unassigned=False):
     """
     Get the keynote table and file reference for the given document, or raise an exception if it cannot be accessed.
     """
@@ -660,11 +692,25 @@ def get_keynote_reference(target_doc):
     except Exception as exc:
         raise Exception("Could not read the keynote table external reference: {0}".format(exc))
 
-    for ref_type, resource_ref in iterate_external_resource_references(refs):
+    references = iterate_external_resource_references(refs, strict=True)
+    unresolved_reference = False
+    for ref_type, resource_ref in references:
         keynote_path = get_reference_path(resource_ref)
         if keynote_path:
             return keynote_table, resource_ref, keynote_path
+        try:
+            keynote_path = get_keynote_file_reference_path(keynote_table)
+        except Exception as exc:
+            raise Exception("Could not read the stored keynote file reference: {0}".format(exc))
+        if keynote_path:
+            return keynote_table, resource_ref, keynote_path
+        if not is_empty_keynote_reference(resource_ref, ref_type):
+            unresolved_reference = True
 
+    if unresolved_reference:
+        raise Exception("The assigned keynote reference does not expose a readable file path.")
+    if allow_unassigned:
+        return keynote_table, None, ""
     raise Exception("This document does not have a file-based keynote table reference.")
 
 
@@ -1108,12 +1154,18 @@ def make_empty_model_health(status="notScanned", message="Model health has not b
 
 
 # ____________________________________________________________________ SUPABASE ANNOTATION LIBRARY
-def get_storage_mode(target_doc):
+def get_storage_mode_preference(target_doc):
     settings = read_user_settings()
     key = get_document_analytics_identity(target_doc)["documentKey"]
-    mode = (settings.get("storageModes") or {}).get(key, "file")
+    mode = (settings.get("storageModes") or {}).get(key)
+    if mode is None:
+        return None
     # Retain the user's selection from the unreleased RVT-storage implementation.
     return "annotation" if mode in ("model", "annotation") else "file"
+
+
+def get_storage_mode(target_doc):
+    return get_storage_mode_preference(target_doc) or "file"
 
 
 def save_storage_mode(target_doc, mode):
@@ -1132,7 +1184,19 @@ def annotation_library_key(target_doc):
     return "annotation:" + identity["documentKey"]
 
 
-def keynote_supabase_rpc(name, arguments):
+def check_keynote_rpc_result(result, allow_missing=False):
+    """Recognize the deployed snapshot API's explicit not-found response only."""
+    if not isinstance(result, dict):
+        raise Exception("Supabase returned an invalid keynote response.")
+    if result.get("status") == "error":
+        if allow_missing and result.get("message") == "Keynote library was not found.":
+            result["notFound"] = True
+        else:
+            raise Exception(result.get("message") or "Supabase rejected the request.")
+    return result
+
+
+def keynote_supabase_rpc(name, arguments, allow_missing=False):
     """Fetch canonical cloud data in the Revit event; credentials never enter status messages."""
     from System.Net import WebRequest
     from System.Text import Encoding
@@ -1170,18 +1234,17 @@ def keynote_supabase_rpc(name, arguments):
             response.Close()
         if stream is not None:
             stream.Close()
-    if result.get("status") == "error":
-        raise Exception(result.get("message") or "Supabase rejected the request.")
-    return result
+    return check_keynote_rpc_result(result, allow_missing=allow_missing)
 
 
-def build_annotation_keynote_payload(target_doc, include_model_health=True, allow_converted_source=False):
+def build_annotation_keynote_payload(target_doc, include_model_health=True, allow_converted_source=False, snapshot=None):
     payload = build_base_payload(target_doc, "ready", "")
     payload.update({"storageMode": "annotation", "displayPath": "Supabase: " + get_document_title(target_doc)})
     payload["preferences"]["placementMode"] = "genericAnnotation"
     try:
         payload["libraryKey"] = annotation_library_key(target_doc)
-        snapshot = keynote_supabase_rpc("get_annotation_keynote_snapshot", {"p_library_key": payload["libraryKey"]})
+        if snapshot is None:
+            snapshot = keynote_supabase_rpc("get_annotation_keynote_snapshot", {"p_library_key": payload["libraryKey"]})
         if not snapshot.get("libraryId"):
             raise Exception("Initialize the Supabase library using the storage selector.")
         payload.update(snapshot)
@@ -1263,6 +1326,14 @@ def write_and_assign_keynote_file(target_doc, path, entries):
     finally:
         if stream is not None:
             stream.Dispose()
+    try:
+        assign_keynote_file(target_doc, path)
+    except Exception as exc:
+        raise Exception("The keynote file was created at '{0}', but assignment failed: {1}".format(path, exc))
+
+
+def assign_keynote_file(target_doc, path):
+    """Assign an existing file without changing its contents."""
     transaction = Transaction(target_doc, "Assign Keynote Text File")
     try:
         transaction.Start()
@@ -1273,13 +1344,44 @@ def write_and_assign_keynote_file(target_doc, path, entries):
         results = KeyBasedTreeEntriesLoadResults()
         result = table.LoadFrom(reference, results)
         if safe_str(result) != "Success" or list(results.GetFailureMessages()):
-            raise Exception("Revit could not load the new keynote file ({0}).".format(result))
+            raise Exception("Revit could not load the keynote file ({0}).".format(result))
         if transaction.Commit() != TransactionStatus.Committed:
             raise Exception("Revit did not commit the keynote file assignment.")
-    except Exception as exc:
+    except Exception:
         if transaction.GetStatus() == TransactionStatus.Started:
             transaction.RollBack()
-        raise Exception("The keynote file was created at '{0}', but assignment failed: {1}".format(path, exc))
+        raise
+
+
+def reconnect_keynote_file(target_doc):
+    """Browse, validate, and reconnect a source even when reference detection fails."""
+    group = None
+    try:
+        if get_document_analytics_identity(target_doc)["documentKeySource"] == "title":
+            raise Exception("Save the Revit project, then retry reconnecting its keynote file.")
+        path = forms.pick_file(file_ext="txt", title="Reconnect Keynote Text File")
+        if not path:
+            return {"status": "canceled", "message": "Keynote file reconnection canceled."}
+        content, encoding = decode_keynote_bytes(read_binary_file(path))
+        entries, parse_issues = parse_keynote_text(content)
+        if has_error_issues(validate_entries(entries, parse_issues)):
+            raise Exception("The selected keynote file has invalid rows or hierarchy. Correct the file before reconnecting it.")
+        group = TransactionGroup(target_doc, "Reconnect Keynote Text File")
+        group.Start()
+        assign_keynote_file(target_doc, path)
+        payload = build_keynote_payload(target_doc, storage_mode="file", source_path=path)
+        if payload.get("status") != "ready":
+            raise Exception(payload.get("message") or "Could not load the selected keynote file.")
+        if group.Assimilate() != TransactionStatus.Committed:
+            raise Exception("Revit did not commit the keynote file reconnection.")
+        group = None
+        save_storage_mode(target_doc, "file")
+        payload["message"] = "Reconnected '{0}' and assigned it to Revit.".format(path)
+        return {"status": "ready", "payload": payload, "message": payload["message"]}
+    except Exception as exc:
+        if group is not None and group.GetStatus() == TransactionStatus.Started:
+            group.RollBack()
+        return {"status": "error", "message": safe_str(exc)}
 
 
 def sync_converted_keynote_file(payload, source, annotation_key):
@@ -1308,7 +1410,26 @@ def setup_keynote_storage(target_doc, setup_payload):
     try:
         if mode not in ("file", "annotation"):
             raise Exception("Unknown keynote storage mode.")
+        if get_document_analytics_identity(target_doc)["documentKeySource"] == "title":
+            raise Exception("Save the Revit project, then Refresh before setting up keynotes.")
+        if setup_payload.get("projectSetup") and not setup_payload.get("recoverySetup"):
+            current = build_project_keynote_payload(target_doc, include_model_health=False)
+            setup = current.get("projectSetup") or {}
+            if setup.get("state") != "required" or not setup.get("canContinue"):
+                raise Exception(setup.get("message") or "This project already has keynotes configured. Refresh before continuing.")
         converting_annotation = mode == "file" and get_storage_mode(target_doc) == "annotation"
+        # A new project may have a stale local annotation preference, but no library to export.
+        if setup_payload.get("projectSetup") and not setup_payload.get("recoverySetup"):
+            converting_annotation = False
+        if setup_payload.get("recoverySetup"):
+            # Explicit recovery bypasses reference detection, but never replaces an
+            # existing project cloud library with an empty division template.
+            snapshot = keynote_supabase_rpc("get_annotation_keynote_snapshot", {
+                "p_library_key": annotation_library_key(target_doc)}, allow_missing=True)
+            missing = snapshot.get("status") == "error" and snapshot.get("notFound") is True
+            if not missing and (snapshot.get("status") != "ready" or not snapshot.get("libraryId")):
+                raise Exception("Could not confirm the existing project cloud library. Check Settings and retry.")
+            converting_annotation = mode == "file" and not missing
         if mode == "annotation":
             key = annotation_library_key(target_doc)
             file_payload = build_keynote_payload(target_doc, include_model_health=False, storage_mode="file")
@@ -1335,7 +1456,9 @@ def setup_keynote_storage(target_doc, setup_payload):
                 conversion_group.Start()
             write_and_assign_keynote_file(target_doc, path, entries)
             exported_path = path
-        payload = build_keynote_payload(target_doc, storage_mode=mode)
+        payload = build_keynote_payload(target_doc, storage_mode=mode, source_path=exported_path)
+        if payload.get("status") != "ready":
+            raise Exception(payload.get("message") or "Could not load the configured keynote library. Refresh before retrying.")
         if converting_annotation:
             sync_converted_keynote_file(payload, source, annotation_library_key(target_doc))
             if conversion_group.Assimilate() != TransactionStatus.Committed:
@@ -1360,6 +1483,7 @@ def build_base_payload(target_doc, status, message):
         "docTitle": get_document_title(target_doc),
         "keynotePath": "",
         "storageMode": "file",
+        "projectSetup": {"state": "complete", "canContinue": False, "message": ""},
         "displayPath": "",
         "libraryKey": "",
         "encoding": "",
@@ -1385,13 +1509,76 @@ def build_base_payload(target_doc, status, message):
     return payload
 
 
-def build_keynote_payload(target_doc, include_model_health=True, storage_mode=None):
+def build_project_keynote_payload(target_doc, include_model_health=True):
+    """Resolve first-run setup without treating unavailable sources as new projects."""
+    payload = build_base_payload(target_doc, "error", "")
+    unassigned = False
+    try:
+        preference = get_storage_mode_preference(target_doc)
+        try:
+            table, reference, path = get_keynote_reference(target_doc, allow_unassigned=True)
+        except Exception:
+            # Configured annotations do not depend on a usable native keynote reference.
+            if preference == "annotation":
+                return build_annotation_keynote_payload(target_doc, include_model_health)
+            raise
+        if path:
+            return build_keynote_payload(target_doc, include_model_health, storage_mode=preference or "file")
+        unassigned = True
+
+        if payload["documentKeySource"] == "title":
+            message = "Save the Revit project, then Refresh before setting up keynotes."
+            payload.update({"status": "setupRequired", "message": message,
+                            "projectSetup": {"state": "required", "canContinue": False, "message": message}})
+            return payload
+
+        key = annotation_library_key(target_doc)
+        snapshot = keynote_supabase_rpc("get_annotation_keynote_snapshot", {"p_library_key": key}, allow_missing=True)
+        if snapshot.get("status") == "error" and snapshot.get("notFound") is True:
+            message = "Choose how this project will use keynotes."
+            payload.update({"status": "setupRequired", "message": message,
+                            "projectSetup": {"state": "required", "canContinue": True, "message": message}})
+            return payload
+        if snapshot.get("status") != "ready" or not snapshot.get("libraryId"):
+            raise Exception("Could not confirm the project's keynote library. Check Settings and Refresh.")
+
+        if preference != "file":
+            payload = build_annotation_keynote_payload(target_doc, include_model_health, snapshot=snapshot)
+            if preference is None and snapshot.get("sourceType") == "annotation" and payload.get("status") == "ready":
+                save_storage_mode(target_doc, "annotation")
+            return payload
+
+        # Respect an explicit Text File preference even if another source exists in the cloud.
+        payload = build_keynote_payload(target_doc, include_model_health, storage_mode="file")
+        payload["message"] = ("This project has an existing Supabase keynote library. Select Generic Annotation Only in Settings to use it."
+                              if snapshot.get("sourceType") == "annotation" else
+                              "This project has an existing Text File library. Restore its keynote file assignment, or use Settings to recover it.")
+        payload["issues"] = [make_issue("error", payload["message"], code="loadError")]
+        return payload
+    except Exception as exc:
+        message = safe_str(exc)
+        payload.update({"status": "error", "message": message,
+                        "issues": [make_issue("error", message, code="projectSetupCheckFailed")]})
+        # Reference inspection failures stay in the existing error view. Only a confirmed
+        # unassigned table can display setup, and a failed cloud check disables creation.
+        if unassigned:
+            payload["projectSetup"] = {"state": "blocked", "canContinue": False,
+                                       "message": message + " Check Settings and Refresh before continuing."}
+        return payload
+
+
+def build_keynote_payload(target_doc, include_model_health=True, storage_mode=None, source_path=None):
     if (storage_mode or get_storage_mode(target_doc)) == "annotation":
         return build_annotation_keynote_payload(target_doc, include_model_health)
     payload = build_base_payload(target_doc, "error", "")
 
     try:
-        keynote_table, resource_ref, keynote_path = get_keynote_reference(target_doc)
+        if source_path is None:
+            keynote_table, resource_ref, keynote_path = get_keynote_reference(target_doc)
+        else:
+            # A successful LoadFrom already verified assignment. Use the selected
+            # path to load data instead of repeating failed reference discovery.
+            keynote_path = source_path
         payload["keynotePath"] = keynote_path
         payload["displayPath"] = keynote_path
         payload["libraryKey"] = normalize_path(keynote_path)
@@ -4148,7 +4335,7 @@ class KeynoteManagerEventHandler(IExternalEventHandler):
             except Exception as exc:
                 window.call_keynote_app("handleSupabaseSettingsResult", {"status": "error", "message": safe_str(exc)})
                 return
-            keynote_payload = build_keynote_payload(window.document)
+            keynote_payload = build_project_keynote_payload(window.document)
             window.set_payload(keynote_payload)
             window.call_keynote_app("handleSupabaseSettingsResult", {"status": "ready", "payload": keynote_payload})
             return
@@ -4160,13 +4347,20 @@ class KeynoteManagerEventHandler(IExternalEventHandler):
             window.call_keynote_app("handleStorageResult", result)
             return
 
+        if action == "reconnectFile":
+            result = reconnect_keynote_file(window.document)
+            if result.get("payload"):
+                window.set_payload(result["payload"])
+            window.call_keynote_app("handleStorageResult", result)
+            return
+
         if action == "syncAnnotationFamily":
             result = sync_annotation_family_payload(window.document, payload or {})
             window.call_keynote_app("handleFamilySyncResult", result)
             return
 
         if action == "refresh":
-            keynote_payload = build_keynote_payload(window.document)
+            keynote_payload = build_project_keynote_payload(window.document)
             window.set_payload(keynote_payload)
             window.send_keynote_payload(force=True)
             window.send_status(keynote_payload.get("status"), keynote_payload.get("message"))
@@ -4503,6 +4697,12 @@ class KeynoteManagerWindow(Window):
             self.raise_external_event("set up keynote storage", "storage")
             return
 
+        if message_type == "reconnectFile":
+            self.event_handler.pending_action = "reconnectFile"
+            self.event_handler.pending_payload = None
+            self.raise_external_event("reconnect keynote file", "storage")
+            return
+
         if message_type == "configureSupabase":
             self.event_handler.pending_action = "configureSupabase"
             self.event_handler.pending_payload = message.get("payload") or {}
@@ -4592,7 +4792,7 @@ if not os.path.exists(PATH_INDEX):
 
 if not focus_existing_window():
     try:
-        keynote_payload = build_keynote_payload(doc)
+        keynote_payload = build_project_keynote_payload(doc)
         WebView2, CoreWebView2CreationProperties = load_webview2_types()
     except Exception as startup_error:
         forms.alert(

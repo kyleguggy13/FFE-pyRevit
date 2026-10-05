@@ -21,6 +21,10 @@
     dirty: false,
     saving: false,
     storageBusy: false,
+    setupMode: null,
+    setupDocumentKey: null,
+    setupFeedback: null,
+    manualSetup: false,
     familySyncing: false,
     pendingFamilySync: null,
     loadGeneration: 0,
@@ -64,6 +68,7 @@
   };
 
   var STATUS_TITLES = {
+    setupRequired: "Project Setup",
     ready: "Ready",
     syncing: "Syncing",
     conflict: "Conflict",
@@ -368,6 +373,7 @@
   }
 
   function blockForSafeMode(actionLabel) {
+    if (projectSetupActive()) { return true; }
     if (state.storageBusy || state.saving) {
       setStatus({ status: "warning", message: "Wait for the current keynote operation to finish." });
       return true;
@@ -404,8 +410,132 @@
     return (payload || state.payload || {}).storageMode === "annotation";
   }
 
+  function projectSetupActive(payload) {
+    if (!payload && state.manualSetup) { return true; }
+    var setup = (payload || state.payload || {}).projectSetup || {};
+    return setup.state === "required" || setup.state === "blocked";
+  }
+
+  function projectSetupCanContinue() {
+    if (state.manualSetup) {
+      return Boolean(state.payload && state.payload.documentKeySource && state.payload.documentKeySource !== "title");
+    }
+    var setup = (state.payload || {}).projectSetup || {};
+    return setup.state === "required" && setup.canContinue === true;
+  }
+
+  function keynoteLoadFailed() {
+    return Boolean(state.payload && ["error", "missingFile", "unsupported", "invalidFormat"].indexOf(state.payload.status) !== -1);
+  }
+
+  function recoveryBusy() {
+    return state.storageBusy || state.saving || state.familySyncing || state.dbInitializing || state.analyticsCollecting;
+  }
+
+  function renderKeynoteRecovery() {
+    var active = projectSetupActive();
+    var failed = keynoteLoadFailed();
+    var actions = byId("keynote-recovery-actions");
+    var setupButton = byId("open-project-setup");
+    var reconnectButton = byId("reconnect-keynote-file");
+    if (actions) { actions.hidden = !failed && !active; }
+    if (setupButton) {
+      setupButton.hidden = !failed || state.manualSetup || (active && (state.payload.projectSetup || {}).state !== "blocked");
+      setupButton.disabled = Boolean(recoveryBusy());
+    }
+    if (reconnectButton) { reconnectButton.disabled = Boolean(recoveryBusy()); }
+  }
+
+  function openProjectSetup() {
+    if (!keynoteLoadFailed() || recoveryBusy()) { return; }
+    state.manualSetup = true;
+    state.setupFeedback = null;
+    setSettingsOpen(false);
+    renderAll();
+    setStatus({ status: "setupRequired", message: projectSetupCanContinue()
+      ? "Choose a keynote type, or reconnect an existing keynote text file."
+      : "Save the Revit project, then Refresh before setting up keynotes." });
+  }
+
+  function closeProjectSetup() {
+    if (!state.manualSetup || recoveryBusy()) { return; }
+    state.manualSetup = false;
+    state.setupFeedback = null;
+    renderAll();
+    setStatusFromPayload(state.payload || {});
+  }
+
+  function requestReconnectFile() {
+    if (recoveryBusy() || (!keynoteLoadFailed() && !projectSetupActive())) { return; }
+    if (!confirmDiscardChanges("Reconnecting a keynote file will discard unsaved edits and switch to Text File mode. Continue?")) { return; }
+    setSettingsOpen(false);
+    state.storageBusy = true;
+    renderMeta();
+    setStatus({ status: "syncing", message: "Choose the existing keynote text file to reconnect..." });
+    clearLocalEditClaims().then(function () {
+      if (!postWebViewMessage({ type: "reconnectFile" })) {
+        handleStorageResult({ status: "error", message: "Could not send file reconnection to Revit. Open the manager from pyRevit and retry." });
+      }
+    }).catch(function (error) {
+      handleStorageResult({ status: "error", message: "Could not prepare file reconnection: " + (error.message || text(error)) });
+    });
+  }
+
+  function renderProjectSetup() {
+    var active = projectSetupActive();
+    var setup = (state.payload || {}).projectSetup || {};
+    var panel = byId("project-setup");
+    var shell = document.querySelector(".app-shell");
+    var workspace = document.querySelector(".workspace");
+    var busy = state.storageBusy || state.saving || state.familySyncing || state.dbInitializing || state.analyticsCollecting;
+    if (panel) {
+      panel.hidden = !active;
+      panel.setAttribute("aria-busy", busy ? "true" : "false");
+    }
+    if (shell) { shell.classList.toggle("is-project-setup", active); }
+    if (workspace) {
+      workspace.hidden = active;
+      workspace.inert = active || Boolean(busy);
+    }
+    if (!active) { return; }
+    setText("project-setup-eyebrow", state.manualSetup ? "PROJECT RECOVERY" : "NEW PROJECT");
+    setText("project-setup-intro", state.manualSetup
+      ? "Choose how this project will use keynotes. An existing project cloud library will be reused when available."
+      : "Choose how this project will use keynotes. Both options start with the FFE division template.");
+    var back = byId("project-setup-back");
+    if (back) {
+      back.hidden = !state.manualSetup;
+      back.disabled = Boolean(busy);
+    }
+    ["setup-revit-keynotes", "setup-annotation-keynotes"].forEach(function (id) {
+      var input = byId(id);
+      if (input) {
+        input.checked = input.value === state.setupMode;
+        input.disabled = Boolean(busy);
+      }
+    });
+    var button = byId("project-setup-continue");
+    if (button) {
+      button.disabled = Boolean(busy || !state.setupMode || !projectSetupCanContinue());
+      button.textContent = busy ? "Setting up..." : "Continue";
+    }
+    var feedback = state.setupFeedback || { message: state.manualSetup && !projectSetupCanContinue()
+      ? "Save the Revit project, then Refresh before setting up keynotes." : setup.message, error: setup.state === "blocked" };
+    var message = byId("project-setup-message");
+    setText(message, feedback.message || "");
+    if (message) { message.setAttribute("data-error", feedback.error ? "true" : "false"); }
+    setText("project-setup-next", state.setupMode === "file"
+      ? (state.manualSetup ? "Next: save a new text file and replace the current Revit keynote assignment." : "Next: choose where to save RevitKeynotes.txt.")
+      : (state.setupMode === "annotation" ? "Next: create the project cloud library." : "Select a keynote type to continue."));
+  }
+
+  function requestProjectSetup() {
+    if (!projectSetupActive() || !projectSetupCanContinue() || !state.setupMode) { return; }
+    requestStorage(state.setupMode, state.setupMode === "file");
+  }
+
   function sourceAvailable() {
-    return Boolean(state.payload && (isAnnotationOnly() ? state.payload.libraryId : state.payload.keynotePath));
+    return Boolean(!projectSetupActive() && state.payload && (isAnnotationOnly() ? state.payload.libraryId : state.payload.keynotePath));
   }
 
   function sourceText(value) {
@@ -546,6 +676,8 @@
       renderMeta();
       return;
     }
+    var initializing = projectSetupActive();
+    if (initializing && (!projectSetupCanContinue() || (mode !== "file" && mode !== "annotation"))) { renderMeta(); return; }
     var converting = isAnnotationOnly() && mode === "file";
     if (!confirmDiscardChanges(converting
       ? "Export the saved Supabase library and discard unsaved edits? Cancel and Save first to include your edits."
@@ -556,11 +688,18 @@
     setSettingsOpen(false);
     state.storageBusy = true;
     renderMeta();
+    if (initializing) { setStatus({ status: "syncing", message: "Setting up project keynotes..." }); }
     clearLocalEditClaims().then(function () {
-      if (!postWebViewMessage({ type: "setupStorage", payload: { storageMode: mode, createFile: Boolean(createFile) } })) {
-        state.storageBusy = false;
-        renderMeta();
+      var request = { storageMode: mode, createFile: Boolean(createFile || (initializing && mode === "file")) };
+      if (initializing) {
+        if (state.manualSetup) { request.recoverySetup = true; }
+        else { request.projectSetup = true; }
       }
+      if (!postWebViewMessage({ type: "setupStorage", payload: request })) {
+        handleStorageResult({ status: "error", message: "Could not send keynote setup to Revit. Open the manager from pyRevit and retry." });
+      }
+    }).catch(function (error) {
+      handleStorageResult({ status: "error", message: "Could not prepare keynote setup: " + (error.message || text(error)) });
     });
   }
 
@@ -588,13 +727,14 @@
       return;
     }
     state.storageBusy = false;
-    if (result.status === "ready" && result.payload) {
+    if (result.status === "ready" && result.payload && result.payload.status === "ready" && !projectSetupActive(result.payload)) {
+      state.manualSetup = false;
       state.allowNextLoad = true;
       loadData(result.payload);
       state.operationIssues = result.issues || [];
       renderValidation();
     } else {
-      setStatus({ status: result.status === "canceled" ? "ready" : "error", message: result.message || "Could not change keynote storage." });
+      setStatus({ status: result.status === "canceled" ? "ready" : "error", message: (result.payload && result.payload.message) || result.message || "Could not change keynote storage." });
       syncLocalEditClaims({ force: true });
       renderMeta();
     }
@@ -1465,6 +1605,10 @@
 
     setText("state-title", STATUS_TITLES[status] || "Status");
     setText("state-message", sourceText(statusState.message || ""));
+    if (projectSetupActive()) {
+      state.setupFeedback = { message: statusState.message || "", error: status === "error" };
+      renderProjectSetup();
+    }
   }
 
   function confirmDiscardChanges(message) {
@@ -1748,10 +1892,10 @@
     var busy = state.storageBusy || state.saving || state.familySyncing || state.dbInitializing || state.analyticsCollecting;
     if (storageSelect) {
       storageSelect.value = payload.storageMode || "file";
-      storageSelect.disabled = Boolean(busy);
+      storageSelect.disabled = Boolean(busy || projectSetupActive());
     }
     if (createFile) {
-      createFile.disabled = Boolean(busy);
+      createFile.disabled = Boolean(busy || projectSetupActive());
       createFile.textContent = isAnnotationOnly() ? "Export Library to Text File" : "Create Text File";
     }
     setText("create-keynote-file-help", isAnnotationOnly()
@@ -1768,6 +1912,9 @@
     setText("keynote-path", payload.displayPath || payload.keynotePath || "No keynote file loaded");
     setText("encoding-label", isAnnotationOnly() ? "Supabase library" : (payload.encoding || "-"));
     setText("entry-count", formatNumber(state.entries.length));
+    if (byId("refresh-data")) { byId("refresh-data").disabled = Boolean(busy); }
+    renderKeynoteRecovery();
+    renderProjectSetup();
   }
 
   function renderDivisions() {
@@ -3649,6 +3796,7 @@
   function renderAll() {
     ensureSelection();
     renderMeta();
+    if (projectSetupActive()) { return; }
     renderDivisions();
     renderDivisionSelect();
     renderDivisionHeader();
@@ -4607,7 +4755,7 @@
     var settings = (payload && payload.supabase) || {};
     var client = currentClient();
 
-    if (!payload || !payload.libraryKey) {
+    if (!payload || projectSetupActive(payload) || !payload.libraryKey) {
       state.dbReady = false;
       return;
     }
@@ -4969,6 +5117,13 @@
 
     state.loadGeneration += 1;
     state.payload = payload || {};
+    if (state.setupDocumentKey !== state.payload.documentKey) {
+      state.setupMode = null;
+      state.manualSetup = false;
+      state.setupDocumentKey = state.payload.documentKey;
+    }
+    if (state.payload.status === "ready") { state.manualSetup = false; }
+    state.setupFeedback = null;
     preferences = state.payload.preferences || {};
     setPlacementMode(preferences.placementMode || state.payload.placementMode || state.placementMode);
     state.entries = (state.payload.entries || []).map(normalizeEntry);
@@ -5683,7 +5838,7 @@
     var settings = (state.payload && state.payload.supabase) || {};
     var db = dbManager();
 
-    if (state.analyticsCollecting || state.saving || state.storageBusy) {
+    if (projectSetupActive() || state.analyticsCollecting || state.saving || state.storageBusy) {
       return;
     }
 
@@ -6162,6 +6317,25 @@
   }
 
   function init() {
+    bindClick("open-project-setup", openProjectSetup);
+    bindClick("reconnect-keynote-file", requestReconnectFile);
+    bindClick("project-setup-back", closeProjectSetup);
+    var setupForm = byId("project-setup-form");
+    if (setupForm) {
+      setupForm.addEventListener("submit", function (event) {
+        event.preventDefault();
+        requestProjectSetup();
+      });
+    }
+    ["setup-revit-keynotes", "setup-annotation-keynotes"].forEach(function (id) {
+      var input = byId(id);
+      if (input) {
+        input.addEventListener("change", function () {
+          state.setupMode = input.value;
+          renderProjectSetup();
+        });
+      }
+    });
     bindClick("open-settings", function () { setSettingsOpen(true); });
     bindClick("close-settings", function () { setSettingsOpen(false); });
     var settingsForm = byId("supabase-settings-form");

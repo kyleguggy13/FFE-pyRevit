@@ -139,6 +139,10 @@
           <strong id="state-title">&lt;Messages&gt;</strong>
           <span id="state-message"></span>
         </div>
+        <div id="keynote-recovery-actions" class="keynote-recovery-actions" aria-label="Recover project keynotes" hidden>
+          <button id="open-project-setup" class="utility-button" type="button">Set Up Project</button>
+          <button id="reconnect-keynote-file" class="utility-button" type="button">Reconnect Keynote File</button>
+        </div>
         <div class="message-actions">
           <button
             id="warning-pill"
@@ -169,7 +173,40 @@
         </div>
       </section>
 
-      <section class="file-strip" aria-label="Keynote storage details">
+      <section id="project-setup" class="project-setup" aria-labelledby="project-setup-heading" hidden>
+        <div class="project-setup-card">
+          <p id="project-setup-eyebrow" class="eyebrow">NEW PROJECT</p>
+          <h2 id="project-setup-heading">Set up project keynotes</h2>
+          <p id="project-setup-intro" class="project-setup-intro">Choose how this project will use keynotes. Both options start with the FFE division template.</p>
+          <form id="project-setup-form">
+            <fieldset class="project-setup-choices">
+              <legend class="sr-only">Keynote type</legend>
+              <label class="project-setup-choice" for="setup-revit-keynotes">
+                <input id="setup-revit-keynotes" type="radio" name="project-keynote-mode" value="file" />
+                <span>
+                  <strong>Revit Keynotes</strong>
+                  <span>Save the division template as a text file in your project location and assign it to Revit.</span>
+                </span>
+              </label>
+              <label class="project-setup-choice" for="setup-annotation-keynotes">
+                <input id="setup-annotation-keynotes" type="radio" name="project-keynote-mode" value="annotation" />
+                <span>
+                  <strong>Generic Annotation Keynotes</strong>
+                  <span>Create a cloud keynote library for generic annotations. No text file is needed.</span>
+                </span>
+              </label>
+            </fieldset>
+            <p id="project-setup-message" class="project-setup-message" role="status" aria-live="polite"></p>
+            <div class="project-setup-actions">
+              <button id="project-setup-continue" class="utility-button" type="submit" disabled>Continue</button>
+              <button id="project-setup-back" class="utility-button" type="button" hidden>Back to Manager</button>
+              <span id="project-setup-next">Select a keynote type to continue.</span>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <section id="keynote-file-strip" class="file-strip" aria-label="Keynote storage details">
         <button id="sync-annotation-family" class="utility-button" type="button" hidden>Update Family Types</button>
         <span id="keynote-path">No keynote file loaded</span>
         <span id="encoding-label">-</span>

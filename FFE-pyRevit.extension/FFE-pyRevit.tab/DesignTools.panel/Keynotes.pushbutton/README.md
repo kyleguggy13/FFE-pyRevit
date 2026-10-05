@@ -6,13 +6,33 @@ Both storage modes use the same Key, Text, and Parent structure and the same edi
 
 ## Opening the Manager
 
-Open the tool from the FFE-pyRevit ribbon. The manager opens in its own window and loads the keynote file assigned to the active Revit document.
+Open the tool from the FFE-pyRevit ribbon. The manager opens in its own window and loads the keynote source for the active Revit document. Projects without an assigned keynote reference or an existing cloud library open on **Set up project keynotes**.
 
 At the top of the window, confirm that the correct Revit document is listed. If the wrong document is active, switch back to Revit, activate the correct model, and reopen or refresh the manager.
 
+### New Project Setup
+
+Save the Revit project first, then click **Refresh** if the setup page asks you to save. Choose a keynote type and click **Continue**:
+
+- **Revit Keynotes** downloads the FFE division template and opens Save As with `RevitKeynotes.txt` as the suggested name. Choose your project's shared file location. The manager creates a UTF-16 text file, assigns it to Revit's keynote table, and opens the editor after loading succeeds. Existing files are not overwritten.
+- **Generic Annotation Keynotes** creates the project library in Supabase from the FFE division template and opens the editor with generic annotation placement selected. Setup does not create a text file or prepare a Revit family; existing placement tools handle the family requirements.
+
+Settings, Refresh, and Close remain available on the setup page. Canceling Save As or a failed setup keeps your choice so you can retry. A Supabase connection is required for both setup choices because the division template is stored there. If the cloud library check fails, open **Settings** to check the connection, then **Refresh**; creation is disabled until the manager confirms that no library exists.
+
+An existing annotation library is recovered using the central/cloud project identity, without replacing its notes. An explicit storage preference is preserved. A converted text-file library uses the existing recovery workflow. An assigned reference that is missing, inaccessible, malformed, or unsupported stays in the existing error view instead of starting new-project setup.
+
+### Recovering a Library or File Connection
+
+When the library fails to load or its text file is missing, the status bar shows **Set Up Project** and **Reconnect Keynote File**.
+
+- **Set Up Project** opens the setup choices directly, even when automatic reference detection fails. Save the model before continuing. Revit Keynotes creates and assigns a new file; if a project cloud library exists, its saved notes are exported into that file instead of being replaced by the division template. Generic Annotation Keynotes reuses the existing project cloud library or initializes it when none exists. Supabase must be available for these setup operations. **Back to Manager** returns to the previous view without changing the source.
+- **Reconnect Keynote File** opens a picker for an existing `.txt` file, validates it, assigns it to Revit, and loads it in Text File mode. The selected file is not rewritten, and reconnection does not require Supabase. If assignment or loading fails, the previous assignment is restored. Cancellation retains the current source and unsaved edits.
+
+Reconnect is also available on the setup page. Recovery actions remain available after failures and are hidden after the source loads successfully. Save/synchronize the RVT to persist the new keynote assignment.
+
 ## Choosing Storage
 
-Open **Settings** at the top of the manager to choose **Text File** or **Generic Annotation Only** under **Storage Mode**. The popup also contains **Create Text File**, **Supabase Project URL**, and **Supabase Publishable Key**. Edit the connection fields and click **Save Connection** to save them in your user settings and reload the library. Legacy anon keys remain supported. Closing Settings without saving leaves the connection unchanged. Existing projects default to Text File. The mode choice is remembered in your local user settings; no keynote library or library identity is written to RVT storage.
+Open **Settings** at the top of the manager to choose **Text File** or **Generic Annotation Only** under **Storage Mode**. The popup also contains **Create Text File**, **Supabase Project URL**, and **Supabase Publishable Key**. During new-project setup, choose the keynote type on the setup page; the storage controls in Settings stay disabled. Edit the connection fields and click **Save Connection** to save them in your user settings and reload the library. Legacy anon keys remain supported. Closing Settings without saving leaves the connection unchanged. Projects with assigned keynote references default to Text File unless you have selected another mode. The mode choice is remembered in your local user settings; no keynote library or library identity is written to RVT storage.
 
 - **Text File** uses the assigned text file with Supabase as a mirror. **Create Text File** downloads the 21-division template, asks for a new filename, writes UTF-16 text, and assigns it to Revit.
 - **Generic Annotation Only** uses **Supabase as the source of truth**. On first setup, the cloud library is seeded from the valid assigned file, or from the Supabase division template. Existing cloud libraries are never reseeded from a file or family types. The editor retains divisions, subnotes, blank descriptions, and unplaced notes.

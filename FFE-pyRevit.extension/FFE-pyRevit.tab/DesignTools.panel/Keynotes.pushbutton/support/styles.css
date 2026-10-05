@@ -185,6 +185,116 @@ h2 {
   grid-template-rows: auto auto auto auto minmax(0, 1fr);
 }
 
+.app-shell.is-project-setup {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.is-project-setup .workspace,
+.is-project-setup #keynote-file-strip,
+.is-project-setup #safe-mode-strip,
+.is-project-setup .message-actions,
+.is-project-setup #dirty-state,
+.is-project-setup #collect-analytics,
+.is-project-setup #undo-change,
+.is-project-setup #redo-change,
+.is-project-setup #save-data,
+.is-project-setup #model-issues-overlay,
+.is-project-setup #placed-keynotes-overlay {
+  display: none;
+}
+
+.project-setup[hidden] {
+  display: none;
+}
+
+.project-setup {
+  display: grid;
+  align-items: start;
+  justify-items: center;
+  padding: 32px 16px;
+}
+
+.project-setup-card {
+  width: min(100%, 720px);
+}
+
+.project-setup-card h2 {
+  font-size: var(--t-em-xl);
+  margin-bottom: 12px;
+}
+
+.project-setup-intro,
+.project-setup-choice span span,
+.project-setup-actions span {
+  color: var(--ink-2);
+  line-height: var(--lh-base);
+}
+
+.project-setup-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+  gap: 16px;
+  border: 0;
+  padding: 0;
+  margin: 24px 0 16px;
+}
+
+.project-setup-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--divider);
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+
+.project-setup-choice:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-wash);
+}
+
+.project-setup-choice:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.project-setup-choice input {
+  margin-top: 4px;
+  accent-color: var(--accent);
+}
+
+.project-setup-choice strong,
+.project-setup-choice span span {
+  display: block;
+}
+
+.project-setup-choice strong {
+  margin-bottom: 8px;
+}
+
+.project-setup-message {
+  min-height: 24px;
+  margin: 16px 0;
+  color: var(--ink-2);
+}
+
+.project-setup-message[data-error="true"] {
+  color: var(--negative);
+}
+
+.project-setup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+
+#project-setup-continue {
+  background: var(--accent);
+  color: var(--white);
+}
+
 .title-card {
   min-width: 0;
   display: flex;
@@ -296,6 +406,7 @@ h2 {
   min-width: 0;
   min-height: 30px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -349,6 +460,19 @@ h2 {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.keynote-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.keynote-recovery-actions[hidden],
+#open-project-setup[hidden],
+#project-setup-back[hidden] {
+  display: none;
 }
 
 .message-strip[data-tone="ready"]::before {

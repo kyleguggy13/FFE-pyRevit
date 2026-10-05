@@ -2,6 +2,28 @@
 
 Use disposable projects after deploying `supabase/keynote_annotation_library.sql` and running its SQL acceptance script.
 
+## New project setup
+
+- Open a saved project with no assigned keynote reference and no cloud library. Verify the setup page offers Revit Keynotes and Generic Annotation Keynotes, with Continue disabled until a choice is selected. Project name, status, Settings, Refresh, and Close remain visible; editor controls are hidden. Check keyboard selection and a narrow window.
+- Select Revit Keynotes and Continue. Save As must suggest `RevitKeynotes.txt` and allow a shared project location. Verify UTF-16, all 21 template divisions, successful keynote-table assignment, and the editor opening only after the file loads. Save/synchronize the RVT and reopen to verify the assignment persists.
+- Cancel Save As, choose an existing filename, make the target folder unwritable, and force Revit assignment failure. Setup must keep the choice, show an actionable message, and permit retry without changing the storage preference. If a file was created before assignment failed, its location must be reported. Double-click Continue and verify only one operation/dialog runs.
+- Select Generic Annotation Keynotes. Verify the library is seeded once from the divisions template, no text file is created, and no Revit family is prepared. The editor must select generic annotation placement. Add a cloud note, reopen, and confirm setup is skipped and the note remains.
+- Open a different workstation/local of that central project without a local mode preference. Verify the same cloud library is recovered without reseeding. An explicit Text File preference must remain selected and provide Settings-based recovery rather than silently switching modes. Converted text-file libraries must use the existing recovery flow.
+- Open an unsaved project with no keynote reference. Verify the inline save-and-refresh instruction and disabled Continue for both choices. Save the model and Refresh; setup should become available only after a successful cloud absence check.
+- Disconnect Supabase, remove its configuration, or simulate a missing migration during the initial library check. Verify creation remains disabled and Settings/Refresh can recover. Fail the template download or the load after initialization: setup must remain visible and must not report success or persist the new mode. Refresh must recover an initialization that succeeded before its response was interrupted.
+- Start a project from a template with no keynote file selected, including a blank built-in reference that retains a default PathType. Verify automatic setup appears instead of "The assigned keynote reference does not expose a readable file path." Test both saved and unsaved projects, then assign a file and reopen to verify setup is skipped.
+- Open projects with assigned valid, missing, inaccessible, malformed, and remote keynote references. All must bypass automatic setup and retain their existing editor/error behavior. Test an assigned local/network file without an InSessionPath; the stored external file path must still be used. Fail external-reference inspection or use a configured reference without a readable path; neither may be treated as an unassigned project.
+
+## Existing storage, editing, and conversion
+
+### Recovery actions
+
+- Force a missing file, a pathless assigned reference, an unsupported resource, invalid file rows, and a failed cloud load. Verify the status bar shows Set Up Project and Reconnect Keynote File. Verify the actions disappear when the source loads successfully and cannot be submitted twice during an operation.
+- Click Set Up Project after a reference-detection error. Both choices must be usable for a saved model without passing automatic reference detection. Back to Manager must restore the previous view. Fail or cancel setup and verify the choice and recovery actions remain available.
+- Recover Revit Keynotes with no project cloud library: download the division template, save a new file, and verify its assignment and editor loading. Repeat with an existing project cloud library and confirm its full saved notes are exported and its library/entry IDs are preserved. Recover Generic Annotation Keynotes and confirm existing cloud notes are reused without reseeding or preparing families.
+- Click Reconnect Keynote File and select a valid local/network text file. Verify native keynote assignment, loaded rows, Text File mode, and unchanged file contents. Repeat with Supabase disconnected and with a pathless original reference; reconnection must still work. Save/synchronize and reopen to verify persistence.
+- Cancel the picker, select a malformed/unreadable file, fail Revit assignment, and fail the subsequent load. Verify no successful result or mode change; assignment/loading failures must restore the previous assignment. With unsaved editor changes, cancel the discard prompt and verify neither edits nor source change. An unsaved RVT must ask to be saved before opening the picker.
+
 1. Existing projects still open in Text File mode. Verify editing, saving, both placement modes, and Create Text File (including cancellation and assignment failure).
 2. Switch a saved project to Generic Annotation Only. First setup copies the assigned file when valid, otherwise the Supabase template. Switching again must preserve cloud edits instead of reseeding. An unsaved project must ask to be saved first.
 3. Save divisions, nested notes, blank descriptions, and Unicode. Reopen the manager without saving/synchronizing the RVT: cloud library edits must remain. No DataStorage/Extensible Storage library is created.
