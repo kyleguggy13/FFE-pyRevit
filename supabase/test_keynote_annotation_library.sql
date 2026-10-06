@@ -56,7 +56,7 @@ begin
   assert v_result->>'libraryKey' = v_file_key, 'Conversion updates path identity';
   assert v_result->>'fileHash' = 'hash', 'Conversion stores export metadata';
   assert v_result->'entries' = v_snapshot->'entries', 'Conversion preserves every row and row ID';
-  assert (public.get_keynote_snapshot(v_key))->>'status' = 'error', 'No duplicate annotation record';
+  assert (select count(*) from public.keynote_libraries where library_key = v_key) = 0, 'No duplicate annotation record';
   assert (public.get_annotation_keynote_snapshot(v_key))->>'libraryId' = v_library_id, 'Project alias survives conversion';
   v_result := public.convert_annotation_keynote_library_to_file(v_key, v_version,
     v_file_key, v_file_key, 'hash', 123);

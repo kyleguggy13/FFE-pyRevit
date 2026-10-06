@@ -115,8 +115,10 @@
 
   function ensureLibrary(payload) {
     payload = payload || {};
-    return rpc("ensure_keynote_library", {
+    return rpc("ensure_keynote_library_association", {
+      p_library_id: payload.libraryId || null,
       p_library_key: payload.libraryKey,
+      p_file_key: payload.fileLibraryKey || payload.libraryKey,
       p_display_path: payload.displayPath || payload.keynotePath || "",
       p_encoding: payload.encoding || "utf-8",
       p_line_ending: payload.lineEnding || "\r\n",

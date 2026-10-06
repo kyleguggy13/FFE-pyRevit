@@ -747,6 +747,21 @@
     });
   }
 
+  function requestLibraryAssociation(operation) {
+    if (recoveryBusy() || projectSetupActive() || (operation !== "choose" && operation !== "fork")) { return; }
+    if (!confirmDiscardChanges("Changing the library association will discard unsaved edits. Continue?")) { return; }
+    setSettingsOpen(false);
+    state.storageBusy = true;
+    renderMeta();
+    clearLocalEditClaims().then(function () {
+      if (!postWebViewMessage({ type: "changeLibraryAssociation", payload: { operation: operation } })) {
+        handleStorageResult({ status: "error", message: "Could not send the library association change to Revit." });
+      }
+    }).catch(function (error) {
+      handleStorageResult({ status: "error", message: error.message || text(error) });
+    });
+  }
+
   function handleStorageResult(result) {
     result = result || {};
     if (result.status === "needsTemplate") {
@@ -923,7 +938,8 @@
       code === "unsupportedReference" ||
       code === "missingFile" ||
       code === "loadError" ||
-      code === "writeUnavailable"
+      code === "writeUnavailable" ||
+      code.indexOf("libraryAssociation") === 0
     );
   }
 
@@ -1935,6 +1951,9 @@
     }
     var busy = state.storageBusy || state.saving || state.familySyncing || state.dbInitializing || state.analyticsCollecting;
     renderStorageModeControls();
+    var associationDisabled = Boolean(busy || projectSetupActive() || !(payload.supabase || {}).configured);
+    if (byId("change-keynote-library")) { byId("change-keynote-library").disabled = associationDisabled; }
+    if (byId("fork-keynote-library")) { byId("fork-keynote-library").disabled = associationDisabled || !payload.libraryId; }
     if (createFile) {
       createFile.disabled = Boolean(busy || projectSetupActive());
       createFile.textContent = isAnnotationOnly() ? "Export Library to Text File" : "Create Text File";
@@ -4175,7 +4194,9 @@
     }
 
     return db.ensureLibrary({
+      libraryId: analytics.libraryId || (state.payload && state.payload.libraryId) || "",
       libraryKey: analytics.libraryKey || (state.payload && state.payload.libraryKey) || "",
+      fileLibraryKey: analytics.fileLibraryKey || (state.payload && state.payload.fileLibraryKey) || analytics.libraryKey || "",
       displayPath: analytics.displayPath || analytics.keynotePath || "",
       keynotePath: analytics.keynotePath || "",
       encoding: analytics.encoding || "utf-8",
@@ -4677,6 +4698,7 @@
     state.dbSnapshot = snapshot;
     if (state.payload) {
       state.payload.libraryId = snapshot.libraryId || state.payload.libraryId || "";
+      state.payload.libraryKey = snapshot.libraryKey || state.payload.libraryKey;
       state.payload.datasetVersion = snapshot.datasetVersion || 0;
     }
 
@@ -4977,7 +4999,9 @@
     }
 
     db.ensureLibrary({
+      libraryId: payload.libraryId || "",
       libraryKey: payload.libraryKey,
+      fileLibraryKey: payload.fileLibraryKey || payload.libraryKey,
       displayPath: payload.displayPath || payload.keynotePath,
       keynotePath: payload.keynotePath,
       encoding: payload.encoding || "utf-8",
@@ -4986,6 +5010,9 @@
       clientId: client.clientId,
       clientName: client.clientName
     }).then(function (snapshot) {
+      // Aliases and model UUIDs resolve to the existing canonical key before any mirror write.
+      payload.libraryKey = snapshot.libraryKey || payload.libraryKey;
+      payload.libraryId = snapshot.libraryId || payload.libraryId;
       state.dbInitializing = false;
       state.dbReady = true;
       state.syncIssues = [];
@@ -6094,7 +6121,7 @@
 
     syncAnalyticsResult(analytics).then(function (syncResult) {
       state.analyticsCollecting = false;
-      state.operationIssues = [];
+      state.operationIssues = result.issues || [];
       applyOtherModelUsageResult(syncResult, true);
       renderValidation();
       renderSaveState();
@@ -6520,6 +6547,8 @@
     bindStorageModeControls();
     bindClick("sync-annotation-family", function () { requestFamilySync(); });
     bindClick("create-keynote-file", function () { requestStorage("file", true); });
+    bindClick("change-keynote-library", function () { requestLibraryAssociation("choose"); });
+    bindClick("fork-keynote-library", function () { requestLibraryAssociation("fork"); });
     var searchInput = byId("search-input");
     var divisionSelectMenu = byId("division-select-menu");
     var placementFilterSelect = byId("placement-filter-select");

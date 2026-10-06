@@ -384,6 +384,11 @@ h2 {
   color: var(--ink-1);
 }
 
+#open-project-setup {
+  background: var(--positive);
+  color: var(--white);
+}
+
 .history-icon-button {
   width: 26px;
   padding: 3px;

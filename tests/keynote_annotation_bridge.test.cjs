@@ -12,6 +12,7 @@ function harness(db = {}) {
   const hooks = `
     globalScope.testApi = { state: state, saveData: saveData, setPlacementMode: setPlacementMode,
       attachSupabaseLibrary: attachSupabaseLibrary, processRemoteEntryChange: processRemoteEntryChange,
+      ensureLibraryBeforeAnalyticsSync: ensureLibraryBeforeAnalyticsSync,
       subscribeToLibrary: subscribeToLibrary,
       normalizeModelHealth: normalizeModelHealth, renderModelHealth: renderModelHealth,
       createModelIssueRepairControls: createModelIssueRepairControls,
@@ -20,6 +21,7 @@ function harness(db = {}) {
       requestProjectSetup: requestProjectSetup, handleStorageResult: handleStorageResult,
       bindStorageModeControls: bindStorageModeControls, renderStorageModeControls: renderStorageModeControls,
       setSettingsOpen: setSettingsOpen,
+      requestLibraryAssociation: requestLibraryAssociation,
       projectSetupActive: projectSetupActive, renderProjectSetup: renderProjectSetup,
       openProjectSetup: openProjectSetup, closeProjectSetup: closeProjectSetup,
       requestReconnectFile: requestReconnectFile, renderKeynoteRecovery: renderKeynoteRecovery,
@@ -183,6 +185,86 @@ function repairIssue(action = 'renameType', secondText = 'Same description') {
       : [{ id: '1', name: '00.00', key: '00.00', text: 'Same description' },
          { id: '2', name: 'Alternate descriptive name', key: '00.00', text: secondText }] } };
 }
+
+test('bound file attachment passes the UUID and uses the resolved canonical key before mirroring', async () => {
+  let ensured;
+  let mirrored;
+  const h = harness({ configure() {}, ensureLibrary: async payload => {
+    ensured = payload;
+    return { status: 'ready', libraryId: 'existing-uuid', libraryKey: 'original.txt', fileHash: 'old-hash', entries: [] };
+  }, syncFileSnapshot: async payload => {
+    mirrored = payload;
+    return { status: 'ready', libraryId: 'existing-uuid', libraryKey: 'original.txt', fileHash: payload.fileHash, entries: payload.entries };
+  } });
+  const payload = { status: 'ready', storageMode: 'file', libraryId: 'existing-uuid', libraryKey: 'cached-key.txt',
+    fileLibraryKey: 'moved.txt', keynotePath: 'Moved.txt', fileHash: 'new-hash', entries: [{ key: 'A', text: 'Note', parentKey: '' }],
+    issues: [], supabase: { configured: true } };
+  h.testApi.state.payload = payload;
+  h.testApi.attachSupabaseLibrary(payload, 'load');
+  await h.testApi.flush();
+  assert.equal(ensured.libraryId, 'existing-uuid');
+  assert.equal(ensured.fileLibraryKey, 'moved.txt');
+  assert.equal(mirrored.libraryKey, 'original.txt');
+  assert.equal(payload.libraryKey, 'original.txt');
+  assert.equal(payload.libraryId, 'existing-uuid');
+});
+
+test('analytics file attachment keeps the UUID and active path after a file move', async () => {
+  let ensured;
+  const db = { ensureLibrary: async payload => { ensured = payload; return {}; } };
+  const h = harness(db);
+  h.testApi.state.payload = { storageMode: 'file', libraryId: 'model-uuid',
+    libraryKey: 'original.txt', fileLibraryKey: 'moved.txt' };
+  for (const analytics of [
+    { storageMode: 'file', libraryId: 'scan-uuid', libraryKey: 'original.txt', fileLibraryKey: 'moved.txt' },
+    { storageMode: 'file', libraryKey: 'original.txt' }
+  ]) {
+    await h.testApi.ensureLibraryBeforeAnalyticsSync(db, analytics);
+    assert.equal(ensured.libraryId, analytics.libraryId || 'model-uuid');
+    assert.equal(ensured.fileLibraryKey, 'moved.txt');
+    assert.equal(ensured.libraryKey, 'original.txt');
+  }
+});
+
+test('adapter resolves file attachment by UUID with a separate current file identity', async () => {
+  let request;
+  const context = { Promise, supabase: { createClient: () => ({ rpc: async (name, args) => {
+    request = { name, args };
+    return { data: { status: 'ready', libraryId: 'uuid', libraryKey: 'original.txt' } };
+  } }) } };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(support, 'db_manager.js'), 'utf8'), context);
+  context.ffeKeynoteDb.configure({ url: 'https://example.supabase.co', anonKey: 'test' });
+  await context.ffeKeynoteDb.ensureLibrary({ libraryId: 'uuid', libraryKey: 'original.txt', fileLibraryKey: 'renamed.txt' });
+  assert.equal(request.name, 'ensure_keynote_library_association');
+  assert.equal(request.args.p_library_id, 'uuid');
+  assert.equal(request.args.p_library_key, 'original.txt');
+  assert.equal(request.args.p_file_key, 'renamed.txt');
+  await context.ffeKeynoteDb.ensureLibrary({ libraryKey: 'unbound.txt' });
+  assert.equal(request.args.p_library_id, null);
+});
+
+test('library association actions preserve edits on cancellation and post one native request when accepted', async () => {
+  const h = settingsHarness();
+  h.testApi.state.dirty = true;
+  const entries = h.testApi.state.entries;
+  h.confirm = () => false;
+  h.testApi.requestLibraryAssociation('choose');
+  await h.testApi.flush();
+  assert.equal(h.messages.length, 0);
+  assert.equal(h.testApi.state.entries, entries);
+  h.confirm = () => true;
+  h.testApi.requestLibraryAssociation('choose');
+  h.testApi.requestLibraryAssociation('choose');
+  await h.testApi.flush();
+  assert.equal(h.messages.length, 1);
+  assert.equal(h.messages[0].type, 'changeLibraryAssociation');
+  assert.equal(h.messages[0].payload.operation, 'choose');
+  h.testApi.handleStorageResult({ status: 'canceled', message: 'Canceled' });
+  assert.equal(h.testApi.state.storageBusy, false);
+  assert.equal(h.testApi.state.entries, entries);
+  assert.equal(h.testApi.state.dirty, true);
+});
 
 test('type-name warning renders a repair button even without a corresponding library row', () => {
   const h = repairHarness();

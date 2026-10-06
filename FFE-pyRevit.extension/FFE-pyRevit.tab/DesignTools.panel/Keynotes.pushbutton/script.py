@@ -17,6 +17,7 @@ How-To:
 - Choose Generic Annotation Only mode for Generic Annotation keynotes without a text file.
 __________________________________________________________________
 Last update:
+- [10.06.2026] - Model-stored library UUIDs preserve associations across renames, moves, and storage conversions.
 - [10.06.2026] - Text File to Generic Annotation Only conversion reuses the existing Supabase library.
 - [10.06.2026] - Added user-entered renumbering for duplicate Generic Annotation keys and direct type-name repairs.
 - [10.06.2026] - New project setup can merge or remove existing Generic Annotation keynotes.
@@ -82,7 +83,7 @@ Design decisions:
 - Removal is staged in a Revit transaction group and rolled back if setup fails.
 - Text File mode uses the assigned file, with explicit template-based creation.
 - Generic Annotation Only mode stores its library exclusively in Supabase.
-- Revit holds placed annotations and family types, not a library snapshot or identity.
+- Revit holds placed annotations, family types, and verified library identity metadata; note contents remain in Supabase.
 - Text File mode retains the shared-file source of truth and Supabase mirror.
 - Malformed source lines are shown and block save because the structured
   editor cannot safely preserve or repair arbitrary tab layouts.
@@ -105,7 +106,7 @@ clr.AddReference("PresentationCore")
 clr.AddReference("PresentationFramework")
 clr.AddReference("WindowsBase")
 
-from System import Int64, Uri
+from System import Guid, Int64, String, Uri
 from System.Collections.Generic import List
 from System.Windows import Clipboard, ResizeMode, Thickness, Visibility, Window, WindowStartupLocation
 from System.Windows.Controls import Grid, TextBlock
@@ -138,6 +139,7 @@ from Autodesk.Revit.DB import (
     WorksetKind,
 )
 from Autodesk.Revit.UI import ExternalEvent, IExternalEventHandler, PostableCommand, RevitCommandId
+from Autodesk.Revit.DB.ExtensibleStorage import AccessLevel, DataStorage, Entity, Schema, SchemaBuilder
 
 from pyrevit import forms, revit, script
 
@@ -1160,12 +1162,189 @@ def make_empty_model_health(status="notScanned", message="Model health has not b
 
 
 # ____________________________________________________________________ SUPABASE ANNOTATION LIBRARY
+LIBRARY_ASSOCIATION_SCHEMA_GUID = "c7faab32-7e9e-4b98-84f6-dbea18b8b03a"
+LIBRARY_ASSOCIATION_FIELDS = {
+    "libraryId": "LibraryId", "projectUrl": "ProjectUrl", "libraryKey": "LibraryKey",
+    "storageMode": "StorageMode", "documentKey": "DocumentKey", "keynotePath": "KeynotePath",
+    "annotationKey": "AnnotationKey",
+}
+
+
+def get_library_association_schema(create=False):
+    schema = Schema.Lookup(Guid(LIBRARY_ASSOCIATION_SCHEMA_GUID))
+    if schema is not None or not create:
+        return schema
+    builder = SchemaBuilder(Guid(LIBRARY_ASSOCIATION_SCHEMA_GUID))
+    builder.SetSchemaName("FFEKeynoteLibraryAssociationV1")
+    builder.SetReadAccessLevel(AccessLevel.Public)
+    builder.SetWriteAccessLevel(AccessLevel.Public)
+    for field_name in sorted(LIBRARY_ASSOCIATION_FIELDS.values()):
+        builder.AddSimpleField(field_name, String)
+    return builder.Finish()
+
+
+def find_library_association_storage(target_doc, allow_conflicts=False):
+    schema = get_library_association_schema()
+    if schema is None:
+        return []
+    records = []
+    for storage in FilteredElementCollector(target_doc).OfClass(DataStorage).ToElements():
+        entity = storage.GetEntity(schema)
+        if not entity.IsValid():
+            continue
+        record = {key: safe_unicode(entity.Get[String](schema.GetField(field))).strip()
+                  for key, field in LIBRARY_ASSOCIATION_FIELDS.items()}
+        # Invalid saved metadata must never become an unbound/new library.
+        if not allow_conflicts:
+            record["libraryId"] = str(uuid.UUID(record["libraryId"]))
+        if not allow_conflicts and (not record["projectUrl"] or not record["libraryKey"] or record["storageMode"] not in ("file", "annotation")):
+            raise Exception("The saved keynote library association is invalid. Use Change Library in Settings to repair it.")
+        records.append((storage, record))
+    identities = set((record["libraryId"], record["projectUrl"]) for storage, record in records)
+    if len(identities) > 1 and not allow_conflicts:
+        raise Exception("This model contains conflicting keynote library associations. Use Change Library in Settings to choose one.")
+    return records
+
+
+def read_library_association(target_doc):
+    records = find_library_association_storage(target_doc)
+    return records[0][1] if records else None
+
+
+def write_library_association(target_doc, record, replace_existing=False):
+    record = {key: safe_unicode(record.get(key)).strip() for key in LIBRARY_ASSOCIATION_FIELDS}
+    record["libraryId"] = str(uuid.UUID(record["libraryId"]))
+    if not record["projectUrl"] or not record["libraryKey"] or record["storageMode"] not in ("file", "annotation"):
+        raise Exception("A verified Supabase library and project are required for the association.")
+    records = find_library_association_storage(target_doc, allow_conflicts=replace_existing)
+    if records and all(previous == record for storage, previous in records):
+        return False
+    transaction = Transaction(target_doc, "Associate FFE Keynote Library")
+    try:
+        transaction.Start()
+        schema = get_library_association_schema(create=True)
+        if not records:
+            records = [(DataStorage.Create(target_doc), {})]
+        for storage, previous in records:
+            entity = Entity(schema)
+            for key, field in LIBRARY_ASSOCIATION_FIELDS.items():
+                entity.Set[String](schema.GetField(field), record[key])
+            storage.SetEntity(entity)
+        if transaction.Commit() != TransactionStatus.Committed:
+            raise Exception("Revit did not commit the library association.")
+    except Exception:
+        if transaction.GetStatus() == TransactionStatus.Started:
+            transaction.RollBack()
+        raise
+    return True
+
+
+def library_association_project_url():
+    return safe_unicode(load_supabase_settings().get("url")).strip().rstrip("/").lower()
+
+
+def checked_library_association(target_doc):
+    record = read_library_association(target_doc)
+    if record and record["projectUrl"] != library_association_project_url():
+        raise Exception("This model's keynote library belongs to a different Supabase project. Restore its connection or use Change Library in Settings.")
+    return record
+
+
+def remember_library_association(target_doc, payload, snapshot):
+    """Persist only verified identity metadata; note contents remain in Supabase."""
+    previous = checked_library_association(target_doc) or {}
+    identity = get_document_analytics_identity(target_doc)
+    if identity["documentKeySource"] == "title":
+        return payload
+    record = make_library_association_record(target_doc, payload, snapshot, previous)
+    payload["libraryId"] = record["libraryId"]
+    payload["libraryKey"] = record["libraryKey"]
+    try:
+        if write_library_association(target_doc, record):
+            payload.setdefault("issues", []).append(make_issue("warning",
+                "The library association was saved in the model. Save/Sync Revit to persist and share it.", code="libraryAssociationSaved"))
+    except Exception as exc:
+        payload.setdefault("issues", []).append(make_issue("warning",
+            "The library is connected, but its model association could not be saved: " + safe_str(exc) +
+            " Resolve model ownership and Refresh, then Save/Sync Revit.", code="libraryAssociationWriteFailed"))
+    return payload
+
+
+def make_library_association_record(target_doc, payload, snapshot, previous=None):
+    previous = previous or {}
+    identity = get_document_analytics_identity(target_doc)
+    return {"libraryId": snapshot["libraryId"], "projectUrl": library_association_project_url(),
+              "libraryKey": snapshot["libraryKey"], "storageMode": payload.get("storageMode", "file"),
+              "documentKey": identity["documentKey"],
+              "keynotePath": normalize_path(payload.get("keynotePath") or previous.get("keynotePath") or ""),
+              "annotationKey": snapshot.get("annotationLibraryKey") or previous.get("annotationKey") or
+                  (snapshot["libraryKey"] if snapshot["libraryKey"].startswith("annotation:") else "annotation:" + snapshot["libraryId"])}
+
+
+def resolve_file_library_association(target_doc, payload):
+    record = checked_library_association(target_doc)
+    if record:
+        payload.update({"libraryId": record["libraryId"], "libraryKey": record["libraryKey"]})
+    if not (payload.get("supabase") or {}).get("configured"):
+        return payload
+    try:
+        snapshot = keynote_supabase_rpc("get_keynote_snapshot_by_id", {"p_library_id": record["libraryId"]}) if record else \
+            keynote_supabase_rpc("get_keynote_snapshot", {"p_library_key": payload["fileLibraryKey"]}, allow_missing=True)
+    except Exception as exc:
+        if not record or safe_str(exc).startswith("Could not access the Supabase keynote library."):
+            payload.setdefault("issues", []).append(make_issue("warning", safe_str(exc), code="libraryAssociationLookupFailed"))
+            return payload  # Cached UUID remains attached; the client must not create a replacement.
+        raise
+    if not record and snapshot.get("notFound") is True:
+        return payload
+    if snapshot.get("status") != "ready" or not snapshot.get("libraryId"):
+        raise Exception(snapshot.get("message") or "Could not verify the keynote library association.")
+    if snapshot.get("sourceType", "file") != "file":
+        raise Exception("The associated library is in Generic Annotation Only mode. Select that mode in Settings.")
+    payload.update({"libraryId": snapshot["libraryId"], "libraryKey": snapshot["libraryKey"]})
+    if record and record.get("keynotePath") != payload["fileLibraryKey"]:
+        snapshot = keynote_supabase_rpc("link_keynote_library_path", {
+            "p_library_id": snapshot["libraryId"], "p_file_key": payload["fileLibraryKey"],
+            "p_display_path": payload["keynotePath"]})
+    elif snapshot.get("fileLibraryKey") and snapshot["fileLibraryKey"] != payload["fileLibraryKey"]:
+        raise Exception("The library's keynote file moved to '{0}'. Reconnect Keynote File before saving or syncing this model.".format(
+            snapshot.get("displayPath") or snapshot["fileLibraryKey"]))
+    # Initial attachment is written after the file has actually been mirrored.
+    if record or snapshot.get("fileHash") == payload.get("fileHash"):
+        remember_library_association(target_doc, payload, snapshot)
+    return payload
+
+
+def reconcile_model_library_association(target_doc):
+    record = checked_library_association(target_doc)
+    if not record:
+        return
+    identity = get_document_analytics_identity(target_doc)
+    if identity["documentKeySource"] == "title":
+        raise Exception("Save this project before choosing its keynote library association.")
+    if record.get("documentKey") == identity["documentKey"]:
+        return
+    choice = forms.CommandSwitchWindow.show([
+        "Keep existing library", "Create independent library", "Cancel"],
+        message="The Revit project path changed. For a renamed or moved model, keep the existing library. "
+                "For a separate project copy, create an independent library. Text File copies will ask for a new keynote file.")
+    if choice == "Keep existing library":
+        record["documentKey"] = identity["documentKey"]
+        write_library_association(target_doc, record)
+    elif choice == "Create independent library":
+        if fork_model_keynote_library(target_doc, record) is None:
+            raise Exception("Independent library creation canceled. The original association was kept.")
+    else:
+        raise Exception("Library association choice canceled. Refresh to choose how this model will use keynotes.")
+
+
 def get_storage_mode_preference(target_doc):
     settings = read_user_settings()
     key = get_document_analytics_identity(target_doc)["documentKey"]
     mode = (settings.get("storageModes") or {}).get(key)
     if mode is None:
-        return None
+        record = checked_library_association(target_doc)
+        return record.get("storageMode") if record else None
     # Retain the user's selection from the unreleased RVT-storage implementation.
     return "annotation" if mode in ("model", "annotation") else "file"
 
@@ -1183,7 +1362,10 @@ def save_storage_mode(target_doc, mode):
 
 
 def annotation_library_key(target_doc):
-    """Use the central/cloud path for all worksharing locals; store no identity in RVT."""
+    """Use the stored annotation alias, with the legacy central/cloud path for adoption."""
+    record = checked_library_association(target_doc)
+    if record:
+        return record.get("annotationKey") or "annotation:" + record["libraryId"]
     identity = get_document_analytics_identity(target_doc)
     if identity["documentKeySource"] == "title":
         raise Exception("Save the Revit project before setting up Generic Annotation Only mode.")
@@ -1248,9 +1430,12 @@ def build_annotation_keynote_payload(target_doc, include_model_health=True, allo
     payload.update({"storageMode": "annotation", "displayPath": "Supabase: " + get_document_title(target_doc)})
     payload["preferences"]["placementMode"] = "genericAnnotation"
     try:
+        reconcile_model_library_association(target_doc)
         payload["libraryKey"] = annotation_library_key(target_doc)
         if snapshot is None:
-            snapshot = keynote_supabase_rpc("get_annotation_keynote_snapshot", {"p_library_key": payload["libraryKey"]})
+            association = checked_library_association(target_doc)
+            snapshot = keynote_supabase_rpc("get_keynote_snapshot_by_id", {"p_library_id": association["libraryId"]}) if association else \
+                keynote_supabase_rpc("get_annotation_keynote_snapshot", {"p_library_key": payload["libraryKey"]})
         if not snapshot.get("libraryId"):
             raise Exception("Initialize the Supabase library using the storage selector.")
         payload.update(snapshot)
@@ -1261,6 +1446,8 @@ def build_annotation_keynote_payload(target_doc, include_model_health=True, allo
         payload["issues"] = validate_entries(payload["entries"])
         payload["status"] = "invalidFormat" if has_error_issues(payload["issues"]) else "ready"
         payload["message"] = "Loaded {0} keynote entries from Supabase.".format(payload["entryCount"])
+        if payload["status"] == "ready" and snapshot.get("sourceType") == "annotation":
+            remember_library_association(target_doc, payload, snapshot)
         if include_model_health:
             payload["modelHealth"] = build_model_health(target_doc, payload)
             payload["sheetVisibleKeynotes"] = payload["modelHealth"].get("placedKeyMap") or {}
@@ -1363,6 +1550,7 @@ def reconnect_keynote_file(target_doc):
     """Browse, validate, and reconnect a source even when reference detection fails."""
     group = None
     try:
+        reconcile_model_library_association(target_doc)
         if get_document_analytics_identity(target_doc)["documentKeySource"] == "title":
             raise Exception("Save the Revit project, then retry reconnecting its keynote file.")
         path = forms.pick_file(file_ext="txt", title="Reconnect Keynote Text File")
@@ -1390,7 +1578,7 @@ def reconnect_keynote_file(target_doc):
         return {"status": "error", "message": safe_str(exc)}
 
 
-def sync_converted_keynote_file(payload, source, annotation_key):
+def sync_converted_keynote_file(payload, source, annotation_key, target_doc=None):
     """Convert the existing library record, preserving its IDs and associated data."""
     if payload.get("status") != "ready":
         raise Exception(payload.get("message") or "Could not read the assigned file.")
@@ -1405,6 +1593,8 @@ def sync_converted_keynote_file(payload, source, annotation_key):
     })
     if result.get("status") != "ready" or result.get("libraryId") != source.get("libraryId"):
         raise Exception("Supabase did not confirm conversion of the existing library.")
+    if target_doc is not None:
+        remember_library_association(target_doc, payload, result)
 
 
 def collect_existing_setup_keynotes(target_doc):
@@ -1509,8 +1699,8 @@ def convert_file_keynote_payload_to_annotation(target_doc, file_payload):
     """Promote the existing file mirror, preserving its identity and related data."""
     if file_payload.get("status") != "ready":
         raise Exception(file_payload.get("message") or "Reconnect and load the keynote file before changing storage.")
-    snapshot = keynote_supabase_rpc("get_keynote_snapshot", {
-        "p_library_key": file_payload["libraryKey"]}, allow_missing=True)
+    snapshot = keynote_supabase_rpc("get_keynote_snapshot_by_id", {"p_library_id": file_payload["libraryId"]}) if file_payload.get("libraryId") else \
+        keynote_supabase_rpc("get_keynote_snapshot", {"p_library_key": file_payload["libraryKey"]}, allow_missing=True)
     if snapshot.get("status") == "error" and snapshot.get("notFound") is True:
         return None  # A file never mirrored to Supabase has no existing record to convert.
     if snapshot.get("status") != "ready" or not snapshot.get("libraryId"):
@@ -1528,6 +1718,123 @@ def convert_file_keynote_payload_to_annotation(target_doc, file_payload):
     return result
 
 
+def fork_model_keynote_library(target_doc, record):
+    """Copy notes into a new library; leave original notes, claims, and analytics intact."""
+    source = keynote_supabase_rpc("get_keynote_snapshot_by_id", {"p_library_id": record["libraryId"]})
+    mode = source["sourceType"]
+    path = None
+    group = None
+    fork = None
+    try:
+        if mode == "file":
+            path = forms.save_file(file_ext="txt", default_name="RevitKeynotes.txt", title="Create Independent Keynote File")
+            if not path:
+                return None
+            # Re-read after Save As; current file contents are authoritative in file mode.
+            original = build_keynote_payload(target_doc, include_model_health=False, storage_mode="file", resolve_association=False)
+            if original.get("status") != "ready":
+                raise Exception(original.get("message") or "Reconnect the original keynote file before copying its library.")
+            source = keynote_supabase_rpc("get_keynote_snapshot_by_id", {"p_library_id": record["libraryId"]})
+            if source.get("sourceType") != mode:
+                raise Exception("The original library's storage mode changed. Refresh before copying it.")
+            entries = original["entries"]
+        else:
+            entries = source["entries"]
+        group = TransactionGroup(target_doc, "Create Independent Keynote Library")
+        group.Start()
+        if mode == "file":
+            write_and_assign_keynote_file(target_doc, path, entries)
+            payload = build_keynote_payload(target_doc, include_model_health=False, storage_mode="file", source_path=path, resolve_association=False)
+            if payload.get("status") != "ready":
+                raise Exception(payload.get("message") or "Could not load the independent keynote file.")
+        else:
+            payload = {"storageMode": "annotation", "libraryKey": "annotation:" + uuid.uuid4().hex,
+                       "displayPath": "Supabase: " + get_document_title(target_doc)}
+        fork = keynote_supabase_rpc("fork_keynote_library", {
+            "p_source_library_id": source["libraryId"], "p_base_dataset_version": source["datasetVersion"],
+            "p_library_key": payload["libraryKey"], "p_display_path": payload.get("displayPath", ""),
+            "p_source_type": mode, "p_seed_entries": entries if mode == "file" else None,
+            "p_file_hash": payload.get("fileHash", ""), "p_last_write_utc": payload.get("lastWriteUtc"),
+            "p_encoding": payload.get("encoding", "utf-8"), "p_line_ending": payload.get("lineEnding", "\r\n"),
+        })
+        if fork.get("status") != "ready" or not fork.get("libraryId") or fork["libraryId"] == source["libraryId"]:
+            raise Exception("Supabase did not confirm an independent library.")
+        write_library_association(target_doc, make_library_association_record(target_doc, payload, fork))
+        if group.Assimilate() != TransactionStatus.Committed:
+            raise Exception("Revit did not commit the independent library association.")
+        group = None
+        save_storage_mode(target_doc, mode)
+        return fork
+    except Exception as exc:
+        if group is not None and group.GetStatus() == TransactionStatus.Started:
+            group.RollBack()
+        message = safe_str(exc)
+        if path:
+            message += " Any new file remains at '{0}'; the previous Revit assignment and association were restored.".format(path)
+        if fork and fork.get("libraryId"):
+            message += " The new cloud library remains available. Use Change Library in Settings to reconnect it."
+        raise Exception(message)
+
+
+def change_model_library_association(target_doc, operation):
+    group = None
+    try:
+        if get_document_analytics_identity(target_doc)["documentKeySource"] == "title":
+            raise Exception("Save the Revit project before changing its library association.")
+        if operation == "fork":
+            record = checked_library_association(target_doc)
+            if not record:
+                raise Exception("Refresh to save the current library association before creating an independent library.")
+            if fork_model_keynote_library(target_doc, record) is None:
+                return {"status": "canceled", "message": "Independent library creation canceled."}
+            mode = get_storage_mode(target_doc)
+        elif operation == "choose":
+            libraries = keynote_supabase_rpc("list_keynote_libraries", {}).get("libraries") or []
+            if not libraries:
+                raise Exception("No Supabase keynote libraries are available in this connection.")
+            options = {"{0}. [{1}] {2}".format(index + 1, "Text File" if row["sourceType"] == "file" else "Generic Annotation",
+                        row.get("displayPath") or row["libraryKey"]): row for index, row in enumerate(libraries)}
+            choice = forms.SelectFromList.show(sorted(options), title="Choose Keynote Library", multiselect=False,
+                                               button_name="Use Library")
+            if not choice:
+                return {"status": "canceled", "message": "Library association change canceled."}
+            snapshot = keynote_supabase_rpc("get_keynote_snapshot_by_id", {"p_library_id": options[choice]["libraryId"]})
+            mode = snapshot["sourceType"]
+            if mode == "file":
+                path = snapshot.get("displayPath") or snapshot["libraryKey"]
+                if not os.path.exists(path):
+                    path = forms.pick_file(file_ext="txt", title="Reconnect Selected Library's Keynote File")
+                    if not path:
+                        return {"status": "canceled", "message": "Library file reconnection canceled."}
+                payload = build_keynote_payload(target_doc, include_model_health=False, storage_mode="file", source_path=path, resolve_association=False)
+                if payload.get("status") != "ready":
+                    raise Exception(payload.get("message") or "The selected library's file is invalid.")
+            else:
+                payload = {"storageMode": "annotation"}
+            group = TransactionGroup(target_doc, "Change Keynote Library Association")
+            group.Start()
+            if mode == "file":
+                assign_keynote_file(target_doc, path)
+                snapshot = keynote_supabase_rpc("link_keynote_library_path", {
+                    "p_library_id": snapshot["libraryId"], "p_file_key": normalize_path(path), "p_display_path": path})
+            write_library_association(target_doc, make_library_association_record(target_doc, payload, snapshot), replace_existing=True)
+            if group.Assimilate() != TransactionStatus.Committed:
+                raise Exception("Revit did not commit the library association change.")
+            group = None
+            save_storage_mode(target_doc, mode)
+        else:
+            raise Exception("Unknown library association action.")
+        payload = build_keynote_payload(target_doc, storage_mode=mode)
+        if payload.get("status") != "ready":
+            raise Exception(payload.get("message") or "The selected library could not be loaded. Refresh to retry.")
+        payload["message"] = "Library association updated. Save/Sync Revit to persist and share it."
+        return {"status": "ready", "payload": payload, "message": payload["message"]}
+    except Exception as exc:
+        if group is not None and group.GetStatus() == TransactionStatus.Started:
+            group.RollBack()
+        return {"status": "error", "message": safe_str(exc)}
+
+
 def setup_keynote_storage(target_doc, setup_payload):
     """Initialize storage, resolve existing model notes, or export the complete cloud library."""
     mode = setup_payload.get("storageMode")
@@ -1537,6 +1844,7 @@ def setup_keynote_storage(target_doc, setup_payload):
     exported_path = None
     converted_file_library = None
     try:
+        reconcile_model_library_association(target_doc)
         if mode not in ("file", "annotation"):
             raise Exception("Unknown keynote storage mode.")
         if get_document_analytics_identity(target_doc)["documentKeySource"] == "title":
@@ -1554,8 +1862,10 @@ def setup_keynote_storage(target_doc, setup_payload):
         if setup_payload.get("recoverySetup"):
             # Explicit recovery bypasses reference detection, but never replaces an
             # existing project cloud library with an empty division template.
-            snapshot = keynote_supabase_rpc("get_annotation_keynote_snapshot", {
-                "p_library_key": annotation_library_key(target_doc)}, allow_missing=True)
+            association = checked_library_association(target_doc)
+            snapshot = keynote_supabase_rpc("get_keynote_snapshot_by_id", {"p_library_id": association["libraryId"]}) if association else \
+                keynote_supabase_rpc("get_annotation_keynote_snapshot", {
+                    "p_library_key": annotation_library_key(target_doc)}, allow_missing=True)
             missing = snapshot.get("status") == "error" and snapshot.get("notFound") is True
             if not missing and (snapshot.get("status") != "ready" or not snapshot.get("libraryId")):
                 raise Exception("Could not confirm the existing project cloud library. Check Settings and retry.")
@@ -1617,7 +1927,8 @@ def setup_keynote_storage(target_doc, setup_payload):
                     remove_existing_setup_keynotes(target_doc, existing)
             write_and_assign_keynote_file(target_doc, path, entries)
             exported_path = path
-        payload = build_keynote_payload(target_doc, storage_mode=mode, source_path=exported_path)
+        payload = build_keynote_payload(target_doc, storage_mode=mode, source_path=exported_path,
+                                        resolve_association=not converting_annotation)
         if payload.get("status") != "ready":
             raise Exception(payload.get("message") or "Could not load the configured keynote library. Refresh before retrying.")
         if existing_action == "merge":
@@ -1632,7 +1943,7 @@ def setup_keynote_storage(target_doc, setup_payload):
                 raise Exception("Revit did not commit project setup. Refresh before retrying.")
             setup_group = None
         if converting_annotation:
-            sync_converted_keynote_file(payload, source, annotation_library_key(target_doc))
+            sync_converted_keynote_file(payload, source, annotation_library_key(target_doc), target_doc)
             if conversion_group.Assimilate() != TransactionStatus.Committed:
                 raise Exception("Supabase was updated, but Revit did not commit the file assignment. Refresh and retry conversion.")
             conversion_group = None
@@ -1699,6 +2010,7 @@ def build_project_keynote_payload(target_doc, include_model_health=True):
     payload = build_base_payload(target_doc, "error", "")
     unassigned = False
     try:
+        reconcile_model_library_association(target_doc)
         preference = get_storage_mode_preference(target_doc)
         try:
             table, reference, path = get_keynote_reference(target_doc, allow_unassigned=True)
@@ -1718,7 +2030,9 @@ def build_project_keynote_payload(target_doc, include_model_health=True):
             return payload
 
         key = annotation_library_key(target_doc)
-        snapshot = keynote_supabase_rpc("get_annotation_keynote_snapshot", {"p_library_key": key}, allow_missing=True)
+        association = checked_library_association(target_doc)
+        snapshot = keynote_supabase_rpc("get_keynote_snapshot_by_id", {"p_library_id": association["libraryId"]}) if association else \
+            keynote_supabase_rpc("get_annotation_keynote_snapshot", {"p_library_key": key}, allow_missing=True)
         if snapshot.get("status") == "error" and snapshot.get("notFound") is True:
             message = "Choose how this project will use keynotes."
             payload.update({"status": "setupRequired", "message": message,
@@ -1752,12 +2066,14 @@ def build_project_keynote_payload(target_doc, include_model_health=True):
         return payload
 
 
-def build_keynote_payload(target_doc, include_model_health=True, storage_mode=None, source_path=None):
-    if (storage_mode or get_storage_mode(target_doc)) == "annotation":
-        return build_annotation_keynote_payload(target_doc, include_model_health)
+def build_keynote_payload(target_doc, include_model_health=True, storage_mode=None, source_path=None, resolve_association=True):
     payload = build_base_payload(target_doc, "error", "")
 
     try:
+        if (storage_mode or get_storage_mode(target_doc)) == "annotation":
+            return build_annotation_keynote_payload(target_doc, include_model_health)
+        if resolve_association:
+            reconcile_model_library_association(target_doc)
         if source_path is None:
             keynote_table, resource_ref, keynote_path = get_keynote_reference(target_doc)
         else:
@@ -1767,6 +2083,11 @@ def build_keynote_payload(target_doc, include_model_health=True, storage_mode=No
         payload["keynotePath"] = keynote_path
         payload["displayPath"] = keynote_path
         payload["libraryKey"] = normalize_path(keynote_path)
+        payload["fileLibraryKey"] = normalize_path(keynote_path)
+        if resolve_association:
+            association = checked_library_association(target_doc)
+            if association:
+                payload.update({"libraryId": association["libraryId"], "libraryKey": association["libraryKey"]})
 
         if looks_like_remote_resource(keynote_path):
             payload["status"] = "unsupported"
@@ -1792,7 +2113,7 @@ def build_keynote_payload(target_doc, include_model_health=True, storage_mode=No
         model_health = make_empty_model_health()
         if include_model_health:
             model_health = build_model_health(target_doc, {
-                "libraryKey": normalize_path(keynote_path),
+                "libraryKey": payload["libraryKey"],
                 "displayPath": keynote_path,
                 "keynotePath": keynote_path,
                 "encoding": encoding,
@@ -1821,6 +2142,8 @@ def build_keynote_payload(target_doc, include_model_health=True, storage_mode=No
 
         if has_error_issues(issues):
             payload["message"] = "Loaded {0} entries, but validation errors must be fixed before saving.".format(len(entries))
+        elif resolve_association:
+            resolve_file_library_association(target_doc, payload)
 
     except Exception as exc:
         payload["status"] = "error"
@@ -3029,7 +3352,9 @@ def collect_keynote_analytics(target_doc, keynote_payload):
     analytics = {
         "datasetVersion": keynote_payload.get("datasetVersion", 0),
         "storageMode": keynote_payload.get("storageMode", "file"),
+        "libraryId": keynote_payload.get("libraryId") or "",
         "libraryKey": keynote_payload.get("libraryKey") or "",
+        "fileLibraryKey": keynote_payload.get("fileLibraryKey") or "",
         "displayPath": keynote_payload.get("displayPath") or keynote_payload.get("keynotePath") or "",
         "keynotePath": keynote_payload.get("keynotePath") or "",
         "encoding": keynote_payload.get("encoding") or "utf-8",
@@ -3561,6 +3886,8 @@ def collect_keynote_analytics_payload(target_doc):
             "message": message,
             "analytics": analytics,
             "modelHealth": model_health,
+            "issues": [issue for issue in keynote_payload.get("issues") or []
+                       if safe_str(issue.get("code")).startswith("libraryAssociation")],
         }
     except Exception as exc:
         try:
@@ -4643,6 +4970,13 @@ class KeynoteManagerEventHandler(IExternalEventHandler):
             window.call_keynote_app("handleStorageResult", result)
             return
 
+        if action == "changeLibraryAssociation":
+            result = change_model_library_association(window.document, (payload or {}).get("operation"))
+            if result.get("payload"):
+                window.set_payload(result["payload"])
+            window.call_keynote_app("handleStorageResult", result)
+            return
+
         if action == "syncAnnotationFamily":
             result = sync_annotation_family_payload(window.document, payload or {})
             window.call_keynote_app("handleFamilySyncResult", result)
@@ -4995,6 +5329,12 @@ class KeynoteManagerWindow(Window):
             self.event_handler.pending_action = "reconnectFile"
             self.event_handler.pending_payload = None
             self.raise_external_event("reconnect keynote file", "storage")
+            return
+
+        if message_type == "changeLibraryAssociation":
+            self.event_handler.pending_action = "changeLibraryAssociation"
+            self.event_handler.pending_payload = message.get("payload") or {}
+            self.raise_external_event("change library association", "storage")
             return
 
         if message_type == "configureSupabase":

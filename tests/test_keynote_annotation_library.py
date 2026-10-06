@@ -19,10 +19,16 @@ SCRIPT = ROOT / 'FFE-pyRevit.extension/FFE-pyRevit.tab/DesignTools.panel/Keynote
 TREE = ast.parse(SCRIPT.read_text(encoding='utf-8'))
 
 
-def load_functions():
+def load_functions(with_associations=False):
     namespace = {'unicode': str, 'uuid': uuid, 'codecs': codecs}
     definitions = [node for node in TREE.body if isinstance(node, ast.FunctionDef)]
     exec(compile(ast.Module(body=definitions, type_ignores=[]), str(SCRIPT), 'exec'), namespace)
+    if not with_associations:
+        # Model identity persistence is exercised separately against a Revit storage boundary.
+        namespace.update({'checked_library_association': lambda doc: None,
+                          'reconcile_model_library_association': lambda doc: None,
+                          'remember_library_association': lambda doc, payload, snapshot: payload,
+                          'resolve_file_library_association': lambda doc, payload: payload})
     return namespace
 
 
@@ -311,16 +317,24 @@ class KeynoteStorageTests(unittest.TestCase):
             'get_document_analytics_identity': lambda doc: {},
             'get_generated_at': lambda: 'test'
         })
-        result = self.api['collect_keynote_analytics'](object(), {'storageMode': 'annotation', 'entries': []})
+        result = self.api['collect_keynote_analytics'](object(), {'storageMode': 'annotation', 'entries': [],
+            'libraryId': 'model-uuid', 'libraryKey': 'original.txt', 'fileLibraryKey': 'moved.txt'})
         self.assertEqual(['genericAnnotation'], scanned)
         self.assertEqual(0, result['userKeynoteScannedCount'])
         self.assertEqual(1, result['genericAnnotationScannedCount'])
+        self.assertEqual('model-uuid', result['libraryId'])
+        self.assertEqual('original.txt', result['libraryKey'])
+        self.assertEqual('moved.txt', result['fileLibraryKey'])
 
 
-    def test_no_rvt_library_storage_code_remains(self):
+    def test_rvt_schema_contains_only_identity_and_no_library_snapshot_or_revision(self):
         source = SCRIPT.read_text(encoding='utf-8')
-        for forbidden in ('DataStorage', 'ExtensibleStorage', 'storageRevision', 'storageAncestors'):
+        for forbidden in ('storageRevision', 'storageAncestors'):
             self.assertNotIn(forbidden, source)
+        fields = next(node.value for node in TREE.body if isinstance(node, ast.Assign) and
+                      any(isinstance(target, ast.Name) and target.id == 'LIBRARY_ASSOCIATION_FIELDS' for target in node.targets))
+        self.assertEqual({'LibraryId', 'ProjectUrl', 'LibraryKey', 'StorageMode', 'DocumentKey', 'KeynotePath', 'AnnotationKey'},
+                         set(ast.literal_eval(fields).values()))
 
     def test_connection_popup_saves_both_fields_and_preserves_client_identity(self):
         saved = {'clientId': 'existing-user', 'otherSetting': True}
