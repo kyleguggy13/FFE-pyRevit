@@ -24,14 +24,9 @@
   <body>
     <div class="app-shell">
       <header class="title-card">
-        <div class="brand-copy">
-          <p class="eyebrow">FFE-PYREVIT v1.15.0</p>
-          <h1>KEYNOTE MANAGER v1.3</h1>
-          <p class="meta-line">
-            <span id="doc-title">Waiting for Revit document</span>
-            <span id="dirty-state" data-dirty="false">NO CHANGES</span>
-          </p>
-        </div>
+        <p class="meta-line">
+          <span id="dirty-state" data-dirty="false">NO CHANGES</span>
+        </p>
 
         <div class="window-actions" aria-label="Window actions">
           <button
@@ -45,6 +40,16 @@
             aria-controls="settings-dialog"
           >
             Settings
+          </button>
+          <button
+            id="open-about"
+            class="utility-button"
+            type="button"
+            aria-haspopup="dialog"
+            aria-controls="about-dialog"
+            title="About Keynote Manager and the current library"
+          >
+            About
           </button>
           <button
             id="refresh-data"
@@ -206,11 +211,8 @@
         </div>
       </section>
 
-      <section id="keynote-file-strip" class="file-strip" aria-label="Keynote storage details">
+      <section id="keynote-file-strip" class="file-strip" aria-label="Keynote family actions" hidden>
         <button id="sync-annotation-family" class="utility-button" type="button" hidden>Update Family Types</button>
-        <span id="keynote-path">No keynote file loaded</span>
-        <span id="encoding-label">-</span>
-        <span><strong id="entry-count">0</strong> entries</span>
       </section>
 
       <section id="safe-mode-strip" class="safe-mode-strip" hidden>
@@ -428,6 +430,36 @@
           </div>
         </aside>
       </main>
+
+      <dialog id="about-dialog" class="settings-dialog" aria-labelledby="about-heading">
+        <div class="model-issues-heading">
+          <h2 id="about-heading">About</h2>
+          <button id="close-about" class="sidebar-toggle model-issues-close" type="button" aria-label="Close about" title="Close about">
+            <span aria-hidden="true">x</span>
+          </button>
+        </div>
+        <div class="settings-body">
+          <div class="brand-copy">
+            <p class="eyebrow">FFE-PYREVIT v1.15.0</p>
+            <h1>KEYNOTE MANAGER v1.3</h1>
+            <p class="meta-line"><span id="doc-title">Waiting for Revit document</span></p>
+          </div>
+          <dl class="about-details">
+            <div>
+              <dt>Keynote source</dt>
+              <dd id="keynote-path">No keynote file loaded</dd>
+            </div>
+            <div>
+              <dt>Encoding / Storage</dt>
+              <dd id="encoding-label">-</dd>
+            </div>
+            <div>
+              <dt>Entries</dt>
+              <dd id="entry-count">0</dd>
+            </div>
+          </dl>
+        </div>
+      </dialog>
 
       <dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-heading">
         <div class="model-issues-heading">

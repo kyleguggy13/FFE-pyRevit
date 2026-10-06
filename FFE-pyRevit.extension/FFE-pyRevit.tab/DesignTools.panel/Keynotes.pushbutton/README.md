@@ -8,7 +8,7 @@ Both storage modes use the same Key, Text, and Parent structure and the same edi
 
 Open the tool from the FFE-pyRevit ribbon. The manager opens in its own window and loads the keynote source for the active Revit document. Projects without an assigned keynote reference or an existing cloud library open on **Set up project keynotes**.
 
-At the top of the window, confirm that the correct Revit document is listed. If the wrong document is active, switch back to Revit, activate the correct model, and reopen or refresh the manager.
+Click **About** beside **Settings** to view the manager version, Revit document name, keynote source path, encoding/storage information, and entry count. The change indicator stays in the main header. If the wrong document is listed, switch back to Revit, activate the correct model, and reopen or refresh the manager.
 
 ### New Project Setup
 

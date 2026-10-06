@@ -176,12 +176,17 @@ h2 {
   margin: 6px 6px;
   padding: 8px;
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 12px;
   background: var(--page-3);
 }
 
+.app-shell:has(#keynote-file-strip:not([hidden])),
 .app-shell:has(.safe-mode-strip:not([hidden])) {
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+}
+
+.app-shell:has(#keynote-file-strip:not([hidden])):has(.safe-mode-strip:not([hidden])) {
   grid-template-rows: auto auto auto auto minmax(0, 1fr);
 }
 
@@ -312,7 +317,7 @@ h2 {
   min-width: 0;
 }
 
-.title-card h1 {
+.brand-copy h1 {
   margin-bottom: 3px;
   font-size: var(--t-em-lg);
 }
@@ -579,6 +584,10 @@ h2 {
   color: var(--ink-2);
 }
 
+.file-strip[hidden] {
+  display: none;
+}
+
 .settings-field select,
 .settings-field input {
   width: 100%;
@@ -610,6 +619,26 @@ h2 {
   display: grid;
   gap: 12px;
   padding: 16px;
+}
+
+.about-details {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--divider-soft);
+}
+
+.about-details dt {
+  margin-bottom: 4px;
+  font-size: var(--t-em-sm);
+  font-weight: 600;
+}
+
+.about-details dd {
+  margin: 0;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
 }
 
 .settings-section {

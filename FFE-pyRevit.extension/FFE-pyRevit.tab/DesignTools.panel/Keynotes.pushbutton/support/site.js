@@ -666,6 +666,7 @@
     var dialog = byId("settings-dialog");
     if (!dialog) { return; }
     if (open) {
+      setAboutOpen(false);
       if (!dialog.open) {
         state.pendingStorageMode = null;
         var settings = (state.payload && state.payload.supabase) || {};
@@ -677,6 +678,18 @@
       if (!dialog.open) { dialog.showModal(); }
     } else if (dialog.open) {
       state.pendingStorageMode = null;
+      dialog.close();
+    }
+  }
+
+  function setAboutOpen(open) {
+    var dialog = byId("about-dialog");
+    if (!dialog) { return; }
+    if (open) {
+      setSettingsOpen(false);
+      renderMeta();
+      if (!dialog.open) { dialog.showModal(); }
+    } else if (dialog.open) {
       dialog.close();
     }
   }
@@ -1949,6 +1962,7 @@
       familyButton.hidden = !isAnnotationOnly();
       familyButton.disabled = state.saving || state.storageBusy || state.familySyncing || state.dirty || !state.dbReady;
     }
+    if (byId("keynote-file-strip")) { byId("keynote-file-strip").hidden = !familyButton || familyButton.hidden; }
     var busy = state.storageBusy || state.saving || state.familySyncing || state.dbInitializing || state.analyticsCollecting;
     renderStorageModeControls();
     var associationDisabled = Boolean(busy || projectSetupActive() || !(payload.supabase || {}).configured);
@@ -6537,6 +6551,8 @@
     });
     bindClick("open-settings", function () { setSettingsOpen(true); });
     bindClick("close-settings", function () { setSettingsOpen(false); });
+    bindClick("open-about", function () { setAboutOpen(true); });
+    bindClick("close-about", function () { setAboutOpen(false); });
     var settingsForm = byId("supabase-settings-form");
     if (settingsForm) {
       settingsForm.addEventListener("submit", function (event) {
@@ -6604,8 +6620,9 @@
       closeRowActionMenu(false);
     });
     document.addEventListener("keydown", function (event) {
-      // The native dialog handles Escape and keeps keyboard focus in Settings.
-      if (byId("settings-dialog") && byId("settings-dialog").open) { return; }
+      // Native dialogs handle Escape and keep keyboard focus inside the dialog.
+      if ((byId("settings-dialog") && byId("settings-dialog").open) ||
+          (byId("about-dialog") && byId("about-dialog").open)) { return; }
       if (event.key !== "Escape") {
         return;
       }
