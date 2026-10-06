@@ -110,6 +110,8 @@ Some buttons are disabled until a valid row is selected.
 
 ### Search, Show, and Place As
 
+The notes table fills the remaining window height and scrolls independently. Its column headers stay visible while you scroll; the search and placement controls remain above the table.
+
 Use `Search` to find keynotes by key, description, or parent key.
 
 Use `Show` to control which keynotes are visible:

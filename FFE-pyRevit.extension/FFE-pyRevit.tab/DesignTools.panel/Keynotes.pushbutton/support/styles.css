@@ -171,8 +171,9 @@ h2 {
 }
 
 .app-shell {
-  width: min(100%, 1160px);
-  min-height: calc(100vh - 72px);
+  width: min(calc(100% - 12px), 1160px);
+  height: calc(100vh - 12px);
+  min-height: 0;
   margin: 6px 6px;
   padding: 8px;
   display: grid;
@@ -213,6 +214,8 @@ h2 {
 }
 
 .project-setup {
+  min-height: 0;
+  overflow: auto;
   display: grid;
   align-items: start;
   justify-items: center;
@@ -1416,8 +1419,9 @@ h2 {
 
 .note-table-shell {
   min-width: 0;
-  min-height: 540px;
+  min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   border: 0;
   border-radius: var(--r-md);
   background: var(--page-3);
@@ -2335,9 +2339,9 @@ body.is-resizing-note-column * {
 
 @media (max-width: 900px) {
   .app-shell {
-    width: min(100%, 900px);
+    width: min(calc(100% - 20px), 900px);
     margin: 10px auto;
-    min-height: calc(100vh - 48px);
+    height: calc(100vh - 20px);
   }
 
   .workspace {
@@ -2376,7 +2380,6 @@ body.is-resizing-note-column * {
 
   .note-table-shell {
     min-width: 430px;
-    min-height: 650px;
   }
 
   .title-card {
