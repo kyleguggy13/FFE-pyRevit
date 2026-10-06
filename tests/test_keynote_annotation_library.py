@@ -103,6 +103,76 @@ class KeynoteStorageTests(unittest.TestCase):
             self.assertEqual('ready', result['status'])
             self.assertEqual(['dialog', 'read-cloud', 'start', 'assign', 'sync', 'commit', 'mode:file'], events)
 
+    def configure_file_to_annotation(self, failure=None, missing=False):
+        events = []
+        entries = [row('DIVISION 22', 'PLUMBING'), row('22.01', '', 'DIVISION 22'),
+                   row('22.01A', 'Caf\u00e9', '22.01')]
+        source = {'status': 'ready', 'storageMode': 'file', 'libraryKey': 'notes.txt',
+                  'entries': entries, 'fileHash': 'current-file-hash',
+                  'supabase': {'clientId': 'test-client', 'clientName': 'Test'}}
+        def load(doc, **kwargs):
+            mode = kwargs.get('storage_mode')
+            events.append('load:' + mode)
+            if mode == 'file':
+                if failure == 'file':
+                    return dict(source, status='missingFile', message='File was not found')
+                return copy.deepcopy(source)
+            if failure == 'load': return {'status': 'error', 'message': 'Cloud load failed'}
+            return {'status': 'ready', 'storageMode': 'annotation', 'libraryId': 'original-library',
+                    'libraryKey': 'notes.txt', 'entries': entries, 'message': 'Loaded cloud notes'}
+        def rpc(name, arguments, allow_missing=False):
+            events.append(name)
+            if failure == 'lookup': raise Exception('Connection lost')
+            if name == 'get_keynote_snapshot':
+                self.assertEqual('notes.txt', arguments['p_library_key'])
+                if missing: return {'status': 'error', 'notFound': True}
+                return {'status': 'ready', 'libraryId': 'original-library', 'datasetVersion': 7}
+            if name == 'ensure_annotation_keynote_library':
+                self.assertTrue(missing)
+                self.assertEqual(entries, arguments['p_seed_entries'])
+                return {'status': 'ready', 'libraryId': 'original-library'}
+            self.assertEqual('convert_file_keynote_library_to_annotation', name)
+            self.assertEqual('notes.txt', arguments['p_file_key'])
+            self.assertEqual('annotation:central.rvt', arguments['p_annotation_key'])
+            self.assertEqual(7, arguments['p_base_dataset_version'])
+            self.assertEqual('current-file-hash', arguments['p_file_hash'])
+            self.assertEqual(entries, arguments['p_entries'])
+            self.assertEqual('test-client', arguments['p_client_id'])
+            if failure == 'convert': raise Exception('The library changed during conversion')
+            return {'status': 'ready', 'libraryId': 'wrong-library' if failure == 'identity' else 'original-library'}
+        self.api.update({'get_document_title': lambda doc: 'Test Project',
+                         'build_keynote_payload': load, 'keynote_supabase_rpc': rpc,
+                         'save_storage_mode': lambda doc, mode: events.append('mode:' + mode),
+                         'write_and_assign_keynote_file': lambda *args: self.fail('Conversion changed Revit file assignment'),
+                         'collect_existing_setup_keynotes': lambda *args: self.fail('Conversion prompted for model note removal')})
+        return events
+
+    def test_file_to_annotation_converts_existing_library_before_loading_and_persisting_mode(self):
+        events = self.configure_file_to_annotation()
+        result = self.api['setup_keynote_storage'](object(), {'storageMode': 'annotation'})
+        self.assertEqual('ready', result['status'])
+        self.assertEqual('original-library', result['payload']['libraryId'])
+        self.assertIn('existing Supabase library', result['message'])
+        self.assertEqual(['load:file', 'get_keynote_snapshot', 'convert_file_keynote_library_to_annotation',
+                          'load:annotation', 'mode:annotation'], events)
+
+    def test_file_to_annotation_failure_never_creates_a_replacement_or_persists_mode(self):
+        for failure in ('file', 'lookup', 'convert', 'identity', 'load'):
+            with self.subTest(failure=failure):
+                events = self.configure_file_to_annotation(failure=failure)
+                result = self.api['setup_keynote_storage'](object(), {'storageMode': 'annotation'})
+                self.assertEqual('error', result['status'])
+                self.assertNotIn('payload', result)
+                self.assertNotIn('ensure_annotation_keynote_library', events)
+                self.assertNotIn('mode:annotation', events)
+
+    def test_file_never_mirrored_can_initialize_an_annotation_library_from_valid_file(self):
+        events = self.configure_file_to_annotation(missing=True)
+        result = self.api['setup_keynote_storage'](object(), {'storageMode': 'annotation'})
+        self.assertEqual('ready', result['status'])
+        self.assertIn('ensure_annotation_keynote_library', events)
+        self.assertNotIn('convert_file_keynote_library_to_annotation', events)
+
     def test_canceled_annotation_export_keeps_source_and_does_not_write(self):
         events = self.configure_conversion(canceled=True)
         result = self.api['setup_keynote_storage'](object(), {'storageMode': 'file'})
@@ -1035,6 +1105,204 @@ class KeynoteFileReconnectTests(unittest.TestCase):
                 with self.assertRaisesRegex(Exception, 'could not load'):
                     api['assign_keynote_file'](object(), self.selected)
                 self.assertEqual(['start', 'rollback'], events)
+
+
+class ModelIssueRepairTests(unittest.TestCase):
+    def setUp(self):
+        self.api = load_functions()
+        self.events = []
+        self.fail_delete = False
+        self.fail_commit = False
+        class Parameter:
+            IsReadOnly = False
+            def __init__(self, value):
+                self.value = value
+                self.fail_set = False
+            def AsString(self): return self.value
+            def Set(self, value):
+                if self.fail_set: return False
+                self.value = value
+                return True
+        class Symbol:
+            def __init__(self, identity, name, description):
+                self.Id = types.SimpleNamespace(Value=identity)
+                self._name = name
+                self.fail_rename = False
+                self.fail_final_rename = False
+                self.parameters = {'Number': Parameter('00.00'), 'Text': Parameter(description)}
+            @property
+            def Name(self): return self._name
+            @Name.setter
+            def Name(self, value):
+                if self.fail_rename: raise Exception('Type is owned by another user')
+                if self.fail_final_rename and value == '00.01': raise Exception('Final name rejected')
+                if any(symbol is not self and symbol.Name == value for symbol in outer.symbols):
+                    raise Exception('Name already exists')
+                self._name = value
+            def LookupParameter(self, name): return self.parameters.get(name)
+        class Instance:
+            def __init__(self, identity, type_id):
+                self.Id = types.SimpleNamespace(Value=identity)
+                self.type_id = type_id
+                self.fail_retype = False
+            def ChangeTypeId(self, element_id):
+                if self.fail_retype: raise Exception('Annotation is owned by another user')
+                self.type_id = element_id.Value
+        self.keeper = Symbol(9876543210, 'Long descriptive name', 'Retained description')
+        self.other = Symbol(2, 'Other descriptive name', 'Other description')
+        self.symbols = [self.keeper, self.other]
+        self.instances = [Instance(201, 2), Instance(202, 2), Instance(203, 9876543210)]
+        outer = self
+        class Transaction:
+            def __init__(self, *args): self.status = None
+            def Start(self):
+                self.status = 'started'
+                outer.events.append('start')
+                self.before = (list(outer.symbols), [symbol.Name for symbol in outer.symbols],
+                               [instance.type_id for instance in outer.instances],
+                               [symbol.parameters['Number'].value for symbol in outer.symbols])
+            def GetStatus(self): return self.status
+            def Commit(self):
+                if outer.fail_commit: return 'failed'
+                self.status = 'committed'
+                outer.events.append('commit')
+                return 'committed'
+            def RollBack(self):
+                outer.symbols[:] = self.before[0]
+                for symbol, name in zip(outer.symbols, self.before[1]): symbol._name = name
+                for instance, type_id in zip(outer.instances, self.before[2]): instance.type_id = type_id
+                for symbol, number in zip(outer.symbols, self.before[3]): symbol.parameters['Number'].value = number
+                outer.events.append('rollback')
+                self.status = 'rolled-back'
+        def delete(element_id):
+            if self.fail_delete: raise Exception('Cannot delete this type')
+            self.events.append(('delete', element_id.Value))
+            self.symbols[:] = [symbol for symbol in self.symbols if symbol.Id.Value != element_id.Value]
+        def instances_by_type(doc):
+            result = {}
+            for instance in self.instances:
+                result.setdefault(instance.type_id, []).append(instance)
+            return result
+        self.doc = types.SimpleNamespace(Delete=delete)
+        self.api.update({'GENERIC_KEYNOTE_NUMBER_PARAMETER': 'Number', 'GENERIC_KEYNOTE_TEXT_PARAMETER': 'Text',
+                         'get_document_analytics_identity': lambda doc: {'documentKey': 'central.rvt'},
+                         'get_generic_annotation_keynote_family': lambda doc: 'FFE family',
+                         'get_family_symbols': lambda *args: list(self.symbols),
+                         'collect_generic_annotation_instances_by_symbol': instances_by_type,
+                         'get_leader_arrowhead_type': lambda doc: object(),
+                         'Transaction': Transaction,
+                         'TransactionStatus': types.SimpleNamespace(Started='started', Committed='committed')})
+
+    def request(self, action='renumberDuplicateTypes'):
+        selected = [self.keeper] if action == 'renameType' else self.symbols
+        return {'documentKey': 'central.rvt', 'action': action, 'issueKey': '00.00',
+                'types': [self.api['make_generic_annotation_repair_type'](symbol) for symbol in selected],
+                'newKeys': [{'id': str(self.keeper.Id.Value), 'key': '00.00'}, {'id': '2', 'key': '00.01'}]}
+
+    def test_scan_exposes_repair_details_for_unlisted_keynote_types_with_64_bit_ids(self):
+        issues = []
+        self.api['append_generic_annotation_model_health_issues'](self.doc, {}, issues)
+        names = [issue for issue in issues if issue['code'] == 'genericAnnotationTypeNameMismatch']
+        duplicate = next(issue for issue in issues if issue['code'] == 'genericAnnotationDuplicateTypes')
+        self.assertEqual(2, len(names))
+        self.assertEqual('9876543210', names[0]['repair']['types'][0]['id'])
+        self.assertEqual('renumberDuplicateTypes', duplicate['repair']['action'])
+        self.assertEqual(2, len(duplicate['repair']['types']))
+
+    def test_rename_uses_number_without_reading_or_modifying_the_keynote_library(self):
+        result = self.api['repair_generic_annotation_model_issue'](self.doc, self.request('renameType'))
+        self.assertEqual('ready', result['status'])
+        self.assertEqual('00.00', self.keeper.Name)
+        self.assertEqual('Retained description', self.keeper.parameters['Text'].value)
+        self.assertEqual([201, 202, 203], [instance.Id.Value for instance in self.instances])
+        self.assertEqual(['start', 'commit'], self.events)
+
+    def test_renumber_preserves_every_type_description_and_original_instance_type(self):
+        result = self.api['repair_generic_annotation_model_issue'](self.doc, self.request())
+        self.assertEqual('ready', result['status'])
+        self.assertEqual([self.keeper, self.other], self.symbols)
+        self.assertEqual([2, 2, self.keeper.Id.Value], [instance.type_id for instance in self.instances])
+        self.assertEqual(['00.00', '00.01'], [symbol.Name for symbol in self.symbols])
+        self.assertEqual(['00.00', '00.01'], [symbol.parameters['Number'].value for symbol in self.symbols])
+        self.assertEqual(['Retained description', 'Other description'], [symbol.parameters['Text'].value for symbol in self.symbols])
+        self.assertEqual(['start', 'commit'], self.events)
+
+    def test_changed_model_type_values_and_new_duplicates_reject_stale_repairs_before_starting(self):
+        for change in ('document', 'text', 'name', 'number', 'added-type', 'removed-type'):
+            with self.subTest(change=change):
+                self.setUp()
+                request = self.request()
+                if change == 'document': request['documentKey'] = 'different.rvt'
+                elif change == 'text': self.other.parameters['Text'].value = 'Concurrent edit'
+                elif change == 'name': self.other.Name = 'Concurrent rename'
+                elif change == 'number': self.other.parameters['Number'].value = '01.01'
+                elif change == 'removed-type': self.symbols.remove(self.other)
+                else:
+                    third = copy.deepcopy(self.other)
+                    third.Id.Value = 3
+                    self.symbols.append(third)
+                result = self.api['repair_generic_annotation_model_issue'](self.doc, request)
+                self.assertEqual('warning', result['status'])
+                self.assertIn('Refresh', result['message'])
+                self.assertEqual([], self.events)
+
+    def test_failed_number_rename_or_commit_rolls_back_every_type_and_parameter_change(self):
+        for failure in ('number', 'rename', 'final-rename', 'commit'):
+            with self.subTest(failure=failure):
+                self.setUp()
+                if failure == 'number': self.other.parameters['Number'].fail_set = True
+                elif failure == 'rename': self.other.fail_rename = True
+                elif failure == 'final-rename': self.other.fail_final_rename = True
+                else: self.fail_commit = True
+                result = self.api['repair_generic_annotation_model_issue'](self.doc, self.request())
+                self.assertEqual('warning', result['status'])
+                self.assertEqual([self.keeper, self.other], self.symbols)
+                self.assertEqual([2, 2, self.keeper.Id.Value], [instance.type_id for instance in self.instances])
+                self.assertEqual('Long descriptive name', self.keeper.Name)
+                self.assertEqual('Other descriptive name', self.other.Name)
+                self.assertEqual(['00.00', '00.00'], [symbol.parameters['Number'].value for symbol in self.symbols])
+                self.assertEqual('rollback', self.events[-1])
+
+    def test_name_collision_requires_renumbering_and_selected_names_can_be_reassigned(self):
+        self.other.Name = '00.00'
+        result = self.api['repair_generic_annotation_model_issue'](self.doc, self.request('renameType'))
+        self.assertEqual('warning', result['status'])
+        self.assertIn('Renumber the duplicate', result['message'])
+        self.assertEqual([], self.events)
+        result = self.api['repair_generic_annotation_model_issue'](self.doc, self.request())
+        self.assertEqual('ready', result['status'])
+        self.assertEqual('00.00', self.keeper.Name)
+        self.assertEqual('00.01', self.other.Name)
+
+    def test_invalid_assignments_and_collisions_are_rejected_without_starting_transaction(self):
+        for invalid in ('blank', 'duplicate-key', 'missing', 'duplicate-id', 'unknown-id', 'tab', 'name-collision', 'number-collision', 'read-only', 'legacy-merge'):
+            with self.subTest(invalid=invalid):
+                self.setUp()
+                request = self.request()
+                if invalid == 'blank': request['newKeys'][1]['key'] = ' '
+                elif invalid == 'duplicate-key': request['newKeys'][1]['key'] = ' 00.00 '
+                elif invalid == 'missing': request['newKeys'].pop()
+                elif invalid == 'duplicate-id': request['newKeys'][1]['id'] = str(self.keeper.Id.Value)
+                elif invalid == 'unknown-id': request['newKeys'][1]['id'] = 'unknown'
+                elif invalid == 'tab': request['newKeys'][1]['key'] = '00\t01'
+                elif invalid == 'read-only': self.other.parameters['Number'].IsReadOnly = True
+                elif invalid == 'legacy-merge': request['action'] = 'mergeDuplicateTypes'
+                else:
+                    third = copy.deepcopy(self.other)
+                    third.Id.Value = 3
+                    third.Name = '00.01' if invalid == 'name-collision' else 'Third type'
+                    third.parameters['Number'].value = '03.00' if invalid == 'name-collision' else '00.01'
+                    self.symbols.append(third)
+                result = self.api['repair_generic_annotation_model_issue'](self.doc, request)
+                self.assertEqual('warning', result['status'])
+                self.assertEqual([], self.events)
+
+    def test_all_types_can_receive_new_keys(self):
+        request = self.request()
+        request['newKeys'][0]['key'] = '00.02'
+        result = self.api['repair_generic_annotation_model_issue'](self.doc, request)
+        self.assertEqual('ready', result['status'])
+        self.assertEqual(['00.02', '00.01'], [symbol.parameters['Number'].value for symbol in self.symbols])
 
 
 class ExistingSetupKeynoteHelpersTests(unittest.TestCase):

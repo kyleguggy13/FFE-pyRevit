@@ -17,6 +17,8 @@ How-To:
 - Choose Generic Annotation Only mode for Generic Annotation keynotes without a text file.
 __________________________________________________________________
 Last update:
+- [10.06.2026] - Text File to Generic Annotation Only conversion reuses the existing Supabase library.
+- [10.06.2026] - Added user-entered renumbering for duplicate Generic Annotation keys and direct type-name repairs.
 - [10.06.2026] - New project setup can merge or remove existing Generic Annotation keynotes.
 - [09.16.2026] - v1.3 Added Supabase annotation libraries and Supabase template setup.
 - [05.19.2026] - v0.1 WebView2 keynote manager
@@ -1503,6 +1505,29 @@ def remove_existing_setup_keynotes(target_doc, existing):
         raise
 
 
+def convert_file_keynote_payload_to_annotation(target_doc, file_payload):
+    """Promote the existing file mirror, preserving its identity and related data."""
+    if file_payload.get("status") != "ready":
+        raise Exception(file_payload.get("message") or "Reconnect and load the keynote file before changing storage.")
+    snapshot = keynote_supabase_rpc("get_keynote_snapshot", {
+        "p_library_key": file_payload["libraryKey"]}, allow_missing=True)
+    if snapshot.get("status") == "error" and snapshot.get("notFound") is True:
+        return None  # A file never mirrored to Supabase has no existing record to convert.
+    if snapshot.get("status") != "ready" or not snapshot.get("libraryId"):
+        raise Exception("Could not confirm the existing file library. Refresh before changing storage.")
+    settings = file_payload.get("supabase") or {}
+    result = keynote_supabase_rpc("convert_file_keynote_library_to_annotation", {
+        "p_file_key": file_payload["libraryKey"], "p_annotation_key": annotation_library_key(target_doc),
+        "p_base_dataset_version": snapshot.get("datasetVersion"),
+        "p_display_path": "Supabase: " + get_document_title(target_doc),
+        "p_file_hash": file_payload["fileHash"], "p_entries": file_payload["entries"],
+        "p_client_id": settings.get("clientId", ""), "p_client_name": settings.get("clientName", ""),
+    })
+    if result.get("status") != "ready" or result.get("libraryId") != snapshot["libraryId"]:
+        raise Exception("Could not confirm conversion of the existing library. Refresh before retrying.")
+    return result
+
+
 def setup_keynote_storage(target_doc, setup_payload):
     """Initialize storage, resolve existing model notes, or export the complete cloud library."""
     mode = setup_payload.get("storageMode")
@@ -1510,6 +1535,7 @@ def setup_keynote_storage(target_doc, setup_payload):
     conversion_group = None
     setup_group = None
     exported_path = None
+    converted_file_library = None
     try:
         if mode not in ("file", "annotation"):
             raise Exception("Unknown keynote storage mode.")
@@ -1561,10 +1587,13 @@ def setup_keynote_storage(target_doc, setup_payload):
                 setup_group = TransactionGroup(target_doc, "Set Up Project Keynotes")
                 setup_group.Start()
                 remove_existing_setup_keynotes(target_doc, existing)
-            keynote_supabase_rpc("ensure_annotation_keynote_library", {
-                "p_library_key": key, "p_display_path": "Supabase: " + get_document_title(target_doc),
-                "p_seed_entries": seed,
-            })
+            if not existing_action and get_storage_mode(target_doc) == "file" and file_payload.get("libraryKey"):
+                converted_file_library = convert_file_keynote_payload_to_annotation(target_doc, file_payload)
+            if converted_file_library is None:
+                keynote_supabase_rpc("ensure_annotation_keynote_library", {
+                    "p_library_key": key, "p_display_path": "Supabase: " + get_document_title(target_doc),
+                    "p_seed_entries": seed,
+                })
         elif create_file or converting_annotation:
             entries = None if converting_annotation else (seed_entries if seed_entries is not None else template_entries(setup_payload))
             if entries is None and not converting_annotation:
@@ -1609,6 +1638,8 @@ def setup_keynote_storage(target_doc, setup_payload):
             conversion_group = None
             payload["message"] = "Exported the complete library to '{0}', assigned it to Revit, and converted the existing Supabase library record.".format(path)
         save_storage_mode(target_doc, mode)
+        if converted_file_library is not None:
+            payload["message"] = "Switched to Generic Annotation Only using the existing Supabase library."
         if existing_action:
             payload["message"] += " " + ("Merged {0} existing Generic Annotation keynote type(s).".format(len(existing["notes"]))
                                          if existing_action == "merge" else
@@ -3019,7 +3050,97 @@ def collect_keynote_analytics(target_doc, keynote_payload):
     return analytics
 
 
-def make_model_health_issue(severity, code, key, message, row=None, details="", type_names=None, resolution=None):
+def make_generic_annotation_repair_type(symbol):
+    """Identify a scanned type and its values so repair can reject stale selections."""
+    return {"id": safe_str(get_element_id_key(symbol)), "name": get_element_name(symbol),
+            "key": get_generic_annotation_symbol_key(symbol),
+            "text": get_lookup_parameter_text(symbol, [GENERIC_KEYNOTE_TEXT_PARAMETER])}
+
+
+def repair_generic_annotation_model_issue(target_doc, request):
+    """Repair selected FFE types atomically without changing the keynote library."""
+    transaction = None
+    try:
+        if request.get("documentKey") != get_document_analytics_identity(target_doc)["documentKey"]:
+            raise Exception("The active model changed. Refresh the model issues before retrying.")
+        action = request.get("action")
+        key = safe_unicode(request.get("issueKey")).strip()
+        expected = request.get("types") or []
+        if not key or action not in ("renameType", "renumberDuplicateTypes"):
+            raise Exception("Unknown Generic Annotation repair.")
+        if (action == "renameType" and len(expected) != 1) or (action == "renumberDuplicateTypes" and len(expected) < 2):
+            raise Exception("Refresh the model issues before choosing types to repair.")
+        family = get_generic_annotation_keynote_family(target_doc)
+        symbols = get_family_symbols(target_doc, family)
+        by_id = {safe_str(get_element_id_key(symbol)): symbol for symbol in symbols}
+        selected = []
+        for scanned in expected:
+            symbol = by_id.get(safe_str(scanned.get("id")))
+            if symbol is None or make_generic_annotation_repair_type(symbol) != scanned or scanned.get("key") != key:
+                raise Exception("A selected keynote type changed or was removed. Refresh the model issues before retrying.")
+            selected.append(symbol)
+        selected_ids = set(safe_str(get_element_id_key(symbol)) for symbol in selected)
+        if len(selected_ids) != len(selected):
+            raise Exception("The repair contains duplicate type selections. Refresh and retry.")
+        assignments = {}
+        if action == "renumberDuplicateTypes":
+            current_ids = set(safe_str(get_element_id_key(symbol)) for symbol in symbols
+                              if get_generic_annotation_symbol_key(symbol) == key)
+            if current_ids != selected_ids:
+                raise Exception("The duplicate keynote types changed. Refresh the model issues before retrying.")
+            for assignment in request.get("newKeys") or []:
+                identity = safe_str(assignment.get("id"))
+                entered_key = safe_unicode(assignment.get("key"))
+                new_key = entered_key.strip()
+                if identity not in selected_ids or identity in assignments:
+                    raise Exception("Enter one new key for each selected type.")
+                if not new_key or any(character in entered_key for character in ("\t", "\r", "\n")):
+                    raise Exception("Each key must be nonblank and contain no tabs or line breaks.")
+                assignments[identity] = new_key
+            if set(assignments) != selected_ids:
+                raise Exception("Enter one new key for each selected type.")
+            if len(set(assignments.values())) != len(assignments):
+                raise Exception("Enter a distinct key for each type. One type may keep the original key.")
+            for symbol in symbols:
+                if safe_str(get_element_id_key(symbol)) not in selected_ids:
+                    if get_generic_annotation_symbol_key(symbol) in assignments.values() or get_element_name(symbol) in assignments.values():
+                        raise Exception("A requested key or type name is already used by another keynote type. Choose unused keys.")
+            for symbol in selected:
+                get_writable_symbol_parameter(symbol, GENERIC_KEYNOTE_NUMBER_PARAMETER)
+        else:
+            keeper = selected[0]
+            if get_lookup_parameter_text(keeper, [GENERIC_KEYNOTE_NUMBER_PARAMETER]) != key:
+                raise Exception("The type's Number parameter changed. Refresh the model issues before retrying.")
+            # A name held by a different keynote must never be overwritten.
+            for symbol in symbols:
+                if get_element_name(symbol) == key and get_element_id_key(symbol) != get_element_id_key(keeper):
+                    raise Exception("A type named '{0}' already exists. Renumber the duplicate keys first.".format(key))
+        transaction = Transaction(target_doc, "Repair Generic Annotation Keynote Types")
+        transaction.Start()
+        if action == "renumberDuplicateTypes":
+            # Release selected names first so assignments can reuse or swap them safely.
+            for symbol in selected:
+                new_key = assignments[safe_str(get_element_id_key(symbol))]
+                if get_element_name(symbol) != new_key:
+                    set_symbol_type_name(symbol, "FFE_Keynote_Repair_" + uuid.uuid4().hex)
+            for symbol in selected:
+                new_key = assignments[safe_str(get_element_id_key(symbol))]
+                set_parameter_text(get_writable_symbol_parameter(symbol, GENERIC_KEYNOTE_NUMBER_PARAMETER), new_key)
+                set_symbol_type_name(symbol, new_key)
+        else:
+            set_symbol_type_name(keeper, key)
+        if transaction.Commit() != TransactionStatus.Committed:
+            raise Exception("Revit did not commit the type repair.")
+        message = ("Renamed the Generic Annotation type to '{0}'.".format(key) if action == "renameType" else
+                   "Assigned distinct keys to {0} Generic Annotation types. All types, descriptions, and placements were preserved.".format(len(selected)))
+        return {"status": "ready", "message": message}
+    except Exception as exc:
+        if transaction is not None and transaction.GetStatus() == TransactionStatus.Started:
+            transaction.RollBack()
+        return {"status": "warning", "message": "The type repair was not completed: " + safe_str(exc)}
+
+
+def make_model_health_issue(severity, code, key, message, row=None, details="", type_names=None, resolution=None, repair=None):
     row = row or {}
     issue = {
         "severity": severity or "warning",
@@ -3048,6 +3169,8 @@ def make_model_health_issue(severity, code, key, message, row=None, details="", 
             "familyTypeText": safe_unicode(resolution.get("familyTypeText")).strip(),
             "fileText": safe_unicode(resolution.get("fileText")).strip(),
         }
+    if repair:
+        issue["repair"] = repair
     return issue
 
 
@@ -3176,7 +3299,8 @@ def append_generic_annotation_model_health_issues(target_doc, entry_by_key, issu
                     number_state.get("value")
                 ),
                 row,
-                "The type name and Number parameter should match the keynote key."
+                "The type name and Number parameter should match the keynote key.",
+                repair={"action": "renameType", "types": [make_generic_annotation_repair_type(symbol)]}
             ))
 
         if symbol_key in entry_by_key and text_state.get("present"):
@@ -3213,7 +3337,9 @@ def append_generic_annotation_model_health_issues(target_doc, entry_by_key, issu
                 "genericAnnotationCount": sum([len(instances_by_symbol.get(get_element_id_key(symbol)) or []) for symbol in key_symbols]),
             },
             "Types: {0}".format(", ".join(type_names)),
-            type_names
+            type_names,
+            repair={"action": "renumberDuplicateTypes", "types": [make_generic_annotation_repair_type(symbol)
+                     for symbol in sorted(key_symbols, key=get_element_name)]}
         ))
 
 
@@ -4483,6 +4609,15 @@ class KeynoteManagerEventHandler(IExternalEventHandler):
         if window is None:
             return
 
+        if action == "repairModelIssue":
+            result = repair_generic_annotation_model_issue(window.document, payload or {})
+            try:
+                result["modelHealth"] = build_model_health(window.document, window.keynote_payload)
+            except Exception as exc:
+                result["message"] += " The model scan could not refresh: {0}. Use Collect Analytics to retry.".format(exc)
+            window.call_keynote_app("handleModelIssueRepairResult", result)
+            return
+
         if action == "configureSupabase":
             try:
                 save_supabase_settings(payload or {})
@@ -4787,6 +4922,8 @@ class KeynoteManagerWindow(Window):
                 self.call_keynote_app("handleStorageResult", result)
             elif failure_target == "settings":
                 self.call_keynote_app("handleSupabaseSettingsResult", result)
+            elif failure_target == "repair":
+                self.call_keynote_app("handleModelIssueRepairResult", result)
             elif failure_target == "status":
                 self.send_status(result.get("status"), result.get("message"))
             else:
@@ -4840,6 +4977,12 @@ class KeynoteManagerWindow(Window):
             self.event_handler.pending_action = "syncAnnotationFamily"
             self.event_handler.pending_payload = message.get("payload") or {}
             self.raise_external_event("update keynote family types", "family")
+            return
+
+        if message_type == "repairModelIssue":
+            self.event_handler.pending_action = "repairModelIssue"
+            self.event_handler.pending_payload = message.get("payload") or {}
+            self.raise_external_event("repair keynote types", "repair")
             return
 
         if message_type == "setupStorage":

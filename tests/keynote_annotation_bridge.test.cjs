@@ -13,8 +13,13 @@ function harness(db = {}) {
     globalScope.testApi = { state: state, saveData: saveData, setPlacementMode: setPlacementMode,
       attachSupabaseLibrary: attachSupabaseLibrary, processRemoteEntryChange: processRemoteEntryChange,
       subscribeToLibrary: subscribeToLibrary,
+      normalizeModelHealth: normalizeModelHealth, renderModelHealth: renderModelHealth,
+      createModelIssueRepairControls: createModelIssueRepairControls,
+      requestModelIssueRepair: requestModelIssueRepair, handleModelIssueRepairResult: handleModelIssueRepairResult,
       handleFamilySyncResult: handleFamilySyncResult, requestFamilySync: requestFamilySync,
       requestProjectSetup: requestProjectSetup, handleStorageResult: handleStorageResult,
+      bindStorageModeControls: bindStorageModeControls, renderStorageModeControls: renderStorageModeControls,
+      setSettingsOpen: setSettingsOpen,
       projectSetupActive: projectSetupActive, renderProjectSetup: renderProjectSetup,
       openProjectSetup: openProjectSetup, closeProjectSetup: closeProjectSetup,
       requestReconnectFile: requestReconnectFile, renderKeynoteRecovery: renderKeynoteRecovery,
@@ -50,6 +55,237 @@ function harness(db = {}) {
   state.dirty = true;
   return context;
 }
+
+function repairHarness() {
+  const h = harness();
+  h.testApi.state.payload.documentKey = 'central.rvt';
+  function element(tag) {
+    return { tag, children: [], attributes: {}, events: {}, value: '', disabled: false, scrollTop: 0,
+      appendChild(child) { this.children.push(child); },
+      removeChild(child) { this.children.splice(this.children.indexOf(child), 1); },
+      get firstChild() { return this.children[0] || null; },
+      setAttribute(name, value) { this.attributes[name] = value; },
+      addEventListener(name, callback) { this.events[name] = callback; } };
+  }
+  h.list = element('div');
+  h.document = { createElement: element, getElementById: id => id === 'model-issues-list' ? h.list : null };
+  return h;
+}
+
+function settingsHarness(mode = 'file') {
+  const h = harness();
+  h.testApi.state.payload.storageMode = mode;
+  h.testApi.state.dirty = false;
+  h.controls = {};
+  for (const id of ['storage-mode', 'apply-storage-mode', 'settings-dialog',
+                    'supabase-project-url', 'supabase-publishable-key']) {
+    h.controls[id] = { value: '', disabled: false, events: {},
+      addEventListener(name, callback) { this.events[name] = callback; } };
+  }
+  const dialog = h.controls['settings-dialog'];
+  dialog.showModal = () => { dialog.open = true; };
+  dialog.close = () => { dialog.open = false; };
+  h.document = { getElementById: id => h.controls[id] || null };
+  h.testApi.bindStorageModeControls();
+  h.testApi.setSettingsOpen(true);
+  h.testApi.renderStorageModeControls();
+  return h;
+}
+
+test('Storage Mode selection enables Apply without starting conversion, and survives redraws', () => {
+  for (const mode of ['file', 'annotation']) {
+    const h = settingsHarness(mode);
+    const select = h.controls['storage-mode'];
+    const apply = h.controls['apply-storage-mode'];
+    assert.equal(select.value, mode);
+    assert.equal(apply.disabled, true);
+    apply.events.click();
+    assert.equal(h.messages.length, 0);
+    select.value = mode === 'file' ? 'annotation' : 'file';
+    select.events.change();
+    assert.equal(apply.disabled, false);
+    assert.equal(h.testApi.state.payload.storageMode, mode);
+    assert.equal(h.messages.length, 0);
+    h.testApi.renderStorageModeControls();
+    assert.equal(select.value, mode === 'file' ? 'annotation' : 'file');
+    assert.equal(apply.disabled, false);
+    select.value = mode;
+    select.events.change();
+    assert.equal(apply.disabled, true);
+  }
+});
+
+test('Apply sends the selected mode once and clears the staged selection after success', async () => {
+  const h = settingsHarness();
+  h.testApi.useSetupLoadBoundary();
+  const select = h.controls['storage-mode'];
+  const apply = h.controls['apply-storage-mode'];
+  select.value = 'annotation';
+  select.events.change();
+  apply.events.click();
+  apply.events.click();
+  await h.testApi.flush();
+  assert.equal(h.messages.length, 1);
+  assert.equal(h.messages[0].payload.storageMode, 'annotation');
+  assert.equal(h.messages[0].payload.createFile, false);
+  assert.equal(h.controls['settings-dialog'].open, false);
+  h.testApi.renderStorageModeControls();
+  assert.equal(apply.disabled, true);
+  assert.equal(select.disabled, true);
+  h.testApi.handleStorageResult({ status: 'ready', payload: {
+    status: 'ready', storageMode: 'annotation', entries: [] } });
+  h.testApi.setSettingsOpen(true);
+  h.testApi.renderStorageModeControls();
+  assert.equal(select.value, 'annotation');
+  assert.equal(apply.disabled, true);
+});
+
+test('Apply stays disabled during work and project setup', () => {
+  for (const flag of ['storageBusy', 'saving', 'familySyncing', 'dbInitializing', 'analyticsCollecting', 'manualSetup']) {
+    const h = settingsHarness();
+    h.controls['storage-mode'].value = 'annotation';
+    h.controls['storage-mode'].events.change();
+    h.testApi.state[flag] = true;
+    h.testApi.renderStorageModeControls();
+    assert.equal(h.controls['apply-storage-mode'].disabled, true);
+    assert.equal(h.controls['storage-mode'].disabled, true);
+    h.controls['apply-storage-mode'].events.click();
+    assert.equal(h.messages.length, 0);
+  }
+});
+
+test('closing Settings discards an unapplied storage choice; canceling discard retains it for retry', () => {
+  const h = settingsHarness();
+  const select = h.controls['storage-mode'];
+  const apply = h.controls['apply-storage-mode'];
+  select.value = 'annotation';
+  select.events.change();
+  h.testApi.state.dirty = true;
+  h.confirm = () => false;
+  apply.events.click();
+  h.testApi.renderStorageModeControls();
+  assert.equal(h.messages.length, 0);
+  assert.equal(h.testApi.state.pendingStorageMode, 'annotation');
+  assert.equal(apply.disabled, false);
+  assert.equal(h.controls['settings-dialog'].open, true);
+  h.testApi.setSettingsOpen(false);
+  h.testApi.setSettingsOpen(true);
+  h.testApi.renderStorageModeControls();
+  assert.equal(select.value, 'file');
+  assert.equal(apply.disabled, true);
+});
+
+function repairIssue(action = 'renameType', secondText = 'Same description') {
+  return { severity: 'warning', key: '00.00', code: action === 'renameType'
+    ? 'genericAnnotationTypeNameMismatch' : 'genericAnnotationDuplicateTypes',
+    repair: { action, types: action === 'renameType'
+      ? [{ id: '9876543210', name: 'Long descriptive name', key: '00.00', text: 'Same description' }]
+      : [{ id: '1', name: '00.00', key: '00.00', text: 'Same description' },
+         { id: '2', name: 'Alternate descriptive name', key: '00.00', text: secondText }] } };
+}
+
+test('type-name warning renders a repair button even without a corresponding library row', () => {
+  const h = repairHarness();
+  h.testApi.state.modelHealth = h.testApi.normalizeModelHealth({ issues: [repairIssue()] });
+  h.testApi.renderModelHealth();
+  const card = h.list.children.find(child => child.className === 'model-issue-item');
+  assert.equal(card.tag, 'div');
+  const button = card.children.at(-1).children.at(-1);
+  assert.equal(button.textContent, 'Rename Type to 00.00');
+  button.events.click();
+  button.events.click();
+  assert.equal(h.messages.length, 1);
+  assert.equal(h.messages[0].type, 'repairModelIssue');
+  assert.equal(h.messages[0].payload.documentKey, 'central.rvt');
+  assert.equal(h.messages[0].payload.types[0].id, '9876543210');
+  assert.equal(h.testApi.state.storageBusy, true);
+  assert.equal(h.testApi.state.dirty, true);
+});
+
+test('duplicate repair asks for distinct keys and preserves each description in the request', () => {
+  const h = repairHarness();
+  const controls = h.testApi.createModelIssueRepairControls(repairIssue('renumberDuplicateTypes', 'Different text'));
+  const labels = controls.children.filter(child => child.tag === 'label');
+  const first = labels[0].children.at(-1);
+  const second = labels[1].children.at(-1);
+  const button = controls.children.at(-1);
+  assert.equal(first.value, '00.00');
+  assert.equal(second.value, '00.00');
+  assert.equal(button.disabled, true);
+  button.events.click();
+  assert.equal(h.messages.length, 0);
+  assert.match(labels[1].children[0].textContent, /Different text/);
+  second.value = '00.01';
+  second.events.input();
+  assert.equal(button.disabled, false);
+  button.events.click();
+  assert.equal(h.messages[0].payload.action, 'renumberDuplicateTypes');
+  assert.deepEqual(JSON.parse(JSON.stringify(h.messages[0].payload.newKeys)),
+    [{ id: '1', key: '00.00' }, { id: '2', key: '00.01' }]);
+  assert.equal(h.messages[0].payload.types[1].text, 'Different text');
+  assert.equal(h.messages[0].payload.keepTypeId, undefined);
+});
+
+test('identical descriptions still require user-entered unique keys', () => {
+  const h = repairHarness();
+  const issue = repairIssue('renumberDuplicateTypes');
+  const controls = h.testApi.createModelIssueRepairControls(issue);
+  const labels = controls.children.filter(child => child.tag === 'label');
+  const second = labels[1].children.at(-1);
+  const button = controls.children.at(-1);
+  assert.equal(button.disabled, true);
+  for (const invalid of ['', ' ', ' 00.00 ', '00\t01']) {
+    second.value = invalid;
+    second.events.input();
+    assert.equal(button.disabled, true);
+    button.events.click();
+  }
+  assert.equal(h.messages.length, 0);
+  labels[0].children.at(-1).value = '00.02';
+  second.value = '00.03';
+  second.events.input();
+  assert.equal(button.disabled, false);
+  button.events.click();
+  assert.deepEqual(Array.from(h.messages[0].payload.newKeys, item => item.key), ['00.02', '00.03']);
+});
+
+test('legacy destructive duplicate repair cannot be sent to Revit', () => {
+  const h = repairHarness();
+  h.testApi.requestModelIssueRepair(repairIssue('mergeDuplicateTypes'), '1');
+  assert.equal(h.messages.length, 0);
+});
+
+test('repairs are blocked during other operations and remote refresh cannot replace a pending repair', () => {
+  const h = repairHarness();
+  h.testApi.state.storageBusy = true;
+  h.testApi.requestModelIssueRepair(repairIssue());
+  h.testApi.processRemoteEntryChange();
+  assert.equal(h.messages.length, 0);
+  assert.equal(h.testApi.state.remoteEntriesPending, true);
+  assert.equal(h.testApi.createModelIssueRepairControls(repairIssue()).children.at(-1).disabled, true);
+  h.testApi.handleModelIssueRepairResult({ status: 'ready', modelHealth: { issues: [] } });
+  assert.notEqual(h.testApi.state.remoteEntriesTimer, null);
+  clearTimeout(h.testApi.state.remoteEntriesTimer);
+});
+
+test('repair responses refresh issues while preserving unsaved library edits and open panel', () => {
+  const h = repairHarness();
+  const entries = h.testApi.state.entries;
+  h.testApi.state.modelIssuesOpen = true;
+  h.testApi.requestModelIssueRepair(repairIssue());
+  h.testApi.handleModelIssueRepairResult({ status: 'warning', message: 'Ownership failure',
+    modelHealth: { issues: [repairIssue()] } });
+  assert.equal(h.testApi.state.storageBusy, false);
+  assert.equal(h.testApi.state.modelHealth.issues.length, 1);
+  assert.equal(h.testApi.state.syncIssues[0].code, 'modelIssueRepairFailed');
+  h.testApi.handleModelIssueRepairResult({ status: 'ready', message: 'Renamed type', modelHealth: { issues: [] } });
+  assert.equal(h.testApi.state.modelHealth.issues.length, 0);
+  assert.equal(h.testApi.state.syncIssues.length, 0);
+  assert.equal(h.testApi.state.entries, entries);
+  assert.equal(h.testApi.state.dirty, true);
+  assert.equal(h.testApi.state.modelIssuesOpen, true);
+  assert.equal(h.messages.length, 1);
+});
 
 test('database commit occurs before any family update and never invokes local save', async () => {
   let resolveSave;
@@ -410,7 +646,7 @@ function recoveryHarness(status = 'error') {
   return h;
 }
 
-test('load failures and missing files expose both recovery actions, ready libraries hide them', () => {
+test('missing files offer reconnect while other load failures also offer setup', () => {
   const h = recoveryHarness();
   const controls = Object.fromEntries(['keynote-recovery-actions', 'open-project-setup', 'reconnect-keynote-file']
     .map(id => [id, {}]));
@@ -419,8 +655,12 @@ test('load failures and missing files expose both recovery actions, ready librar
     h.testApi.state.payload.status = status;
     h.testApi.renderKeynoteRecovery();
     assert.equal(controls['keynote-recovery-actions'].hidden, false);
-    assert.equal(controls['open-project-setup'].hidden, false);
+    assert.equal(controls['open-project-setup'].hidden, status === 'missingFile');
     assert.equal(controls['reconnect-keynote-file'].disabled, false);
+    if (status === 'missingFile') {
+      h.testApi.openProjectSetup();
+      assert.equal(h.testApi.state.manualSetup, false);
+    }
   }
   h.testApi.state.storageBusy = true;
   h.testApi.renderKeynoteRecovery();
@@ -434,7 +674,7 @@ test('load failures and missing files expose both recovery actions, ready librar
 
 test('manual setup bypasses failed automatic detection for either keynote choice', async () => {
   for (const mode of ['file', 'annotation']) {
-    const h = recoveryHarness('missingFile');
+    const h = recoveryHarness();
     h.testApi.openProjectSetup();
     assert.equal(h.testApi.projectSetupActive(), true);
     h.testApi.state.setupMode = mode;

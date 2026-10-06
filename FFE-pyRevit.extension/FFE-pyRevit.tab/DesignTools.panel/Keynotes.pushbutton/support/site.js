@@ -21,6 +21,7 @@
     dirty: false,
     saving: false,
     storageBusy: false,
+    pendingStorageMode: null,
     setupMode: null,
     setupDocumentKey: null,
     setupFeedback: null,
@@ -273,6 +274,12 @@
           elementIds: (issue.elementIds || []).map(text).filter(Boolean),
           sheets: issue.sheets || [],
           typeNames: issue.typeNames || [],
+          repair: issue.repair ? {
+            action: text(issue.repair.action),
+            types: (issue.repair.types || []).map(function (type) {
+              return { id: text(type.id), name: text(type.name), key: text(type.key), text: text(type.text) };
+            })
+          } : null,
           resolution: issue.resolution ? {
             resolutionType: text(issue.resolution.resolutionType),
             familyTypeName: text(issue.resolution.familyTypeName),
@@ -440,14 +447,15 @@
     var reconnectButton = byId("reconnect-keynote-file");
     if (actions) { actions.hidden = !failed && !active; }
     if (setupButton) {
-      setupButton.hidden = !failed || state.manualSetup || (active && (state.payload.projectSetup || {}).state !== "blocked");
+      setupButton.hidden = !failed || state.payload.status === "missingFile" || state.manualSetup ||
+        (active && (state.payload.projectSetup || {}).state !== "blocked");
       setupButton.disabled = Boolean(recoveryBusy());
     }
     if (reconnectButton) { reconnectButton.disabled = Boolean(recoveryBusy()); }
   }
 
   function openProjectSetup() {
-    if (!keynoteLoadFailed() || recoveryBusy()) { return; }
+    if (!keynoteLoadFailed() || state.payload.status === "missingFile" || recoveryBusy()) { return; }
     state.manualSetup = true;
     state.setupFeedback = null;
     setSettingsOpen(false);
@@ -659,6 +667,7 @@
     if (!dialog) { return; }
     if (open) {
       if (!dialog.open) {
+        state.pendingStorageMode = null;
         var settings = (state.payload && state.payload.supabase) || {};
         byId("supabase-project-url").value = settings.url || "";
         byId("supabase-publishable-key").value = settings.anonKey || "";
@@ -667,8 +676,43 @@
       renderMeta();
       if (!dialog.open) { dialog.showModal(); }
     } else if (dialog.open) {
+      state.pendingStorageMode = null;
       dialog.close();
     }
+  }
+
+  function renderStorageModeControls() {
+    var currentMode = (state.payload || {}).storageMode || "file";
+    var selectedMode = state.pendingStorageMode || currentMode;
+    var disabled = Boolean(recoveryBusy() || projectSetupActive());
+    var select = byId("storage-mode");
+    var apply = byId("apply-storage-mode");
+    if (select) {
+      select.value = selectedMode;
+      select.disabled = disabled;
+    }
+    if (apply) {
+      apply.disabled = disabled || selectedMode === currentMode ||
+        (selectedMode !== "file" && selectedMode !== "annotation");
+    }
+  }
+
+  function applyStorageMode() {
+    var mode = state.pendingStorageMode;
+    if (recoveryBusy() || projectSetupActive() || (mode !== "file" && mode !== "annotation") ||
+        mode === ((state.payload || {}).storageMode || "file")) { return; }
+    requestStorage(mode, false);
+  }
+
+  function bindStorageModeControls() {
+    var select = byId("storage-mode");
+    if (select) {
+      select.addEventListener("change", function () {
+        state.pendingStorageMode = select.value;
+        renderStorageModeControls();
+      });
+    }
+    bindClick("apply-storage-mode", applyStorageMode);
   }
 
   function requestStorage(mode, createFile) {
@@ -728,6 +772,7 @@
     }
     state.storageBusy = false;
     if (result.status === "ready" && result.payload && result.payload.status === "ready" && !projectSetupActive(result.payload)) {
+      state.pendingStorageMode = null;
       state.manualSetup = false;
       state.allowNextLoad = true;
       loadData(result.payload);
@@ -1882,7 +1927,6 @@
     var payload = state.payload || {};
     var workspace = document.querySelector(".workspace");
     if (workspace) { workspace.inert = Boolean(state.saving || state.storageBusy); }
-    var storageSelect = byId("storage-mode");
     var createFile = byId("create-keynote-file");
     var familyButton = byId("sync-annotation-family");
     if (familyButton) {
@@ -1890,10 +1934,7 @@
       familyButton.disabled = state.saving || state.storageBusy || state.familySyncing || state.dirty || !state.dbReady;
     }
     var busy = state.storageBusy || state.saving || state.familySyncing || state.dbInitializing || state.analyticsCollecting;
-    if (storageSelect) {
-      storageSelect.value = payload.storageMode || "file";
-      storageSelect.disabled = Boolean(busy || projectSetupActive());
-    }
+    renderStorageModeControls();
     if (createFile) {
       createFile.disabled = Boolean(busy || projectSetupActive());
       createFile.textContent = isAnnotationOnly() ? "Export Library to Text File" : "Create Text File";
@@ -3375,6 +3416,117 @@
     return controls;
   }
 
+  function duplicateKeyInputError(issue, newKeys) {
+    var types = issue.repair.types || [];
+    if (!newKeys || newKeys.length !== types.length) { return "Enter a key for each type."; }
+    var seen = Object.create(null);
+    for (var i = 0; i < types.length; i += 1) {
+      var assignment = newKeys[i];
+      var key = text(assignment.key).trim();
+      if (assignment.id !== types[i].id || !key || /[\t\r\n]/.test(text(assignment.key))) {
+        return "Enter a nonblank key for each type, without tabs or line breaks.";
+      }
+      if (seen[key]) { return "Use a distinct key for each type. One type may keep the original key."; }
+      seen[key] = true;
+    }
+    return "";
+  }
+
+  function requestModelIssueRepair(issue, newKeys) {
+    if (recoveryBusy() || !issue || !issue.repair) { return; }
+    if (issue.repair.action !== "renameType" && issue.repair.action !== "renumberDuplicateTypes") { return; }
+    if (issue.repair.action === "renumberDuplicateTypes" && duplicateKeyInputError(issue, newKeys)) { return; }
+    state.storageBusy = true;
+    renderAll();
+    setStatus({ status: "warning", message: "Repairing Generic Annotation keynote types..." });
+    if (!postWebViewMessage({ type: "repairModelIssue", payload: {
+      documentKey: (state.payload || {}).documentKey,
+      issueKey: issue.key,
+      action: issue.repair.action,
+      types: issue.repair.types,
+      newKeys: newKeys || []
+    } })) {
+      handleModelIssueRepairResult({ status: "error", message: "Could not send the type repair to Revit. Reopen Keynotes and retry." });
+    }
+  }
+
+  function handleModelIssueRepairResult(result) {
+    result = result || {};
+    state.storageBusy = false;
+    if (result.modelHealth) {
+      state.modelHealth = normalizeModelHealth(result.modelHealth);
+      state.sheetVisibleKeynotes = state.modelHealth.placedKeyMap;
+    }
+    if (result.status === "ready") {
+      clearSyncIssueCode("modelIssueRepairFailed");
+    } else {
+      upsertSyncIssue(makeIssue("warning", result.message || "The type repair failed. Retry after resolving ownership or model changes.",
+        "", "modelIssueRepairFailed"));
+    }
+    setStatus(result);
+    renderAll();
+    if (state.remoteEntriesPending) { scheduleRemoteEntryChange(); }
+  }
+
+  function createModelIssueRepairControls(issue) {
+    var repair = issue.repair;
+    var types = repair.types || [];
+    var controls = document.createElement("div");
+    var button = document.createElement("button");
+    var inputs = [];
+    var assignments = function () {
+      return types.map(function (type, index) { return { id: type.id, key: inputs[index].value }; });
+    };
+    controls.className = "model-issue-repair";
+    button.type = "button";
+    button.className = "model-resolution-button";
+    if (repair.action === "renumberDuplicateTypes") {
+      var guidance = document.createElement("span");
+      guidance.className = "validation-detail";
+      guidance.textContent = "Enter a distinct key for each type. All types, descriptions, and placed annotations will be preserved.";
+      controls.appendChild(guidance);
+      var validation = document.createElement("span");
+      validation.className = "validation-detail";
+      validation.setAttribute("aria-live", "polite");
+      var updateKeys = function () {
+        var error = duplicateKeyInputError(issue, assignments());
+        validation.textContent = error;
+        button.disabled = Boolean(recoveryBusy()) || Boolean(error);
+      };
+      types.forEach(function (type) {
+        var label = document.createElement("label");
+        label.textContent = type.name;
+        var description = document.createElement("span");
+        description.className = "validation-detail";
+        description.textContent = "Description: " + (type.text || "(blank)");
+        var input = document.createElement("input");
+        input.type = "text";
+        input.className = "model-repair-key-input";
+        input.value = type.key;
+        input.setAttribute("aria-label", "New key for type " + type.name);
+        input.disabled = Boolean(recoveryBusy());
+        input.addEventListener("input", updateKeys);
+        inputs.push(input);
+        label.appendChild(description);
+        label.appendChild(input);
+        controls.appendChild(label);
+      });
+      controls.appendChild(validation);
+      button.textContent = "Renumber Duplicate Keys";
+      button.title = "Apply these keys to each type's Number parameter and name.";
+      updateKeys();
+    } else {
+      button.textContent = "Rename Type to " + issue.key;
+      button.title = "Use the Number parameter as the type name. The keynote number and description stay the same.";
+      button.disabled = Boolean(recoveryBusy());
+    }
+    button.addEventListener("click", function () {
+      requestModelIssueRepair(issue, inputs.length ? assignments() : []);
+    });
+    controls.appendChild(button);
+    return controls;
+  }
+
   function renderModelHealth() {
     var health = currentModelHealth();
     var issueCount = modelIssueCount();
@@ -3434,7 +3586,7 @@
         var lastGroupTitle = "";
         health.issues.forEach(function (issue) {
           var canJump = Boolean(issue.key && entriesByKey()[issue.key]);
-          var canResolve = Boolean(issue.resolution);
+          var canResolve = Boolean(issue.resolution || issue.repair);
           var item = document.createElement(canResolve ? "div" : "button");
           var label = document.createElement("span");
           var message = document.createElement("strong");
@@ -3472,7 +3624,9 @@
           item.appendChild(message);
           item.appendChild(detail);
 
-          if (canResolve) {
+          if (issue.repair) {
+            item.appendChild(createModelIssueRepairControls(issue));
+          } else if (canResolve) {
             item.appendChild(createModelIssueResolutionControls(issue));
           } else if (canJump) {
             item.addEventListener("click", function () {
@@ -4629,6 +4783,10 @@
   function processRemoteEntryChange() {
     state.remoteEntriesTimer = null;
 
+    if (state.storageBusy) {
+      state.remotePending = state.remoteEntriesPending = true;
+      return;
+    }
     if (state.saving || state.familySyncing || state.pendingDbChanges) {
       return;
     }
@@ -4644,6 +4802,10 @@
   }
 
   function scheduleRemoteEntryChange() {
+    if (state.storageBusy) {
+      state.remotePending = state.remoteEntriesPending = true;
+      return;
+    }
     if (state.saving || state.familySyncing || state.pendingDbChanges) {
       return;
     }
@@ -4666,6 +4828,7 @@
     db.subscribeLibrary(snapshot.libraryId, client.clientId, {
       datasetVersion: snapshot.datasetVersion,
       onRemoteChange: function () {
+        if (state.storageBusy) { scheduleRemoteEntryChange(); return; }
         if (isAnnotationOnly()) {
           scheduleRemoteEntryChange();
           return;
@@ -5125,6 +5288,7 @@
 
     state.loadGeneration += 1;
     state.payload = payload || {};
+    state.pendingStorageMode = null;
     if (state.setupDocumentKey !== state.payload.documentKey) {
       state.setupMode = null;
       state.manualSetup = false;
@@ -6353,10 +6517,7 @@
         configureSupabase();
       });
     }
-    var storageSelect = byId("storage-mode");
-    if (storageSelect) {
-      storageSelect.addEventListener("change", function () { requestStorage(storageSelect.value, false); });
-    }
+    bindStorageModeControls();
     bindClick("sync-annotation-family", function () { requestFamilySync(); });
     bindClick("create-keynote-file", function () { requestStorage("file", true); });
     var searchInput = byId("search-input");
@@ -6506,6 +6667,7 @@
     handleAnalyticsResult: handleAnalyticsResult,
     handleStorageResult: handleStorageResult,
     handleFamilySyncResult: handleFamilySyncResult,
+    handleModelIssueRepairResult: handleModelIssueRepairResult,
     handleSupabaseSettingsResult: handleSupabaseSettingsResult,
     requestRefresh: requestRefresh
   };

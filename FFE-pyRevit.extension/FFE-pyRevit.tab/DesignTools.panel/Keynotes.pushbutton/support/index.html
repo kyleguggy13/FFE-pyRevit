@@ -442,11 +442,14 @@
             <div class="settings-section-body">
               <div class="settings-field">
                 <label for="storage-mode">Storage Mode</label>
-                <select id="storage-mode" aria-describedby="storage-mode-help">
-                  <option value="file">Text File</option>
-                  <option value="annotation">Generic Annotation Only</option>
-                </select>
-                <p id="storage-mode-help">Use an assigned text file, or store Generic Annotation keynotes in Supabase.</p>
+                <div class="settings-storage-controls">
+                  <select id="storage-mode" aria-describedby="storage-mode-help">
+                    <option value="file">Text File</option>
+                    <option value="annotation">Generic Annotation Only</option>
+                  </select>
+                  <button id="apply-storage-mode" class="utility-button" type="button" disabled>Apply</button>
+                </div>
+                <p id="storage-mode-help">Choose a storage mode, then click Apply to switch.</p>
               </div>
               <div class="settings-field">
                 <button id="create-keynote-file" class="utility-button" type="button">Create Text File</button>

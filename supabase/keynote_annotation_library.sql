@@ -103,13 +103,13 @@ begin
     where library_key = p_library_key or annotation_library_key = p_library_key for update;
   if found then
     if v_library.source_type = 'file' and v_library.annotation_library_key = p_library_key then
-      update public.keynote_libraries set library_key = p_library_key, source_type = 'annotation',
+      update public.keynote_libraries set source_type = 'annotation',
         dataset_version = dataset_version + 1, display_path = p_display_path
-        where id = v_library.id;
+        where id = v_library.id returning * into v_library;
     elsif v_library.source_type <> 'annotation' then
       raise exception 'Library source mismatch.';
     end if;
-    return public.get_keynote_snapshot(p_library_key);
+    return public.get_keynote_snapshot(v_library.library_key);
   end if;
   if v_seed is null then
     select content into v_content from public.keynote_templates where template_key = 'ffe-divisions';
@@ -253,4 +253,78 @@ revoke all on function public.get_annotation_keynote_snapshot(text) from public;
 revoke all on function public.convert_annotation_keynote_library_to_file(text,bigint,text,text,text,double precision,text,text,text,text) from public;
 grant execute on function public.get_annotation_keynote_snapshot(text) to anon, authenticated;
 grant execute on function public.convert_annotation_keynote_library_to_file(text,bigint,text,text,text,double precision,text,text,text,text) to anon, authenticated;
+
+-- Promote a file mirror in place. Retain the library ID and existing row IDs.
+create or replace function public.convert_file_keynote_library_to_annotation(
+  p_file_key text, p_annotation_key text, p_base_dataset_version bigint,
+  p_display_path text, p_file_hash text, p_entries jsonb,
+  p_client_id text default '', p_client_name text default ''
+)
+returns jsonb language plpgsql security definer set search_path = public
+set statement_timeout = '60s'
+as $$
+declare v_library public.keynote_libraries%rowtype; v_errors text[];
+begin
+  if coalesce(p_file_key, '') = '' or p_file_key like 'annotation:%'
+     or coalesce(p_annotation_key, '') not like 'annotation:%'
+     or coalesce(p_file_hash, '') = '' or p_entries is null or jsonb_typeof(p_entries) <> 'array' then
+    raise exception 'The file identity, annotation identity, hash, and entries are required.';
+  end if;
+  perform pg_advisory_xact_lock(hashtextextended(p_annotation_key, 0));
+  select * into v_library from public.keynote_libraries where library_key = p_file_key for update;
+  if not found then
+    raise exception 'The original file library was not found. Refresh before retrying.';
+  end if;
+  -- A lost conversion response must never reimport the old file over cloud edits.
+  if v_library.source_type = 'annotation' and v_library.annotation_library_key = p_annotation_key then
+    return public.get_keynote_snapshot(v_library.library_key);
+  end if;
+  if v_library.source_type <> 'file' then
+    raise exception 'This library is already used by another annotation project.';
+  end if;
+  if p_base_dataset_version is null or v_library.dataset_version <> p_base_dataset_version then
+    raise exception 'The library changed during conversion. Refresh before retrying.';
+  end if;
+  if exists (select 1 from public.keynote_libraries where id <> v_library.id
+             and (library_key = p_annotation_key or annotation_library_key = p_annotation_key)) then
+    raise exception 'This project already has a different Supabase library. Conversion would replace its association.';
+  end if;
+  if v_library.annotation_library_key is not null and v_library.annotation_library_key <> p_annotation_key then
+    raise exception 'This file library is associated with another project.';
+  end if;
+  -- The assigned file is authoritative until this transaction switches the source.
+  -- Import external file edits without replacing rows whose keys still exist.
+  if v_library.file_hash <> p_file_hash then
+    insert into public.keynote_entries (library_id, keynote_key, keynote_text, parent_key, sort_order,
+                                       updated_by_client_id, updated_by_client_name)
+    select v_library.id, btrim(coalesce(item.value->>'key', '')), btrim(coalesce(item.value->>'text', '')),
+           btrim(coalesce(item.value->>'parentKey', '')), (item.ordinality - 1)::integer,
+           coalesce(p_client_id, ''), coalesce(p_client_name, '')
+      from jsonb_array_elements(p_entries) with ordinality as item(value, ordinality)
+    on conflict (library_id, keynote_key) do update set
+      keynote_text = excluded.keynote_text, parent_key = excluded.parent_key, sort_order = excluded.sort_order,
+      row_version = keynote_entries.row_version + 1,
+      updated_by_client_id = excluded.updated_by_client_id, updated_by_client_name = excluded.updated_by_client_name
+    where (keynote_entries.keynote_text, keynote_entries.parent_key, keynote_entries.sort_order)
+       is distinct from (excluded.keynote_text, excluded.parent_key, excluded.sort_order);
+    delete from public.keynote_entries where library_id = v_library.id
+      and keynote_key not in (select btrim(coalesce(value->>'key', '')) from jsonb_array_elements(p_entries));
+    v_errors := public.validate_keynote_library(v_library.id);
+    if array_length(v_errors, 1) is not null then
+      raise exception 'File keynote data is invalid: %', array_to_string(v_errors, ' ');
+    end if;
+  end if;
+  -- Keep the file key too: legacy mirror clients then find this protected record
+  -- instead of creating a second record under the original path.
+  update public.keynote_libraries set annotation_library_key = p_annotation_key,
+    source_type = 'annotation', display_path = p_display_path, file_hash = p_file_hash,
+    dataset_version = dataset_version + 1,
+    entry_count = (select count(*) from public.keynote_entries where library_id = v_library.id),
+    last_saved_by_client_id = coalesce(p_client_id, ''), last_saved_by_client_name = coalesce(p_client_name, '')
+    where id = v_library.id;
+  return public.get_keynote_snapshot(v_library.library_key);
+end;
+$$;
+revoke all on function public.convert_file_keynote_library_to_annotation(text,text,bigint,text,text,jsonb,text,text) from public;
+grant execute on function public.convert_file_keynote_library_to_annotation(text,text,bigint,text,text,jsonb,text,text) to anon, authenticated;
 commit;
