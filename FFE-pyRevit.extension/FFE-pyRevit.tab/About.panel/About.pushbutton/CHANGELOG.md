@@ -65,3 +65,9 @@
 
 ### v1.15.0 - 07.22.2026
 - FFE-Keynotes v1.0: Graduating to v1.0 with a stable feature set and improved performance.
+
+### v1.15.4 - 10.06.2026
+- FFE-Keynotes v1.7 Model-stored library UUIDs preserve associations across renames, moves, and storage conversions.
+- FFE-Keynotes v1.6 Text File to Generic Annotation Only conversion reuses the existing Supabase library.
+- FFE-Keynotes v1.5 Added user-entered renumbering for duplicate Generic Annotation keys and direct type-name repairs.
+- FFE-Keynotes v1.4 New project setup can merge or remove existing Generic Annotation keynotes.

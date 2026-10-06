@@ -3,7 +3,7 @@ __title__ = "FFE-Keynotes"
 __version__ = "v1.3"
 __persistentengine__ = True
 __min_revit_ver__ = 2025
-__doc__ = """Version = v1.3
+__doc__ = """Version = v1.4
 Date    = 09.16.2026
 __________________________________________________________________
 Description:
@@ -17,31 +17,14 @@ How-To:
 - Choose Generic Annotation Only mode for Generic Annotation keynotes without a text file.
 __________________________________________________________________
 Last update:
-- [10.06.2026] - Model-stored library UUIDs preserve associations across renames, moves, and storage conversions.
-- [10.06.2026] - Text File to Generic Annotation Only conversion reuses the existing Supabase library.
-- [10.06.2026] - Added user-entered renumbering for duplicate Generic Annotation keys and direct type-name repairs.
-- [10.06.2026] - New project setup can merge or remove existing Generic Annotation keynotes.
+- [10.06.2026] - v1.7 Model-stored library UUIDs preserve associations across renames, moves, and storage conversions.
+- [10.06.2026] - v1.6 Text File to Generic Annotation Only conversion reuses the existing Supabase library.
+- [10.06.2026] - v1.5 Added user-entered renumbering for duplicate Generic Annotation keys and direct type-name repairs.
+- [10.06.2026] - v1.4 New project setup can merge or remove existing Generic Annotation keynotes.
 - [09.16.2026] - v1.3 Added Supabase annotation libraries and Supabase template setup.
-- [05.19.2026] - v0.1 WebView2 keynote manager
-- [05.20.2026] - v0.2 Refactor to support future features and simplify code maintenance.
-- [05.20.2026] - v0.3 Made window stay on top of Revit and show in taskbar to prevent it from getting lost behind the main UI.
-- [05.21.2026] - v0.4 Updated UI styles and layout, and added more robust file encoding detection and handling.
-- [05.26.2026] - v0.5 Added in-place shared-file concurrent editing with Supabase/Postgres mirroring.
-- [05.27.2026] - v0.6 Added row-level locking with Supabase to prevent concurrent edit conflicts.
-- [05.29.2026] - v0.7 Improved error handling and improved UI
-- [06.02.2026] - v0.8 Added Generic Annotation keynote placement and type synchronization.
-- [06.02.2026] - v0.9 Applied the standard leader arrowhead to Generic Annotation keynote types.
-- [06.03.2026] - v0.10 Added Analytics tracking for keynote manager usage and errors.
-- [06.09.2026] - v0.11 Made Place As persist across sessions.
-- [06.10.2026] - v0.12 Added placement filter and collapsible division panel.
-- [06.12.2026] - v0.13 Added automatic model health scan and Safe Mode.
-- [07.10.2026] - v0.14 Added per-keynote family type/text file conflict resolution in Safe Mode.
-- [07.14.2026] - v0.15 Added per-row ellipsis actions for copying, deleting, moving, sequencing, and uppercasing notes.
-- [07.14.2026] - v0.16 Added note promotion and parent menus with safe demotion and subnote-aware deletion.
-- [07.15.2026] - v0.17 Added automatic keynote analytics collection when the manager opens.
-- [07.22.2026] - v1.0 Graduating to v1.0 with a stable feature set and improved performance.
-- [07.22.2026] - v1.1 Added bounded undo/redo history for unsaved keynote edits.
 - [07.30.2026] - v1.2 Marked keynotes placed in other Revit models that share the library.
+- [07.22.2026] - v1.1 Added bounded undo/redo history for unsaved keynote edits.
+- [07.22.2026] - v1.0 Graduating to v1.0 with a stable feature set and improved performance.
 __________________________________________________________________
 Author: Kyle Guggenheim"""
 
