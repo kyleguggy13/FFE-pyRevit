@@ -12,6 +12,7 @@ function harness(db = {}) {
   const hooks = `
     globalScope.testApi = { state: state, saveData: saveData, setPlacementMode: setPlacementMode,
       attachSupabaseLibrary: attachSupabaseLibrary, processRemoteEntryChange: processRemoteEntryChange,
+      subscribeToLibrary: subscribeToLibrary,
       handleFamilySyncResult: handleFamilySyncResult, requestFamilySync: requestFamilySync,
       requestProjectSetup: requestProjectSetup, handleStorageResult: handleStorageResult,
       projectSetupActive: projectSetupActive, renderProjectSetup: renderProjectSetup,
@@ -151,6 +152,87 @@ test('missing text file does not erase its Supabase mirror', () => {
   h.testApi.attachSupabaseLibrary({ storageMode: 'file', libraryKey: 'file.txt',
     issues: [{ severity: 'error', code: 'missingFile' }] }, 'load');
   assert.equal(h.testApi.state.dbReady, false);
+});
+
+test('file attachment uses the matching hash with metadata rows without repeatedly mirroring', async () => {
+  const metadata = { libraryId: 'library', datasetVersion: 7, fileHash: 'same-hash',
+    entries: [{ key: 'A', dbId: 'row-id', rowVersion: 2, sortOrder: 0 }] };
+  let mirrors = 0;
+  const h = harness({ configure() {}, ensureLibrary: async () => metadata,
+    syncFileSnapshot: async () => { mirrors += 1; return metadata; } });
+  const payload = { storageMode: 'file', libraryKey: 'notes.txt', fileHash: 'same-hash',
+    entries: [{ key: 'A', text: 'Actual description', parentKey: 'DIVISION' }], supabase: { configured: true } };
+  h.testApi.state.payload = payload;
+  h.testApi.state.dirty = false;
+  for (let refresh = 0; refresh < 3; refresh += 1) {
+    h.testApi.attachSupabaseLibrary(payload, 'load');
+    await h.testApi.flush();
+    assert.equal(h.testApi.state.dbReady, true);
+  }
+  assert.equal(mirrors, 0);
+  assert.equal(h.testApi.state.dbSnapshot, metadata);
+});
+
+test('file attachment still mirrors changed hashes, missing keys, and different full row content', async () => {
+  const payload = { storageMode: 'file', libraryKey: 'notes.txt', fileHash: 'file-hash',
+    entries: [{ key: 'A', text: 'Current text', parentKey: '' }], supabase: { configured: true } };
+  const snapshots = [
+    { fileHash: 'older-hash', entries: [{ key: 'A' }] },
+    { fileHash: 'file-hash', entries: [{ key: 'OTHER' }] },
+    { fileHash: 'file-hash', entries: [] },
+    { fileHash: 'file-hash', entries: [{ key: 'A', text: 'Old text', parentKey: '' }] },
+    { entries: [{ key: 'A' }] }
+  ];
+  for (const snapshot of snapshots) {
+    let mirrors = 0;
+    const h = harness({ configure() {}, ensureLibrary: async () => snapshot,
+      syncFileSnapshot: async () => { mirrors += 1; return { libraryId: 'library', entries: [] }; } });
+    h.testApi.state.payload = payload;
+    h.testApi.attachSupabaseLibrary(payload, 'load');
+    await h.testApi.flush();
+    assert.equal(mirrors, 1);
+  }
+});
+
+test('library subscription passes the loaded revision to the realtime adapter', () => {
+  let handlers;
+  const h = harness({ subscribeLibrary: (id, client, value) => { handlers = value; } });
+  h.testApi.subscribeToLibrary({ libraryId: 'library', datasetVersion: 7 });
+  assert.equal(handlers.datasetVersion, 7);
+});
+
+test('analytics metadata cannot start a refresh loop while remote keynote saves still notify', () => {
+  let receive;
+  let refreshes = 0;
+  const channel = { on(event, filter, callback) { receive = callback; return this; }, subscribe() { return this; } };
+  const context = { supabase: { createClient: () => ({ channel: () => channel, removeChannel() {} }) } };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(support, 'db_manager.js'), 'utf8'), context);
+  const db = context.ffeKeynoteDb;
+  db.configure({ url: 'https://example.supabase.co', anonKey: 'test' });
+  db.subscribeLibrary('library', 'local', { datasetVersion: 7, onRemoteChange() { refreshes += 1; } });
+  const notify = (version, client = 'other') => receive({ old: { id: 'library' },
+    new: { id: 'library', dataset_version: version, last_saved_by_client_id: client, document_title: 'Project' } });
+  // Analytics retains the last keynote saver and only changes document metadata.
+  for (let update = 0; update < 5; update += 1) { notify(7); }
+  assert.equal(refreshes, 0);
+  notify(8);
+  assert.equal(refreshes, 1);
+  notify(8);
+  notify(7);
+  assert.equal(refreshes, 1);
+  notify(9, 'local');
+  notify(9, 'other');
+  assert.equal(refreshes, 1);
+  db.subscribeLibrary('library', 'local', { datasetVersion: 10 });
+  notify(10);
+  assert.equal(refreshes, 1);
+  notify(11);
+  assert.equal(refreshes, 2);
+  db.unsubscribe();
+  db.subscribeLibrary('different-library', 'local', { datasetVersion: 1, onRemoteChange() { refreshes += 1; } });
+  notify(2);
+  assert.equal(refreshes, 3);
 });
 
 test('adapter invokes authoritative save endpoint with database version', async () => {

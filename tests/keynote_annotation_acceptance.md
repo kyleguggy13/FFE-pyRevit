@@ -16,6 +16,12 @@ Use disposable projects after deploying `supabase/keynote_annotation_library.sql
 
 ## Existing storage, editing, and conversion
 
+### File-based sync stability
+
+- Open a valid file-based keynote project whose Supabase mirror was last saved by another user. After the initial analytics collection, leave the window idle and verify the status settles on Ready without repeated refresh or mirror messages. Refresh several times; an unchanged file must not trigger full mirror sync.
+- Open another project using the same keynote file and collect analytics in either window. Analytics updates must refresh other-model usage without reloading the keynote file. Save a keynote edit in the other window; the receiving window must reload once and settle on Ready. With unsaved edits, verify the remote-change warning preserves those edits.
+- Change the text file outside the manager and click Refresh. Verify the new file contents and hash are mirrored, including when the database attachment returns only row IDs, keys, and versions.
+
 ### Recovery actions
 
 - Force a missing file, a pathless assigned reference, an unsupported resource, invalid file rows, and a failed cloud load. Verify the status bar shows Set Up Project and Reconnect Keynote File. Verify the actions disappear when the source loads successfully and cannot be submitted twice during an operation.

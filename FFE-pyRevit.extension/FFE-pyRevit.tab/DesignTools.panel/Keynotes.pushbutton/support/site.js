@@ -4664,6 +4664,7 @@
     }
 
     db.subscribeLibrary(snapshot.libraryId, client.clientId, {
+      datasetVersion: snapshot.datasetVersion,
       onRemoteChange: function () {
         if (isAnnotationOnly()) {
           scheduleRemoteEntryChange();
@@ -4743,7 +4744,14 @@
     snapshotByKey = indexEntriesByKey(snapshotEntries);
     fileEntries.forEach(function (entry) {
       var match = snapshotByKey[trim(entry.key)];
-      if (!match || !entryFieldsEqual(entry, match)) {
+      if (!match) {
+        differs = true;
+      } else if (Object.prototype.hasOwnProperty.call(match, "text") &&
+                 Object.prototype.hasOwnProperty.call(match, "parentKey")) {
+        if (!entryFieldsEqual(entry, match)) { differs = true; }
+      } else if (!payload.fileHash || !snapshot.fileHash) {
+        // Metadata snapshots omit text/parents. The matching file hash verifies
+        // their content; absent fields must not be compared as empty strings.
         differs = true;
       }
     });

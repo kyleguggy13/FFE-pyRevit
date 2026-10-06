@@ -4,6 +4,7 @@
   var supabaseClient = null;
   var activeChannel = null;
   var currentLibraryId = "";
+  var currentLibraryDatasetVersion = null;
   var activeEntriesChannel = null;
   var currentEntriesLibraryId = "";
   var activeClaimsChannel = null;
@@ -234,6 +235,7 @@
     activeClaimsChannel = null;
     activeAnalyticsChannel = null;
     currentLibraryId = "";
+    currentLibraryDatasetVersion = null;
     currentEntriesLibraryId = "";
     currentClaimsLibraryId = "";
     currentAnalyticsLibraryId = "";
@@ -252,6 +254,11 @@
     if (!supabaseClient || !libraryId) {
       return null;
     }
+    if (currentLibraryId !== libraryId) { currentLibraryDatasetVersion = null; }
+    if (handlers.datasetVersion !== undefined && handlers.datasetVersion !== null) {
+      currentLibraryDatasetVersion = currentLibraryDatasetVersion === null ? Number(handlers.datasetVersion) :
+        Math.max(currentLibraryDatasetVersion, Number(handlers.datasetVersion));
+    }
     if (currentLibraryId === libraryId && activeChannel) {
       return activeChannel;
     }
@@ -269,7 +276,18 @@
           filter: "id=eq." + libraryId
         },
         function (payload) {
-          var nextClientId = text(payload && payload.new && payload.new.last_saved_by_client_id);
+          var row = (payload && payload.new) || {};
+          var nextClientId = text(row.last_saved_by_client_id);
+          if (row.dataset_version !== undefined && row.dataset_version !== null) {
+            var nextVersion = Number(row.dataset_version);
+            // Analytics changes library metadata without changing keynote data.
+            // Track the snapshot revision because Realtime's old row may only
+            // contain the ID. Self notifications also advance this baseline.
+            if (currentLibraryDatasetVersion !== null && nextVersion <= currentLibraryDatasetVersion) {
+              return;
+            }
+            currentLibraryDatasetVersion = nextVersion;
+          }
           if (clientId && nextClientId === clientId) {
             return;
           }

@@ -57,6 +57,7 @@ TODO:
 Key behaviors:
 - Opens a modeless WebView2 window and keeps it alive with pyRevit's
   persistent engine.
+- Opens on Revit's current monitor while retaining the saved window size.
 - Reads and rewrites the keynote file assigned to the current Revit document.
 - Edits structured tab-delimited keynote rows in a WebView.
 - Saves with row-level merge checks, timestamped backups, sidecar file locks,
@@ -4435,6 +4436,7 @@ class KeynoteManagerWindow(Window):
         self.Height = 860
         self.MinWidth = 480
         self.MinHeight = 620
+        # With Revit as the native owner, WPF centers on Revit's current monitor.
         self.WindowStartupLocation = WindowStartupLocation.CenterScreen
         self.ResizeMode = ResizeMode.CanResize
         self.apply_saved_window_state()
@@ -4467,32 +4469,28 @@ class KeynoteManagerWindow(Window):
         return "{0} - {1}".format(APP_NAME, doc_title)
 
     def apply_saved_window_state(self):
+        """Restore size only so old screen coordinates cannot override Revit's monitor."""
         state = read_user_settings()
         try:
             width = float(state.get("width") or 0)
             height = float(state.get("height") or 0)
-            left = state.get("left")
-            top = state.get("top")
 
             if width >= self.MinWidth:
                 self.Width = width
             if height >= self.MinHeight:
                 self.Height = height
-            if left is not None and top is not None:
-                self.Left = float(left)
-                self.Top = float(top)
-                self.WindowStartupLocation = WindowStartupLocation.Manual
         except:
             pass
 
     def save_window_state(self):
+        """Persist size and retire coordinates saved by earlier versions."""
         try:
             state = read_user_settings()
+            state.pop("left", None)
+            state.pop("top", None)
             state.update({
                 "width": float(self.Width),
                 "height": float(self.Height),
-                "left": float(self.Left),
-                "top": float(self.Top),
             })
             write_json_file(get_settings_path(), state)
         except:
