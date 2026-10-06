@@ -14,6 +14,14 @@ Use disposable projects after deploying `supabase/keynote_annotation_library.sql
 - Start a project from a template with no keynote file selected, including a blank built-in reference that retains a default PathType. Verify automatic setup appears instead of "The assigned keynote reference does not expose a readable file path." Test both saved and unsaved projects, then assign a file and reopen to verify setup is skipped.
 - Open projects with assigned valid, missing, inaccessible, malformed, and remote keynote references. All must bypass automatic setup and retain their existing editor/error behavior. Test an assigned local/network file without an InSessionPath; the stored external file path must still be used. Fail external-reference inspection or use a configured reference without a readable path; neither may be treated as an unassigned project.
 
+### Existing Generic Annotation keynotes during new setup
+
+- Start with a saved, unconfigured model containing `FFE_Symbol_Keynote (Type)` notes, including placed and unplaced types. In both setup modes, Continue must show Merge existing keynotes, Remove existing keynotes, and Cancel setup, with the detected type/placement counts. A blank unplaced base and unrelated Generic Annotation families must not trigger the prompt.
+- Merge notes with Unicode, blank descriptions, duplicate types with identical numbers/text, and numbers such as `22.01`. Verify the division template remains, matching model descriptions take precedence, identical duplicates produce one library row, recognized division numbers are grouped under their division, and all original types and placements remain. Conflicting descriptions for one number or invalid tabs/line breaks must stop setup without changing the model or library.
+- Remove must delete the detected placements and note types, preserve unrelated annotations, and retain a blank family base for future placement. Verify the created library contains only template divisions and the success message reports removal counts. Save/synchronize and reopen to check the result.
+- Cancel or close the choice dialog, cancel Save As, fail file assignment/loading, interrupt cloud setup, and force ownership/deletion failures. Verify no partial removal remains, storage preferences are not changed on failure, and any remaining new file or possible cloud result is reported for recovery. Retry and verify the current model is inspected again.
+- Repeat manual Set Up Project recovery for a missing project cloud library. Verify the same choice appears. Recover an existing cloud library or convert between already configured storage modes; existing notes must be preserved without this new-project prompt.
+
 ## Existing storage, editing, and conversion
 
 ### File-based sync stability

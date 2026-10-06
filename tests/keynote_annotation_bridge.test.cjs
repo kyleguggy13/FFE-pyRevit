@@ -352,6 +352,22 @@ test('failed template download keeps setup available for retry', async () => {
   assert.equal(h.messages.length, 0);
 });
 
+test('annotation setup can download a division template before Revit asks to merge or remove model notes', async () => {
+  const h = setupHarness({ configure() {}, getTemplate: async () => ({ content: 'DIVISION 22\tPLUMBING\n' }) });
+  h.testApi.state.setupMode = 'annotation';
+  h.testApi.state.storageBusy = true;
+  h.testApi.handleStorageResult({ status: 'needsTemplate', request: {
+    storageMode: 'annotation', createFile: false, projectSetup: true } });
+  await h.testApi.flush();
+  assert.equal(h.messages.length, 1);
+  assert.equal(h.messages[0].type, 'setupStorage');
+  assert.equal(h.messages[0].payload.storageMode, 'annotation');
+  assert.equal(h.messages[0].payload.createFile, false);
+  assert.equal(h.messages[0].payload.projectSetup, true);
+  assert.match(h.messages[0].payload.template.content, /DIVISION 22/);
+  assert.equal(h.testApi.state.storageBusy, true);
+});
+
 test('setup rendering hides the workspace and enables Continue only when eligible', () => {
   const h = setupHarness();
   function element(value) {

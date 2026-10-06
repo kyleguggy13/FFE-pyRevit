@@ -366,6 +366,7 @@ class ProjectKeynoteSetupTests(unittest.TestCase):
             'keynote_supabase_rpc': self.rpc,
             'save_storage_mode': lambda doc, mode: self.saved_modes.append(mode),
             'normalize_path': lambda path: path.lower(),
+            'collect_existing_setup_keynotes': lambda doc: {'notes': [], 'symbols': [], 'instanceIds': []},
             'os': types.SimpleNamespace(path=types.SimpleNamespace(exists=lambda path: False, isabs=ntpath.isabs)),
         })
 
@@ -684,6 +685,181 @@ class ProjectKeynoteSetupTests(unittest.TestCase):
         self.assertEqual([True], assigned)
         self.assertEqual([], self.saved_modes)
 
+    def configure_existing_setup_notes(self, choice='Merge existing keynotes'):
+        events = []
+        symbol = types.SimpleNamespace(Id=101)
+        existing = {'notes': [{'key': '22.01', 'text': 'Existing fixture', 'symbol': symbol}],
+                    'symbols': [symbol], 'instanceIds': [201, 202]}
+        self.api['collect_existing_setup_keynotes'] = lambda doc: existing
+        def prompt(options, **kwargs):
+            events.append('prompt')
+            self.assertIn('Remove existing keynotes', options)
+            self.assertIn('1 Generic Annotation keynote type(s) and 2 placed keynote(s)', kwargs['message'])
+            return choice
+        def dialog(**kwargs):
+            events.append('save-as')
+            return 'project/notes.txt'
+        self.api['forms'] = types.SimpleNamespace(
+            CommandSwitchWindow=types.SimpleNamespace(show=prompt), save_file=dialog)
+        class Group:
+            def __init__(self, *args): self.status = None
+            def Start(self):
+                self.status = 'started'
+                events.append('group-start')
+            def Assimilate(self):
+                self.status = 'committed'
+                events.append('group-commit')
+                return 'committed'
+            def GetStatus(self): return self.status
+            def RollBack(self):
+                self.status = 'rolled-back'
+                events.append('group-rollback')
+        self.api['TransactionGroup'] = Group
+        self.api['TransactionStatus'] = types.SimpleNamespace(Started='started', Committed='committed')
+        self.api['remove_existing_setup_keynotes'] = lambda doc, notes: events.append('remove')
+        self.api['build_model_health'] = lambda *args: {'placedKeyMap': {}}
+        self.created_entries = None
+        original_build = self.api['build_keynote_payload']
+        def build(doc, **kwargs):
+            if kwargs.get('source_path'):
+                result = self.base_payload(doc, 'ready', 'Loaded file.')
+                result['entries'] = self.created_entries
+                return result
+            return original_build(doc, **kwargs)
+        self.api['build_keynote_payload'] = build
+        def assign(doc, path, entries):
+            events.append('assign')
+            self.created_entries = entries
+        self.api['write_and_assign_keynote_file'] = assign
+        def rpc(name, arguments, allow_missing=False):
+            if name == 'ensure_annotation_keynote_library':
+                events.append('cloud-create')
+                self.snapshot = {'status': 'ready', 'sourceType': 'annotation', 'libraryId': 'new-library',
+                                 'entries': copy.deepcopy(arguments['p_seed_entries'])}
+            return self.rpc(name, arguments, allow_missing)
+        self.api['keynote_supabase_rpc'] = rpc
+        return events, existing
+
+    def test_existing_notes_request_template_before_prompting_in_both_new_setup_modes(self):
+        events, _ = self.configure_existing_setup_notes()
+        for mode in ('file', 'annotation'):
+            result = self.api['setup_keynote_storage'](object(), {'storageMode': mode, 'projectSetup': True})
+            self.assertEqual('needsTemplate', result['status'])
+            self.assertEqual(mode, result['request']['storageMode'])
+        self.assertEqual([], events)
+        self.assertEqual([], self.saved_modes)
+
+    def test_merge_imports_model_notes_into_both_new_library_modes_and_keeps_annotations(self):
+        for mode in ('file', 'annotation'):
+            with self.subTest(mode=mode):
+                self.setUp()
+                events, _ = self.configure_existing_setup_notes()
+                result = self.api['setup_keynote_storage'](object(), {'storageMode': mode, 'projectSetup': True,
+                    'createFile': mode == 'file', 'template': {'content': 'DIVISION 22\tPLUMBING\n'}})
+                self.assertEqual('ready', result['status'], result.get('message'))
+                notes = {note['key']: note for note in result['payload']['entries']}
+                self.assertEqual('Existing fixture', notes['22.01']['text'])
+                self.assertEqual('DIVISION 22', notes['22.01']['parentKey'])
+                self.assertNotIn('remove', events)
+                self.assertEqual([mode], self.saved_modes)
+
+    def test_remove_is_staged_and_only_committed_after_successful_setup_in_both_modes(self):
+        for mode in ('file', 'annotation'):
+            with self.subTest(mode=mode):
+                self.setUp()
+                events, _ = self.configure_existing_setup_notes('Remove existing keynotes')
+                result = self.api['setup_keynote_storage'](object(), {'storageMode': mode, 'projectSetup': True,
+                    'createFile': mode == 'file', 'template': {'content': 'DIVISION 22\tPLUMBING\n'}})
+                self.assertEqual('ready', result['status'], result.get('message'))
+                self.assertEqual(['DIVISION 22'], [note['key'] for note in result['payload']['entries']])
+                self.assertLess(events.index('remove'), events.index('assign' if mode == 'file' else 'cloud-create'))
+                self.assertEqual('group-commit', events[-1])
+                self.assertIn('Removed 2 placed', result['message'])
+
+    def test_cancel_or_closed_existing_note_prompt_has_no_side_effects(self):
+        for choice in ('Cancel setup', None):
+            events, _ = self.configure_existing_setup_notes(choice)
+            result = self.api['setup_keynote_storage'](object(), {'storageMode': 'annotation', 'projectSetup': True,
+                'template': {'content': 'DIVISION 22\tPLUMBING\n'}})
+            self.assertEqual('canceled', result['status'])
+            self.assertEqual(['prompt'], events)
+            self.assertEqual([], self.saved_modes)
+
+    def test_manual_new_library_recovery_asks_about_existing_notes(self):
+        events, _ = self.configure_existing_setup_notes('Cancel setup')
+        result = self.api['setup_keynote_storage'](object(), {'storageMode': 'annotation', 'recoverySetup': True,
+            'template': {'content': 'A\tAlpha\n'}})
+        self.assertEqual('canceled', result['status'])
+        self.assertEqual(['prompt'], events)
+
+    def test_recovery_of_an_existing_cloud_library_never_prompts_or_removes_model_notes(self):
+        self.existing_library()
+        self.api['collect_existing_setup_keynotes'] = lambda *args: self.fail('Existing library prompted for removal')
+        self.api['build_model_health'] = lambda *args: {'placedKeyMap': {}}
+        result = self.api['setup_keynote_storage'](object(), {'storageMode': 'annotation', 'recoverySetup': True})
+        self.assertEqual('ready', result['status'])
+        self.assertEqual('Existing cloud edit', result['payload']['entries'][0]['text'])
+
+    def test_canceling_save_as_after_remove_choice_does_not_delete_anything(self):
+        events, _ = self.configure_existing_setup_notes('Remove existing keynotes')
+        self.api['forms'].save_file = lambda **kwargs: None
+        result = self.api['setup_keynote_storage'](object(), {'storageMode': 'file', 'createFile': True,
+            'projectSetup': True, 'template': {'content': 'A\tAlpha\n'}})
+        self.assertEqual('canceled', result['status'])
+        self.assertEqual(['prompt'], events)
+        self.assertEqual([], self.saved_modes)
+
+    def test_removal_failure_rolls_back_and_never_creates_the_cloud_library(self):
+        events, _ = self.configure_existing_setup_notes('Remove existing keynotes')
+        def failed(*args): raise Exception('Owned by another user')
+        self.api['remove_existing_setup_keynotes'] = failed
+        result = self.api['setup_keynote_storage'](object(), {'storageMode': 'annotation', 'projectSetup': True,
+            'template': {'content': 'A\tAlpha\n'}})
+        self.assertEqual('error', result['status'])
+        self.assertEqual(['prompt', 'group-start', 'group-rollback'], events)
+        self.assertIn('restored', result['message'])
+        self.assertEqual([], self.saved_modes)
+
+    def test_cloud_failure_after_staged_removal_restores_existing_annotations(self):
+        events, _ = self.configure_existing_setup_notes('Remove existing keynotes')
+        original_rpc = self.api['keynote_supabase_rpc']
+        def rpc(name, *args, **kwargs):
+            if name == 'ensure_annotation_keynote_library': raise Exception('Connection lost')
+            return original_rpc(name, *args, **kwargs)
+        self.api['keynote_supabase_rpc'] = rpc
+        result = self.api['setup_keynote_storage'](object(), {'storageMode': 'annotation', 'projectSetup': True,
+            'template': {'content': 'A\tAlpha\n'}})
+        self.assertEqual('error', result['status'])
+        self.assertEqual(['prompt', 'group-start', 'remove', 'group-rollback'], events)
+        self.assertEqual([], self.saved_modes)
+
+    def test_failed_file_load_rolls_back_assignment_and_removal_and_reports_the_remaining_file(self):
+        events, _ = self.configure_existing_setup_notes('Remove existing keynotes')
+        self.api['build_keynote_payload'] = lambda *args, **kwargs: {'status': 'error', 'message': 'Load failed'}
+        result = self.api['setup_keynote_storage'](object(), {'storageMode': 'file', 'createFile': True,
+            'projectSetup': True, 'template': {'content': 'A\tAlpha\n'}})
+        self.assertEqual('error', result['status'])
+        self.assertEqual(['prompt', 'save-as', 'group-start', 'remove', 'assign', 'group-rollback'], events)
+        self.assertIn('project/notes.txt', result['message'])
+        self.assertIn('assignment was rolled back', result['message'])
+        self.assertEqual([], self.saved_modes)
+
+    def test_concurrent_cloud_creation_cannot_silently_drop_merged_notes(self):
+        events, _ = self.configure_existing_setup_notes()
+        original_rpc = self.api['keynote_supabase_rpc']
+        def rpc(name, arguments, **kwargs):
+            if name == 'ensure_annotation_keynote_library':
+                self.existing_library()
+                return self.rpc(name, arguments, **kwargs)
+            return original_rpc(name, arguments, **kwargs)
+        self.api['keynote_supabase_rpc'] = rpc
+        result = self.api['setup_keynote_storage'](object(), {'storageMode': 'annotation', 'projectSetup': True,
+            'template': {'content': 'A\tAlpha\n'}})
+        self.assertEqual('error', result['status'])
+        self.assertIn('did not retain', result['message'])
+        self.assertNotIn('remove', events)
+        self.assertEqual([], self.saved_modes)
+
     def test_new_file_setup_rejects_invalid_template_before_opening_save_as(self):
         self.api['forms'] = types.SimpleNamespace(save_file=lambda **kwargs: self.fail('Invalid template opened Save As'))
         result = self.api['setup_keynote_storage'](object(), {
@@ -859,6 +1035,111 @@ class KeynoteFileReconnectTests(unittest.TestCase):
                 with self.assertRaisesRegex(Exception, 'could not load'):
                     api['assign_keynote_file'](object(), self.selected)
                 self.assertEqual(['start', 'rollback'], events)
+
+
+class ExistingSetupKeynoteHelpersTests(unittest.TestCase):
+    def setUp(self):
+        self.api = load_functions()
+        self.api.update({'GENERIC_KEYNOTE_FAMILY_NAME': 'FFE keynotes',
+                         'GENERIC_KEYNOTE_NUMBER_PARAMETER': 'Number',
+                         'GENERIC_KEYNOTE_TEXT_PARAMETER': 'Text'})
+
+    def test_collection_includes_unplaced_notes_and_excludes_other_annotations_and_blank_bases(self):
+        def symbol(identity, name, number='', description='', family='FFE keynotes'):
+            return types.SimpleNamespace(Id=identity, Name=name, Family=types.SimpleNamespace(Name=family),
+                                         parameters={'Number': number, 'Text': description})
+        symbols = [symbol(1, 'Default'), symbol(2, '22.01', '22.01', 'Fixture'),
+                   symbol(3, '23.01'), symbol(4, 'Placed placeholder'),
+                   symbol(5, 'Room label', 'ROOM', 'Unrelated', 'Other family')]
+        class Collector(list):
+            def OfCategory(self, category): return self
+            def WhereElementIsElementType(self): return self
+        self.api.update({'FilteredElementCollector': lambda doc: Collector(symbols),
+                         'BuiltInCategory': types.SimpleNamespace(OST_GenericAnnotation='annotations'),
+                         'collect_generic_annotation_instances_by_symbol': lambda doc: {
+                             '4': [types.SimpleNamespace(Id=104)]},
+                         'get_element_id_key': lambda element: str(element.Id),
+                         'get_lookup_parameter_text': lambda element, names: element.parameters[names[0]]})
+        result = self.api['collect_existing_setup_keynotes'](object())
+        self.assertEqual(['22.01', '23.01', 'Placed placeholder'], [note['key'] for note in result['notes']])
+        self.assertEqual([104], result['instanceIds'])
+        self.assertEqual([1, 2, 3, 4], [symbol.Id for symbol in result['symbols']])
+
+    def test_merge_deduplicates_identical_model_notes_and_keeps_the_model_description(self):
+        entries = [row('DIVISION 22', 'Template title'), row('A', 'Template text')]
+        notes = {'notes': [{'key': '22.01', 'text': 'Fixture'}, {'key': '22.01', 'text': 'Fixture'},
+                           {'key': 'A', 'text': 'Model text'}, {'key': 'Custom', 'text': ''}]}
+        result = self.api['merge_existing_setup_keynotes'](entries, notes)
+        by_key = {entry['key']: entry for entry in result}
+        self.assertEqual(4, len(result))
+        self.assertEqual('DIVISION 22', by_key['22.01']['parentKey'])
+        self.assertEqual('Model text', by_key['A']['text'])
+        self.assertEqual('', by_key['Custom']['parentKey'])
+        self.assertEqual('Template text', entries[1]['text'])
+
+    def test_merge_rejects_conflicting_duplicate_numbers_and_invalid_model_fields(self):
+        with self.assertRaisesRegex(Exception, 'different descriptions'):
+            self.api['merge_existing_setup_keynotes']([], {'notes': [
+                {'key': 'A', 'text': 'First'}, {'key': 'A', 'text': 'Second'}]})
+        for note in ({'key': '', 'text': 'Missing number'}, {'key': 'A', 'text': 'Line\nbreak'}):
+            with self.subTest(note=note), self.assertRaisesRegex(Exception, 'could not be merged'):
+                self.api['merge_existing_setup_keynotes']([], {'notes': [note]})
+
+    def configure_removal(self, keep_base=False, fail_delete=False):
+        events = []
+        note = types.SimpleNamespace(Id=101, Name='A')
+        blank = types.SimpleNamespace(Id=102, Name='Blank', parameters={'Number': 'A', 'Text': 'Note'})
+        existing = {'notes': [{'key': 'A', 'text': 'Note', 'symbol': note}],
+                    'symbols': [note, blank] if keep_base else [note], 'instanceIds': [201, 202]}
+        class Ids(list):
+            def Add(self, value): self.append(value)
+            @classmethod
+            def __class_getitem__(cls, item): return cls
+        class Transaction:
+            def __init__(self, *args): self.status = None
+            def Start(self):
+                events.append('start')
+                self.status = 'started'
+            def Commit(self):
+                events.append('commit')
+                self.status = 'committed'
+                return 'committed'
+            def GetStatus(self): return self.status
+            def RollBack(self): events.append('rollback')
+        def duplicate(*args):
+            events.append('blank-base')
+            return blank
+        def set_text(parameter, value):
+            blank.parameters[parameter] = value
+        def delete(ids):
+            events.append(('delete', list(ids)))
+            if fail_delete: raise Exception('Owned by another user')
+        self.api.update({'Transaction': Transaction, 'List': Ids, 'ElementId': int,
+                         'TransactionStatus': types.SimpleNamespace(Started='started', Committed='committed'),
+                         'duplicate_family_symbol': duplicate,
+                         'get_writable_symbol_parameter': lambda symbol, name: name,
+                         'set_parameter_text': set_text})
+        return types.SimpleNamespace(Delete=delete), existing, events, blank
+
+    def test_removal_preserves_a_blank_family_base_and_deletes_detected_types_and_instances(self):
+        for keep_base in (False, True):
+            with self.subTest(keep_base=keep_base):
+                doc, existing, events, blank = self.configure_removal(keep_base)
+                self.api['remove_existing_setup_keynotes'](doc, existing)
+                self.assertIn(('delete', [201, 202, 101]), events)
+                self.assertEqual('commit', events[-1])
+                if keep_base:
+                    self.assertNotIn('blank-base', events)
+                else:
+                    self.assertIn('blank-base', events)
+                    self.assertEqual({'Number': '', 'Text': ''}, blank.parameters)
+
+    def test_delete_failure_rolls_back_the_entire_removal_transaction(self):
+        doc, existing, events, _ = self.configure_removal(fail_delete=True)
+        with self.assertRaisesRegex(Exception, 'Owned by another user'):
+            self.api['remove_existing_setup_keynotes'](doc, existing)
+        self.assertEqual('rollback', events[-1])
+        self.assertNotIn('commit', events)
 
 
 if __name__ == '__main__':

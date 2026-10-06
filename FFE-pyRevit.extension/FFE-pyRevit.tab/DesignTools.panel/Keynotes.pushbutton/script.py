@@ -17,6 +17,7 @@ How-To:
 - Choose Generic Annotation Only mode for Generic Annotation keynotes without a text file.
 __________________________________________________________________
 Last update:
+- [10.06.2026] - New project setup can merge or remove existing Generic Annotation keynotes.
 - [09.16.2026] - v1.3 Added Supabase annotation libraries and Supabase template setup.
 - [05.19.2026] - v0.1 WebView2 keynote manager
 - [05.20.2026] - v0.2 Refactor to support future features and simplify code maintenance.
@@ -75,6 +76,8 @@ Revit API notes:
   document API calls run in a valid Revit API context.
 
 Design decisions:
+- New setup asks how to handle existing FFE Generic Annotation keynote types and placements.
+- Removal is staged in a Revit transaction group and rolled back if setup fails.
 - Text File mode uses the assigned file, with explicit template-based creation.
 - Generic Annotation Only mode stores its library exclusively in Supabase.
 - Revit holds placed annotations and family types, not a library snapshot or identity.
@@ -1402,18 +1405,118 @@ def sync_converted_keynote_file(payload, source, annotation_key):
         raise Exception("Supabase did not confirm conversion of the existing library.")
 
 
+def collect_existing_setup_keynotes(target_doc):
+    """Inspect FFE keynote types, including unplaced notes, without changing the model."""
+    instances_by_symbol = collect_generic_annotation_instances_by_symbol(target_doc)
+    symbols = []
+    notes = []
+    instance_ids = []
+    for symbol in (FilteredElementCollector(target_doc)
+                   .OfCategory(BuiltInCategory.OST_GenericAnnotation).WhereElementIsElementType()):
+        if symbol.Family.Name != GENERIC_KEYNOTE_FAMILY_NAME:
+            continue
+        symbols.append(symbol)
+        number = get_lookup_parameter_text(symbol, [GENERIC_KEYNOTE_NUMBER_PARAMETER]).strip()
+        description = get_lookup_parameter_text(symbol, [GENERIC_KEYNOTE_TEXT_PARAMETER]).strip()
+        placed = instances_by_symbol.get(get_element_id_key(symbol)) or []
+        # A blank, unplaced family base is available for future placement, not a note.
+        type_name = get_element_name(symbol)
+        named_keynote = (len(type_name) > 2 and type_name[:2].isdigit() and type_name[2] == ".") or type_name.startswith("DIVISION ")
+        if not number and not description and not placed and not named_keynote:
+            continue
+        notes.append({"key": number or type_name, "text": description,
+                      "symbol": symbol})
+        instance_ids.extend([instance.Id for instance in placed])
+    return {"notes": notes, "symbols": symbols, "instanceIds": instance_ids}
+
+
+def choose_existing_setup_keynotes(existing):
+    """Ask before importing notes or deleting their types and placed annotations."""
+    merge = "Merge existing keynotes"
+    remove = "Remove existing keynotes"
+    choice = forms.CommandSwitchWindow.show(
+        [merge, remove, "Cancel setup"],
+        message=("This model contains {0} Generic Annotation keynote type(s) and {1} placed keynote(s).\n\n"
+                 "Merge imports their numbers and descriptions into the new library and keeps the annotations.\n"
+                 "Remove deletes the placed keynotes and their note types.\n"
+                 "How should new project setup handle them?").format(
+                     len(existing["notes"]), len(existing["instanceIds"]))
+    )
+    return "merge" if choice == merge else "remove" if choice == remove else None
+
+
+def merge_existing_setup_keynotes(entries, existing):
+    """Preserve model descriptions, deduplicate identical notes, and reject ambiguous keys."""
+    merged = [dict(entry) for entry in entries]
+    by_key = {safe_unicode(entry.get("key")).strip(): entry for entry in merged}
+    model_by_key = {}
+    for note in existing["notes"]:
+        key = safe_unicode(note["key"]).strip()
+        description = safe_unicode(note["text"]).strip()
+        if key in model_by_key and model_by_key[key] != description:
+            raise Exception("Existing Generic Annotation types use keynote '{0}' with different descriptions. "
+                            "Resolve the duplicate number in Revit, then retry Merge.".format(key))
+        model_by_key[key] = description
+    for key, description in sorted(model_by_key.items()):
+        if key in by_key:
+            by_key[key]["text"] = description
+            continue
+        division = "DIVISION " + key[:2]
+        parent = division if len(key) > 2 and key[:2].isdigit() and key[2] == "." and division in by_key else ""
+        entry = {"id": "setup-model-" + key, "key": key, "text": description, "parentKey": parent}
+        merged.append(entry)
+        by_key[key] = entry
+    issues = validate_entries(merged)
+    if has_error_issues(issues):
+        raise Exception("Existing model keynotes could not be merged: " + " ".join(
+            issue["message"] for issue in issues if issue.get("severity") == "error"))
+    return merged
+
+
+def remove_existing_setup_keynotes(target_doc, existing):
+    """Delete only detected FFE notes; keep a blank family base and roll back failures."""
+    transaction = Transaction(target_doc, "Remove Existing Generic Annotation Keynotes")
+    try:
+        transaction.Start()
+        notes = existing["notes"]
+        if len(notes) == len(existing["symbols"]):
+            names = set(get_element_name(symbol) for symbol in existing["symbols"])
+            base_name = "FFE Keynote Base"
+            suffix = 1
+            while base_name in names:
+                base_name = "FFE Keynote Base {0}".format(suffix)
+                suffix += 1
+            base = duplicate_family_symbol(target_doc, notes[0]["symbol"], base_name)
+            set_parameter_text(get_writable_symbol_parameter(base, GENERIC_KEYNOTE_NUMBER_PARAMETER), "")
+            set_parameter_text(get_writable_symbol_parameter(base, GENERIC_KEYNOTE_TEXT_PARAMETER), "")
+        ids = List[ElementId]()
+        for element_id in existing["instanceIds"]:
+            ids.Add(element_id)
+        for note in notes:
+            ids.Add(note["symbol"].Id)
+        target_doc.Delete(ids)
+        if transaction.Commit() != TransactionStatus.Committed:
+            raise Exception("Revit did not commit the keynote removal.")
+    except Exception:
+        if transaction.GetStatus() == TransactionStatus.Started:
+            transaction.RollBack()
+        raise
+
+
 def setup_keynote_storage(target_doc, setup_payload):
-    """Export the full cloud library when changing from annotation-only to text file."""
+    """Initialize storage, resolve existing model notes, or export the complete cloud library."""
     mode = setup_payload.get("storageMode")
     create_file = bool(setup_payload.get("createFile"))
     conversion_group = None
+    setup_group = None
     exported_path = None
     try:
         if mode not in ("file", "annotation"):
             raise Exception("Unknown keynote storage mode.")
         if get_document_analytics_identity(target_doc)["documentKeySource"] == "title":
             raise Exception("Save the Revit project, then Refresh before setting up keynotes.")
-        if setup_payload.get("projectSetup") and not setup_payload.get("recoverySetup"):
+        new_setup = bool(setup_payload.get("projectSetup") and not setup_payload.get("recoverySetup"))
+        if new_setup:
             current = build_project_keynote_payload(target_doc, include_model_health=False)
             setup = current.get("projectSetup") or {}
             if setup.get("state") != "required" or not setup.get("canContinue"):
@@ -1431,16 +1534,39 @@ def setup_keynote_storage(target_doc, setup_payload):
             if not missing and (snapshot.get("status") != "ready" or not snapshot.get("libraryId")):
                 raise Exception("Could not confirm the existing project cloud library. Check Settings and retry.")
             converting_annotation = mode == "file" and not missing
+            new_setup = missing
+        if new_setup and mode == "file":
+            create_file = True
+        existing = collect_existing_setup_keynotes(target_doc) if new_setup else None
+        existing_action = None
+        seed_entries = None
+        if existing and existing["notes"]:
+            # Download before the choice so no decision is carried across an async
+            # template request; each retry inspects the current Revit model again.
+            seed_entries = template_entries(setup_payload)
+            if seed_entries is None:
+                return {"status": "needsTemplate", "request": setup_payload}
+            existing_action = choose_existing_setup_keynotes(existing)
+            if existing_action is None:
+                return {"status": "canceled", "message": "Project setup canceled. Existing keynotes were kept."}
+            if existing_action == "merge":
+                seed_entries = merge_existing_setup_keynotes(seed_entries, existing)
         if mode == "annotation":
             key = annotation_library_key(target_doc)
             file_payload = build_keynote_payload(target_doc, include_model_health=False, storage_mode="file")
             seed = file_payload["entries"] if file_payload["status"] == "ready" else None
+            if seed_entries is not None:
+                seed = seed_entries
+            if existing_action == "remove":
+                setup_group = TransactionGroup(target_doc, "Set Up Project Keynotes")
+                setup_group.Start()
+                remove_existing_setup_keynotes(target_doc, existing)
             keynote_supabase_rpc("ensure_annotation_keynote_library", {
                 "p_library_key": key, "p_display_path": "Supabase: " + get_document_title(target_doc),
                 "p_seed_entries": seed,
             })
         elif create_file or converting_annotation:
-            entries = None if converting_annotation else template_entries(setup_payload)
+            entries = None if converting_annotation else (seed_entries if seed_entries is not None else template_entries(setup_payload))
             if entries is None and not converting_annotation:
                 return {"status": "needsTemplate", "request": setup_payload}
             path = forms.save_file(file_ext="txt", default_name="RevitKeynotes.txt",
@@ -1455,11 +1581,27 @@ def setup_keynote_storage(target_doc, setup_payload):
                 entries = source["entries"]
                 conversion_group = TransactionGroup(target_doc, "Convert Keynote Library to Text File")
                 conversion_group.Start()
+            if existing_action:
+                setup_group = TransactionGroup(target_doc, "Set Up Project Keynotes")
+                setup_group.Start()
+                if existing_action == "remove":
+                    remove_existing_setup_keynotes(target_doc, existing)
             write_and_assign_keynote_file(target_doc, path, entries)
             exported_path = path
         payload = build_keynote_payload(target_doc, storage_mode=mode, source_path=exported_path)
         if payload.get("status") != "ready":
             raise Exception(payload.get("message") or "Could not load the configured keynote library. Refresh before retrying.")
+        if existing_action == "merge":
+            loaded = {entry["key"]: entry for entry in payload["entries"]}
+            for note in existing["notes"]:
+                entry = loaded.get(note["key"])
+                if entry is None or safe_unicode(entry.get("text")).strip() != safe_unicode(note["text"]).strip():
+                    raise Exception("The configured library did not retain all model keynotes. "
+                                    "The library may have been created by another user. Existing annotations were kept; Refresh before retrying.")
+        if setup_group is not None:
+            if setup_group.Assimilate() != TransactionStatus.Committed:
+                raise Exception("Revit did not commit project setup. Refresh before retrying.")
+            setup_group = None
         if converting_annotation:
             sync_converted_keynote_file(payload, source, annotation_library_key(target_doc))
             if conversion_group.Assimilate() != TransactionStatus.Committed:
@@ -1467,11 +1609,22 @@ def setup_keynote_storage(target_doc, setup_payload):
             conversion_group = None
             payload["message"] = "Exported the complete library to '{0}', assigned it to Revit, and converted the existing Supabase library record.".format(path)
         save_storage_mode(target_doc, mode)
+        if existing_action:
+            payload["message"] += " " + ("Merged {0} existing Generic Annotation keynote type(s).".format(len(existing["notes"]))
+                                         if existing_action == "merge" else
+                                         "Removed {0} placed Generic Annotation keynote(s) and {1} note type(s).".format(
+                                             len(existing["instanceIds"]), len(existing["notes"])))
         return {"status": "ready", "payload": payload, "message": payload["message"]}
     except Exception as exc:
+        if setup_group is not None and setup_group.GetStatus() == TransactionStatus.Started:
+            setup_group.RollBack()
         if conversion_group is not None and conversion_group.GetStatus() == TransactionStatus.Started:
             conversion_group.RollBack()
         message = safe_str(exc)
+        if setup_group is not None:
+            message += " Existing annotations and note types were restored. Refresh to check the library before retrying."
+            if exported_path:
+                message += " The new file remains at '{0}', but its Revit assignment was rolled back.".format(exported_path)
         if exported_path and conversion_group is not None:
             message += " The export remains at '{0}', but Revit assignment was rolled back and the mode was not changed. Refresh before retrying to check the Supabase outcome.".format(exported_path)
         return {"status": "error", "message": message}
