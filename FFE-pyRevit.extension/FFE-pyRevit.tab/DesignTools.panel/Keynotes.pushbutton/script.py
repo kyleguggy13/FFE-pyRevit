@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 __title__ = "FFE-Keynotes"
-__version__ = "v1.3"
+__version__ = "v1.7"
 __persistentengine__ = True
 __min_revit_ver__ = 2025
-__doc__ = """Version = v1.4
-Date    = 09.16.2026
+__doc__ = """Version = v1.7
+Date    = 10.06.2026
 __________________________________________________________________
 Description:
 Persistent WebView2 keynote manager for an external text file or a Generic Annotation
