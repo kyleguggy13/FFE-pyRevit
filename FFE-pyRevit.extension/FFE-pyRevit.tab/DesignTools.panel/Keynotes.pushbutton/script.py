@@ -3047,6 +3047,13 @@ def make_sheet_analytics_info(sheet):
     }
 
 
+def get_analytics_builtin_parameter_text(element, parameter_name):
+    try:
+        return get_parameter_text(element.get_Parameter(getattr(BuiltInParameter, parameter_name)))
+    except:
+        return ""
+
+
 def make_view_analytics_info(view):
     if view is None:
         return None
@@ -3060,9 +3067,22 @@ def make_view_analytics_info(view):
     if not (view_id or view_name):
         return None
 
+    title_on_sheet = get_analytics_builtin_parameter_text(view, "VIEW_DESCRIPTION") or view_name
+    family_and_type = get_analytics_builtin_parameter_text(view, "VIEW_FAMILY_AND_TYPE_SCHEDULES")
+    if not family_and_type:
+        try:
+            view_type = view.Document.GetElement(view.GetTypeId())
+            family_name = safe_unicode(view_type.FamilyName).strip()
+            type_name = get_element_name(view_type)
+            family_and_type = u": ".join(value for value in (family_name, type_name) if value)
+        except:
+            pass
+
     return {
         "id": view_id,
         "name": view_name,
+        "titleOnSheet": title_on_sheet,
+        "familyAndType": family_and_type,
     }
 
 
@@ -3110,6 +3130,8 @@ def build_view_sheet_lookup(target_doc):
             view_id_value = get_element_id_value(view_id)
             sheet = target_doc.GetElement(viewport.SheetId)
             sheet_info = make_sheet_analytics_info(sheet)
+            if sheet_info:
+                sheet_info["detailNumber"] = get_analytics_builtin_parameter_text(viewport, "VIEWPORT_DETAIL_NUMBER")
             add_sheet_to_view_lookup(result, view_id_value, sheet_info)
         except:
             continue
@@ -3195,10 +3217,7 @@ def record_sheet_analytics(row, sheet_info, source_type, view_info):
             "count": 0,
             "userKeynoteCount": 0,
             "genericAnnotationCount": 0,
-            "viewIds": [],
-            "viewNames": [],
-            "_viewIdMap": {},
-            "_viewNameMap": {},
+            "viewIds": {},
         }
 
     sheet_row = sheet_map[sheet_key]
@@ -3210,13 +3229,17 @@ def record_sheet_analytics(row, sheet_info, source_type, view_info):
 
     if view_info:
         view_id = safe_str(view_info.get("id")).strip()
-        view_name = safe_unicode(view_info.get("name")).strip()
-        if view_id and view_id not in sheet_row["_viewIdMap"]:
-            sheet_row["_viewIdMap"][view_id] = True
-            sheet_row["viewIds"].append(view_id)
-        if view_name and view_name not in sheet_row["_viewNameMap"]:
-            sheet_row["_viewNameMap"][view_name] = True
-            sheet_row["viewNames"].append(view_name)
+        if view_id:
+            if view_id not in sheet_row["viewIds"]:
+                view_name = safe_unicode(view_info.get("name")).strip()
+                sheet_row["viewIds"][view_id] = {
+                    "View Name": view_name,
+                    "Title on Sheet": safe_unicode(view_info.get("titleOnSheet")).strip() or view_name,
+                    "Family and Type": safe_unicode(view_info.get("familyAndType")).strip(),
+                    "Detail Number": safe_unicode(sheet_info.get("detailNumber")).strip(),
+                    "count": 0,
+                }
+            sheet_row["viewIds"][view_id]["count"] += 1
 
 
 def record_keynote_analytics_placement(rows_by_key, entry_by_key, key, source_type, element, target_doc, view_sheet_lookup):
@@ -3261,10 +3284,6 @@ def finalize_keynote_analytics_rows(rows_by_key):
     for row in rows_by_key.values():
         sheet_values = []
         for sheet_row in row.get("_sheetMap", {}).values():
-            sheet_row.pop("_viewIdMap", None)
-            sheet_row.pop("_viewNameMap", None)
-            sheet_row["viewIds"] = sorted(sheet_row.get("viewIds") or [])
-            sheet_row["viewNames"] = sorted(sheet_row.get("viewNames") or [])
             sheet_values.append(sheet_row)
         sheet_values = sorted(sheet_values, key=analytics_sheet_sort_key)
         row["sheetCount"] = len(sheet_values)
