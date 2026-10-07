@@ -176,6 +176,48 @@ except NameError:
     WINDOW_REFS = []
 
 
+# ____________________________________________________________________ LOG ACTION
+def log_action(action, log_status):
+    """Log action to the user's shared JSON log without interrupting the tool."""
+    try:
+        target_doc = revit.doc
+        application = target_doc.Application
+        username = application.Username
+        log_dir = os.path.join(
+            os.path.expanduser("~"),
+            "FFE Inc", "FFE Revit Users - Documents", "00-General",
+            "Revit_Add-Ins", "FFE-pyRevit", "Logs"
+        )
+        log_file = os.path.join(log_dir, username + "_revit_log.json")
+        data_entry = {
+            "datetime": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "username": username,
+            "doc_title": target_doc.Title,
+            "doc_path": target_doc.PathName or "<Untitled>",
+            "revit_version_number": application.VersionNumber,
+            "revit_build": application.VersionBuild,
+            "action": action,
+            "status": log_status,
+        }
+
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        if not os.path.exists(log_file):
+            with open(log_file, "w") as file_obj:
+                json.dump({"action": []}, file_obj)
+
+        with open(log_file, "r+") as file_obj:
+            file_data = json.load(file_obj)
+            file_data.setdefault("action", []).append(data_entry)
+            file_obj.seek(0)
+            json.dump(file_data, file_obj, indent=4)
+            file_obj.truncate()
+        return data_entry
+    except Exception:
+        LOGGER.debug(traceback.format_exc())
+        return None
+
+
 # ____________________________________________________________________ BASIC HELPERS
 def safe_str(value):
     if value is None:
@@ -5430,3 +5472,4 @@ if not focus_existing_window():
     handler.window = window
     WINDOW_REFS.append(window)
     window.Show()
+    log_action("FFE-Keynotes", "Success")
