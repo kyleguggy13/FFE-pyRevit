@@ -5,12 +5,19 @@
     payload: null,
     entries: [],
     filteredEntries: [],
+    currentPage: "dashboard",
+    projects: [],
+    selectedProjectKey: null,
+    selectedModelKey: "all",
+    selectedProjectActions: [],
+    projectPage: 0,
     selectedContributionRange: null,
     activityChart: null,
     resizeTimer: null
   };
 
   var CONTRIBUTION_ROLLING_YEAR = "rollingYear";
+  var PROJECT_PAGE_SIZE = 100;
 
   var STATUS_TITLES = {
     ready: "Log Loaded",
@@ -207,6 +214,44 @@
     return entry.docTitle || entry.docPath || "";
   }
 
+  // Docs: Only explicit cloud paths establish project membership. A local copy
+  // with a similar title is not enough evidence to assign it to a cloud project.
+  function buildModelIdentity(path, title) {
+    var source = text(path).trim().replace(/\\/g, "/");
+    var cloudMatch = source.match(/^(autodesk\s+docs|bim\s+360):\/\/(.*)$/i);
+    var parts = (cloudMatch ? cloudMatch[2] : source).split("/").map(function (part) {
+      return part.trim().replace(/\s+/g, " ");
+    });
+    var projectName = "Unassigned";
+    var projectKey = "unassigned";
+    var normalizedPath = parts.join("/").toLowerCase();
+    var modelLabel = text(title).trim() || shortPath(source) || "Unknown Model";
+    var usablePath = Boolean(source) && !/^<[^>]*>$/.test(source);
+    var validCloudPath = cloudMatch && parts.length >= 2 && parts.every(function (part) {
+      return part && part !== "." && part !== "..";
+    });
+
+    if (validCloudPath) {
+      projectName = parts[0];
+      projectKey = "cloud:" + projectName.toLowerCase();
+      // Prefix changes between BIM 360 and Autodesk Docs do not create a model.
+      normalizedPath = "cloud://" + normalizedPath;
+    } else if (cloudMatch) {
+      normalizedPath = cloudMatch[1].toLowerCase() + "://" + normalizedPath;
+    }
+
+    if (!usablePath) {
+      modelLabel = text(title).trim() || "Unknown Model";
+    }
+
+    return {
+      projectKey: projectKey,
+      projectName: projectName,
+      modelKey: usablePath ? "path:" + normalizedPath : "title:" + modelLabel.toLowerCase().replace(/\s+/g, " "),
+      modelLabel: modelLabel
+    };
+  }
+
   function normalizeEntries(entries) {
     var normalized = [];
 
@@ -216,6 +261,7 @@
 
     entries.forEach(function (entry, index) {
       var parsedDate = parseLocalDate(entry.datetime);
+      var identity = buildModelIdentity(entry.doc_path, entry.doc_title);
       normalized.push({
         index: Number(entry.index === undefined ? index : entry.index),
         datetime: text(entry.datetime),
@@ -226,6 +272,10 @@
         status: text(entry.status),
         docTitle: text(entry.doc_title),
         docPath: text(entry.doc_path),
+        projectKey: identity.projectKey,
+        projectName: identity.projectName,
+        modelKey: identity.modelKey,
+        modelLabel: identity.modelLabel,
         revitVersion: text(entry.revit_version_number),
         revitBuild: text(entry.revit_build),
         familyName: text(entry.family_name),
@@ -1153,17 +1203,17 @@
     return details.join(" | ");
   }
 
-  function renderRecentTable(entries) {
-    var body = byId("recent-table-body");
-    var sorted = entries.slice().sort(function (a, b) {
+  function sortActivityEntries(entries) {
+    return entries.slice().sort(function (a, b) {
       if (b.time !== a.time) {
         return b.time - a.time;
       }
       return b.index - a.index;
     });
-    var visibleRows = sorted.slice(0, 80);
+  }
 
-    setText("recent-subtitle", formatNumber(entries.length) + " entries");
+  function renderActivityRows(bodyId, visibleRows, emptyMessage, useModelLabel) {
+    var body = byId(bodyId);
 
     if (!body) {
       return;
@@ -1176,7 +1226,7 @@
       var emptyCell = document.createElement("td");
       emptyCell.colSpan = 5;
       emptyCell.className = "empty-cell";
-      emptyCell.textContent = "No activity in current filter.";
+      emptyCell.textContent = emptyMessage;
       emptyRow.appendChild(emptyCell);
       body.appendChild(emptyRow);
       return;
@@ -1194,7 +1244,7 @@
 
       appendMainMuted(dateCell, entry.date ? formatDateTime(entry.date, entry.datetime) : (entry.datetime || "-"), "");
       appendMainMuted(actionCell, entry.action, "");
-      appendMainMuted(docCell, docLabel(entry), entry.docPath);
+      appendMainMuted(docCell, useModelLabel ? entry.modelLabel : docLabel(entry), entry.docPath);
 
       pill.className = "status-pill";
       if (tone) {
@@ -1208,13 +1258,264 @@
     });
   }
 
+  function renderRecentTable(entries) {
+    setText("recent-subtitle", formatNumber(entries.length) + " entries");
+    renderActivityRows("recent-table-body", sortActivityEntries(entries).slice(0, 80), "No activity in current filter.", false);
+  }
+
+  // Docs: Group the already-filtered history so sidebar counts, model choices,
+  // and the activity table all describe the same date/action/search scope.
+  function buildProjects(entries) {
+    var projectsByKey = Object.create(null);
+    var projects = [];
+
+    entries.forEach(function (entry) {
+      var project = projectsByKey[entry.projectKey];
+      var model;
+
+      if (!project) {
+        project = {
+          key: entry.projectKey,
+          name: entry.projectName,
+          entries: [],
+          models: [],
+          modelsByKey: Object.create(null)
+        };
+        projectsByKey[project.key] = project;
+        projects.push(project);
+      }
+
+      project.entries.push(entry);
+      model = project.modelsByKey[entry.modelKey];
+      if (!model) {
+        model = { key: entry.modelKey, label: entry.modelLabel, path: entry.docPath, count: 0 };
+        project.modelsByKey[model.key] = model;
+        project.models.push(model);
+      }
+      model.count += 1;
+    });
+
+    projects.forEach(function (project) {
+      project.models.sort(function (a, b) {
+        return a.label.localeCompare(b.label) || a.key.localeCompare(b.key);
+      });
+    });
+    projects.sort(function (a, b) {
+      if (a.key === "unassigned") {
+        return 1;
+      }
+      if (b.key === "unassigned") {
+        return -1;
+      }
+      return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+    });
+    return projects;
+  }
+
+  function getSelectedProject() {
+    return state.projects.filter(function (project) {
+      return project.key === state.selectedProjectKey;
+    })[0] || null;
+  }
+
+  function selectProject(projectKey) {
+    state.selectedProjectKey = projectKey;
+    state.selectedModelKey = "all";
+    state.selectedProjectActions = [];
+    state.projectPage = 0;
+    renderProjects();
+    byId("project-title").focus({ preventScroll: true });
+  }
+
+  function renderProjectList() {
+    var list = byId("project-list");
+    var scrollTop;
+    if (!list) {
+      return;
+    }
+
+    // Rebuilding the buttons temporarily empties the scroll container.
+    scrollTop = list.scrollTop;
+    clearElement(list);
+    setText("projects-subtitle", formatNumber(state.projects.length) + " projects");
+    if (!state.projects.length) {
+      list.appendChild(makeEmptyState("No projects in current filter."));
+      return;
+    }
+
+    state.projects.forEach(function (project) {
+      var button = document.createElement("button");
+      var label = document.createElement("strong");
+      var counts = document.createElement("span");
+      button.type = "button";
+      button.className = "project-list-button";
+      button.setAttribute("aria-pressed", project.key === state.selectedProjectKey ? "true" : "false");
+      label.textContent = project.name;
+      counts.textContent = formatNumber(project.entries.length) + " actions / " + formatNumber(project.models.length) + " models";
+      button.appendChild(label);
+      button.appendChild(counts);
+      button.addEventListener("click", function () {
+        selectProject(project.key);
+      });
+      list.appendChild(button);
+    });
+    list.scrollTop = scrollTop;
+  }
+
+  function renderProjectModelFilter(project) {
+    var select = byId("project-model-filter");
+    if (!select) {
+      return;
+    }
+
+    clearElement(select);
+    select.appendChild(new Option("All models", "all"));
+    if (project) {
+      project.models.forEach(function (model) {
+        // Full paths distinguish models with the same title in different folders.
+        var label = model.label + (model.path ? " - " + model.path : "") + " (" + formatNumber(model.count) + ")";
+        var option = new Option(label, model.key);
+        option.title = label;
+        select.appendChild(option);
+      });
+    }
+    select.value = state.selectedModelKey;
+    select.disabled = !project;
+  }
+
+  function renderProjectActivity(focusedActionKey) {
+    var project = getSelectedProject();
+    var modelEntries = project ? project.entries.filter(function (entry) {
+      return state.selectedModelKey === "all" || entry.modelKey === state.selectedModelKey;
+    }) : [];
+    // Keep counts and available buttons based on the model scope so choosing an
+    // action does not hide the other action types or change their counts.
+    var actionRows = countBy(modelEntries, function (entry) { return entry.action; });
+    var availableActions = actionRows.map(function (row) { return row.label.toLowerCase(); });
+    var selectedActions = state.selectedProjectActions.filter(function (key) {
+      return availableActions.indexOf(key) !== -1;
+    });
+    var entries;
+    if (selectedActions.length !== state.selectedProjectActions.length) {
+      state.projectPage = 0;
+    }
+    state.selectedProjectActions = selectedActions;
+    entries = modelEntries.filter(function (entry) {
+      return !selectedActions.length || selectedActions.indexOf(entry.action.trim().toLowerCase()) !== -1;
+    });
+    var sorted = sortActivityEntries(entries);
+    var maxPage = Math.max(0, Math.ceil(sorted.length / PROJECT_PAGE_SIZE) - 1);
+    var start;
+    var breakdown = byId("project-actions-breakdown");
+
+    // Refresh can shorten a history while the user is viewing its last page.
+    state.projectPage = Math.max(0, Math.min(state.projectPage, maxPage));
+    start = state.projectPage * PROJECT_PAGE_SIZE;
+    setText("project-activity-subtitle", formatNumber(entries.length) + " entries");
+    setText("project-page-range", entries.length
+      ? formatNumber(start + 1) + "-" + formatNumber(Math.min(start + PROJECT_PAGE_SIZE, entries.length)) + " of " + formatNumber(entries.length) + " actions"
+      : "0 of 0 actions");
+    byId("project-previous").disabled = state.projectPage === 0;
+    byId("project-next").disabled = state.projectPage >= maxPage;
+    renderActivityRows(
+      "project-table-body",
+      sorted.slice(start, start + PROJECT_PAGE_SIZE),
+      "No activity in current filter.",
+      true
+    );
+    if (breakdown) {
+      clearElement(breakdown);
+      actionRows.forEach(function (row) {
+        var actionKey = row.label.toLowerCase();
+        var item = document.createElement("button");
+        item.type = "button";
+        item.className = "project-action-count";
+        item.textContent = row.label + ": " + formatNumber(row.count);
+        item.setAttribute("aria-pressed", selectedActions.indexOf(actionKey) !== -1 ? "true" : "false");
+        item.setAttribute("aria-controls", "project-table-body");
+        item.addEventListener("click", function () {
+          var index = state.selectedProjectActions.indexOf(actionKey);
+          if (index === -1) {
+            state.selectedProjectActions.push(actionKey);
+          } else {
+            state.selectedProjectActions.splice(index, 1);
+          }
+          state.projectPage = 0;
+          renderProjectActivity(actionKey);
+        });
+        breakdown.appendChild(item);
+        // Rebuilding the buttons must retain keyboard focus on the toggled item.
+        if (focusedActionKey === actionKey) {
+          item.focus();
+        }
+      });
+      if (!actionRows.length) {
+        setText(breakdown, "No actions in current filter.");
+      }
+    }
+  }
+
+  function renderProjects() {
+    var project = getSelectedProject();
+    if (!project) {
+      project = state.projects[0] || null;
+      state.selectedProjectKey = project ? project.key : null;
+      state.selectedModelKey = "all";
+      state.selectedProjectActions = [];
+      state.projectPage = 0;
+    }
+    if (project && state.selectedModelKey !== "all" && !project.modelsByKey[state.selectedModelKey]) {
+      state.selectedModelKey = "all";
+      state.projectPage = 0;
+    }
+
+    renderProjectList();
+    setText("project-title", project ? project.name : "No projects in current filter");
+    setText("project-action-total", formatNumber(project ? project.entries.length : 0));
+    setText("project-model-total", formatNumber(project ? project.models.length : 0));
+    renderProjectModelFilter(project);
+    renderProjectActivity();
+  }
+
   function renderAll() {
     var filtered = filterEntries(state.entries);
     state.filteredEntries = filtered;
+    state.projects = buildProjects(filtered);
     renderPayloadMeta();
     renderMetrics(filtered);
-    renderCharts(filtered);
+    if (state.currentPage === "dashboard") {
+      renderCharts(filtered);
+    }
     renderRecentTable(filtered);
+    renderProjects();
+  }
+
+  function showPage(page) {
+    var title = byId("page-title");
+    var titles = { dashboard: "User Analytics", recent: "Recent Activity", projects: "Projects" };
+
+    // Keep the WebView document and shared filters alive while changing pages.
+    state.currentPage = page;
+    document.querySelectorAll("[data-analytics-page]").forEach(function (section) {
+      section.hidden = section.getAttribute("data-analytics-page") !== state.currentPage;
+    });
+    setText(title, titles[page]);
+    setText("recent-activity", page === "recent" ? "Back to Analytics" : "Recent Activity");
+    setText("projects-page", page === "projects" ? "Back to Analytics" : "Projects");
+
+    if (page === "dashboard") {
+      // Charts need visible containers to measure their width correctly.
+      renderCharts(state.filteredEntries);
+    }
+    globalScope.scrollTo(0, 0);
+    if (title) {
+      title.focus();
+    }
+  }
+
+  function onFiltersChanged() {
+    state.projectPage = 0;
+    renderAll();
   }
 
   function loadData(payload) {
@@ -1263,7 +1564,9 @@
       globalScope.clearTimeout(state.resizeTimer);
     }
     state.resizeTimer = globalScope.setTimeout(function () {
-      renderActivityChart(state.filteredEntries || []);
+      if (state.currentPage === "dashboard") {
+        renderActivityChart(state.filteredEntries || []);
+      }
     }, 120);
   }
 
@@ -1272,19 +1575,51 @@
     var actionFilter = byId("action-filter");
     var documentSearch = byId("document-search");
     var refreshButton = byId("refresh-data");
+    var recentActivityButton = byId("recent-activity");
+    var projectsButton = byId("projects-page");
+    var modelFilter = byId("project-model-filter");
     var closeButton = byId("close-window");
 
     if (rangeFilter) {
-      rangeFilter.addEventListener("change", renderAll);
+      rangeFilter.addEventListener("change", onFiltersChanged);
     }
     if (actionFilter) {
-      actionFilter.addEventListener("change", renderAll);
+      actionFilter.addEventListener("change", onFiltersChanged);
     }
     if (documentSearch) {
-      documentSearch.addEventListener("input", renderAll);
+      documentSearch.addEventListener("input", onFiltersChanged);
     }
     if (refreshButton) {
       refreshButton.addEventListener("click", refreshData);
+    }
+    if (recentActivityButton) {
+      recentActivityButton.addEventListener("click", function () {
+        showPage(state.currentPage === "recent" ? "dashboard" : "recent");
+      });
+    }
+    if (projectsButton) {
+      projectsButton.addEventListener("click", function () {
+        showPage(state.currentPage === "projects" ? "dashboard" : "projects");
+      });
+    }
+    if (modelFilter) {
+      modelFilter.addEventListener("change", function () {
+        state.selectedModelKey = modelFilter.value;
+        state.projectPage = 0;
+        renderProjectActivity();
+      });
+    }
+    if (byId("project-previous")) {
+      byId("project-previous").addEventListener("click", function () {
+        state.projectPage -= 1;
+        renderProjectActivity();
+      });
+    }
+    if (byId("project-next")) {
+      byId("project-next").addEventListener("click", function () {
+        state.projectPage += 1;
+        renderProjectActivity();
+      });
     }
     if (closeButton) {
       closeButton.addEventListener("click", closeWindow);

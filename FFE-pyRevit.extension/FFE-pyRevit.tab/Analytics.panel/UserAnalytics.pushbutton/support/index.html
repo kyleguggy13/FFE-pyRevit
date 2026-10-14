@@ -15,7 +15,7 @@
           <img class="brand-mark" src="../icon.png" alt="" />
           <div class="brand-copy">
             <p class="eyebrow">FFE-pyRevit</p>
-            <h1>User Analytics</h1>
+            <h1 id="page-title" tabindex="-1">User Analytics</h1>
             <p class="user-line">
               <span data-username>Loading user</span>
               <span class="dot-separator" aria-hidden="true"></span>
@@ -26,6 +26,8 @@
 
         <div class="window-actions">
           <button id="refresh-data" class="secondary-button" type="button">Refresh</button>
+          <button id="recent-activity" class="secondary-button" type="button">Recent Activity</button>
+          <button id="projects-page" class="secondary-button" type="button">Projects</button>
           <button id="close-window" class="primary-button" type="button">Close</button>
         </div>
       </header>
@@ -36,7 +38,7 @@
           <span id="state-message"></span>
         </section>
 
-        <section class="metric-grid" aria-label="Usage summary">
+        <section class="metric-grid" data-analytics-page="dashboard" aria-label="Usage summary">
           <article class="metric-card">
             <span>Total Actions</span>
             <strong id="metric-total">0</strong>
@@ -63,7 +65,7 @@
           </article>
         </section>
 
-        <section class="contribution-panel" aria-labelledby="contribution-title">
+        <section class="contribution-panel" data-analytics-page="dashboard" aria-labelledby="contribution-title">
           <div class="contribution-main">
             <div class="contribution-heading">
               <h2 id="contribution-title">Contribution Graph</h2>
@@ -91,7 +93,7 @@
           <div id="contribution-years" class="contribution-years" aria-label="Contribution years"></div>
         </section>
 
-        <section class="filter-bar" aria-label="Dashboard filters">
+        <section class="filter-bar" aria-label="Activity filters">
           <label class="field-group" for="range-filter">
             <span>Date Range</span>
             <select id="range-filter">
@@ -118,7 +120,7 @@
           </label>
         </section>
 
-        <section class="chart-grid" aria-label="Usage charts">
+        <section class="chart-grid" data-analytics-page="dashboard" aria-label="Usage charts">
           <article class="chart-card chart-card--activity">
             <div class="card-heading">
               <h2>Activity Over Time</h2>
@@ -159,7 +161,7 @@
           </article>
         </section>
 
-        <section class="table-panel" aria-labelledby="recent-title">
+        <section class="table-panel" data-analytics-page="recent" aria-labelledby="recent-title" hidden>
           <div class="card-heading">
             <h2 id="recent-title">Recent Activity</h2>
             <span id="recent-subtitle">0 entries</span>
@@ -181,6 +183,63 @@
                 </tr>
               </tbody>
             </table>
+          </div>
+        </section>
+        <section class="projects-layout" data-analytics-page="projects" aria-label="Project activity" hidden>
+          <aside class="project-sidebar" aria-labelledby="projects-title">
+            <div class="card-heading">
+              <h2 id="projects-title">Forma / ACC Projects</h2>
+              <span id="projects-subtitle">0 projects</span>
+            </div>
+            <div id="project-list" class="project-list" aria-label="Select a project"></div>
+          </aside>
+
+          <div class="project-details">
+            <section class="project-overview" aria-labelledby="project-title">
+              <div class="card-heading">
+                <h2 id="project-title" tabindex="-1">Select a project</h2>
+              </div>
+              <div class="project-summary">
+                <div><span>Project Actions</span><strong id="project-action-total">0</strong></div>
+                <div><span>Project Models</span><strong id="project-model-total">0</strong></div>
+              </div>
+              <label class="field-group project-model-field" for="project-model-filter">
+                <span>Model</span>
+                <select id="project-model-filter" disabled>
+                  <option value="all">All models</option>
+                </select>
+              </label>
+              <h3 class="project-breakdown-title">Action Breakdown</h3>
+              <div id="project-actions-breakdown" class="project-actions-breakdown" role="group" aria-label="Filter model activity by action type"></div>
+            </section>
+
+            <section class="table-panel project-activity" aria-labelledby="project-activity-title">
+              <div class="card-heading">
+                <h2 id="project-activity-title">Model Activity</h2>
+                <span id="project-activity-subtitle">0 entries</span>
+              </div>
+              <div id="project-table-wrap" class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th scope="col">Date</th>
+                      <th scope="col">Action</th>
+                      <th scope="col">Document</th>
+                      <th scope="col">Status</th>
+                      <th scope="col">Detail</th>
+                    </tr>
+                  </thead>
+                  <tbody id="project-table-body">
+                    <tr><td colspan="5" class="empty-cell">Loading usage data...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <nav class="project-pagination" aria-label="Project activity pages">
+                <button id="project-previous" class="secondary-button" type="button" disabled>Previous</button>
+                <span id="project-page-range" role="status" aria-live="polite">0 of 0 actions</span>
+                <button id="project-next" class="secondary-button" type="button" disabled>Next</button>
+              </nav>
+            </section>
           </div>
         </section>
       </main>

@@ -7,7 +7,9 @@ Date    = 06.30.2026
 __________________________________________________________________
 Description:
 Shows a read-only WebView2 dashboard for the current Revit user's
-FFE-pyRevit usage log.
+FFE-pyRevit usage log. Records each new window opening in that log.
+Revit API notes: Compatible with Revit 2025/2026; no model transaction
+is needed. Logging is best-effort and supports no active document.
 __________________________________________________________________
 How-To:
 - Click the button to open the current user's usage dashboard.
@@ -36,7 +38,7 @@ from System import Uri
 from System.Windows import ResizeMode, Thickness, Visibility, Window, WindowStartupLocation
 from System.Windows.Controls import Grid, TextBlock
 
-from pyrevit import forms
+from pyrevit import forms, revit, script
 
 
 # ____________________________________________________________________ VARIABLES
@@ -48,11 +50,50 @@ PATH_INDEX = os.path.join(PATH_SUPPORT, "index.html")
 
 ANALYTICS_NAME = "FFE-pyRevit User Analytics"
 ANALYTICS_VERSION = "v1.0"
+LOGGER = script.get_logger()
 
 try:
     WINDOW_REFS
 except NameError:
     WINDOW_REFS = []
+
+
+# ____________________________________________________________________ LOG ACTION
+def log_action(action, log_status):
+    """Log action to the user's shared JSON log without interrupting the tool."""
+    try:
+        target_doc = revit.doc
+        application = target_doc.Application if target_doc is not None else revit_app
+        username = application.Username
+        log_dir = get_logs_dir()
+        log_file = get_log_file_path(username)
+        data_entry = {
+            "datetime": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "username": username,
+            "doc_title": target_doc.Title if target_doc is not None else "",
+            "doc_path": (target_doc.PathName or "<Untitled>") if target_doc is not None else "<Untitled>",
+            "revit_version_number": application.VersionNumber,
+            "revit_build": application.VersionBuild,
+            "action": action,
+            "status": log_status,
+        }
+
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        if not os.path.exists(log_file):
+            with open(log_file, "w") as file_obj:
+                json.dump({"action": []}, file_obj)
+
+        with open(log_file, "r+") as file_obj:
+            file_data = json.load(file_obj)
+            file_data.setdefault("action", []).append(data_entry)
+            file_obj.seek(0)
+            json.dump(file_data, file_obj, indent=4)
+            file_obj.truncate()
+        return data_entry
+    except Exception:
+        LOGGER.debug(traceback.format_exc())
+        return None
 
 
 # ____________________________________________________________________ HELPERS
@@ -476,3 +517,4 @@ if not focus_existing_window():
     window = UserAnalyticsWindow(WebView2, CoreWebView2CreationProperties)
     WINDOW_REFS.append(window)
     window.Show()
+    log_action("User Analytics", "Success")
