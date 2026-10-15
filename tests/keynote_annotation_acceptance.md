@@ -1,6 +1,14 @@
-# Revit 2025/2026 acceptance checks
+# Revit 2024/2025/2026 acceptance checks
 
 Use disposable projects after deploying `supabase/keynote_manager.sql`, `supabase/keynote_annotation_library.sql`, and `supabase/keynote_library_identity.sql` in that order, then running both annotation and identity SQL acceptance scripts. Reapply identity last when rerunning older migrations.
+
+## WebView2 startup compatibility
+
+- Fully close and restart Revit after deploying the loader fix or upgrading pyRevit; a pyRevit reload is insufficient. Run these checks in Revit 2024 with pyRevit 7, then repeat in Revit 2025 and 2026. Use disposable projects and note the Revit/pyRevit versions with the results.
+- Open Keynotes before opening pyRevit's output window. Confirm the editor loads, text-file and Generic Annotation libraries load, a test description can be edited and saved, and closing/reopening works. Save only disposable notes; confirm the existing browser profile and window behavior remain usable.
+- Restart Revit, open pyRevit's output window first, then repeat. Also open another FFE tool that hosts WebView2 before Keynotes. Keynotes must reuse compatible loaded Core/WPF assemblies without loading another SDK version. Check that the previously opened tool and output window still work after Keynotes opens.
+- With an unavailable pyRevit SDK pair in an isolated test installation, verify Keynotes uses Revit's complete pair. Do not alter Autodesk DLLs or the production pyRevit installation to simulate this case; automated tests cover missing and partial installations.
+- For incompatible bindings or browser initialization failures, verify the visible error retains the original exception, lists loaded DLL identities/paths, and explains the full restart requirement. After restarting, a persistent conflict must remain diagnostic rather than being hidden by another version load. Automated tests cover deliberate conflicts without polluting a running Revit session.
 
 ## Model-stored library identity
 

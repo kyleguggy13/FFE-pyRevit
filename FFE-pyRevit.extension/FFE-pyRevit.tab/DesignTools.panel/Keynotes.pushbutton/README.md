@@ -10,6 +10,16 @@ Open the tool from the FFE-pyRevit ribbon. The manager opens in its own window a
 
 Click **About** beside **Settings** to view the manager version, Revit document name, keynote source path, encoding/storage information, and entry count. The change indicator stays in the main header. If the wrong document is listed, switch back to Revit, activate the correct model, and reopen or refresh the manager.
 
+### WebView2 compatibility (Revit 2024 and pyRevit 7)
+
+After installing the WebView2 compatibility fix or upgrading pyRevit, **fully close and restart Revit** before opening Keynotes. A pyRevit reload cannot replace DLLs already loaded in the Revit process.
+
+Keynotes reuses a compatible loaded WebView2 Core/WPF pair. When neither is loaded, it prefers pyRevit's runtime-specific pair (`netfx` for Revit 2024; `netcore` for Revit 2025/2026), falling back to Revit's pair if pyRevit's pair is unavailable. It verifies both the assembly identities and the WPF control's actual Core binding instead of mixing SDK versions.
+
+The error `Method not found: ...CoreWebView2EnvironmentOptions..ctor(...)` can occur when a newer WPF DLL binds to an older Core DLL. Revit 2024 ships SDK `1.0.1343.22`; the inspected pyRevit 7 installation ships `1.0.4129.50`. Updating the browser runtime alone does not correct a mismatch between these managed DLLs.
+
+If initialization still fails after a full restart, capture the complete error, including the reported DLL versions and paths. Those details identify which installation or add-in supplied each assembly. Do not replace Autodesk's installation DLLs. See `tests/keynote_annotation_acceptance.md` for the Revit 2024/2025/2026 validation steps.
+
 ### New Project Setup
 
 Save the Revit project first, then click **Refresh** if the setup page asks you to save. Choose a keynote type and click **Continue**:
