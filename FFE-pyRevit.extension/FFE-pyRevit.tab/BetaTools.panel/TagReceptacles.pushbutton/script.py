@@ -1,60 +1,42 @@
 # -*- coding: utf-8 -*-
+"""Convert the original v8.3 receptacle workflow into a standalone command.
+
+Key behaviors: report-only Preview, best-effort Write, existing-tag protection,
+and automatic left/right text alignment using the fixed FFE receptacle families.
+Revit API notes: targets Revit 2025/2026; uses ElementId.Value and native
+transactions. Runs on pyRevit's default IronPython engine with WPF forms.
+Design decisions: keep the reference algorithm intact; isolate settings and
+transaction management so Dynamo is not required and Write has one Undo step.
+"""
+
 __title__     = "Tag Receptacles"
 __version__   = "Version = v0.1"
 __doc__       = """Version = v0.1
 Date    = 11.13.2026
 ______________________________________________________________
 Description:
--> 
+-> Automatically tag visible FFE receptacles using the Dynamo v8.3 rules.
+-> Existing tags are not modified.
 ______________________________________________________________
 How-to:
--> 
+-> Open a floor/engineering plan or a sheet containing eligible plans.
+-> Choose Preview or Write and paper-inch dimensions.
+-> FFE_Tag_EF_Receptacle (LA)/(RA) is selected automatically per tag.
+-> Review the results and any placement warnings in the pyRevit output.
 ______________________________________________________________
 Last update:
 - [11.13.2026] - v0.1 BETA RELEASE
 ______________________________________________________________
 Author: Joshua Zolla/Kyle Guggenheim"""
 
-# ____________________________________________________________________ IMPORTS (SYSTEM)
-from System import String
-from collections import defaultdict, deque
-import cgi
-import time
-
-
-# ____________________________________________________________________ IMPORTS (AUTODESK)
-import clr
-clr.AddReference("System")
-
-from Autodesk.Revit.DB import *
-from Autodesk.Revit.DB.ExtensibleStorage import Schema
-from Autodesk.Revit.DB.Mechanical import DuctSystemType
-
-
-# ____________________________________________________________________ IMPORTS (PYREVIT)
-from pyrevit import revit, UI, script, forms
-from pyrevit.script import output
-
-
-# ____________________________________________________________________ VARIABLES
-app         = __revit__.Application
-uidoc       = __revit__.ActiveUIDocument
-doc         = __revit__.ActiveUIDocument.Document
-selection   = uidoc.Selection
-
-output_window = output.get_output()
-
-
-
-
-# ____________________________________________________________________ DYNAMO SCRIPT
+# ____________________________________________________________________ SETUP
 import clr
 import math
+import os
 import traceback
 
+clr.AddReference("System")
 clr.AddReference("RevitAPI")
-clr.AddReference("RevitAPIUI")
-clr.AddReference("RevitServices")
 
 from System.Collections.Generic import List
 from Autodesk.Revit.DB import (
@@ -62,21 +44,157 @@ from Autodesk.Revit.DB import (
     BuiltInParameter, FamilySymbol, IndependentTag,
     Reference, XYZ, LocationPoint, TagOrientation,
     LeaderEndCondition, ViewType, ViewSheet, StorageType,
-    SubTransaction, SpatialElementBoundaryOptions,
+    SubTransaction, Transaction, TransactionGroup, TransactionStatus,
+    SpatialElementBoundaryOptions,
     RevitLinkInstance
 )
-from RevitServices.Persistence import DocumentManager
-from RevitServices.Transactions import TransactionManager
+from pyrevit import forms, script
+
+
+LA_TAG_FAMILY = "FFE_Tag_EF_Receptacle (LA)"
+RA_TAG_FAMILY = "FFE_Tag_EF_Receptacle (RA)"
+DEFAULT_LANDING = 0.074
+DEFAULT_OFFSET = 0.375
+
+
+# ____________________________________________________________________ SETTINGS UI
+def ValidateSettings(write, landing, offset):
+    """Return validated inputs; dimensions are positive, finite paper inches."""
+    dimensions = []
+    for label, value in [("Landing length", landing), ("Diagonal offset", offset)]:
+        try:
+            number = float(value)
+        except (ValueError, TypeError, OverflowError):
+            raise ValueError("{} must be a positive number in paper inches.".format(label))
+        if math.isnan(number) or math.isinf(number) or number <= 0:
+            raise ValueError("{} must be a positive, finite number in paper inches.".format(label))
+        dimensions.append(number)
+
+    return {"write": bool(write),
+            "landing": dimensions[0], "offset": dimensions[1]}
+
+
+class SettingsDialog(forms.WPFWindow):
+    """Collect mode and dimensions; text alignment and tag families are automatic."""
+
+    def __init__(self):
+        forms.WPFWindow.__init__(
+            self, os.path.join(os.path.dirname(__file__), "Settings.xaml"))
+        self.Settings = None
+        self.landingText.Text = str(DEFAULT_LANDING)
+        self.offsetText.Text = str(DEFAULT_OFFSET)
+        self.writeMode.IsChecked = True
+
+    def RunClick(self, sender, args):
+        """Keep the dialog open when inputs need correction."""
+        try:
+            settings = ValidateSettings(
+                self.writeMode.IsChecked,
+                self.landingText.Text, self.offsetText.Text)
+        except ValueError as ex:
+            self.errorText.Text = str(ex)
+            return
+        self.Settings = settings
+        self.Close()
+
+    def CancelClick(self, sender, args):
+        """Leave Settings unset so Cancel, Escape, and window close are no-ops."""
+        self.Close()
+
+
+# ____________________________________________________________________ TRANSACTIONS
+def RollBackIfStarted(transaction):
+    """Roll back an active scope; a rollback failure must stop the workflow."""
+    if transaction is not None and transaction.GetStatus() == TransactionStatus.Started:
+        if transaction.RollBack() != TransactionStatus.RolledBack:
+            raise RuntimeError("Revit could not roll back the tagging transaction.")
+
+
+def CreateTags(doc, jobs, logs, errors):
+    """Create the original job geometry, publishing IDs only after group commit.
+
+Each tag has a subtransaction so unsupported elements can be reported locally.
+The outer group also protects against a failed final commit or assimilation.
+"""
+    createdIds = List[ElementId]()
+    committedLogs = []
+    group = TransactionGroup(doc, "Tag Receptacles")
+    transaction = None
+    try:
+        if group.Start() != TransactionStatus.Started:
+            raise RuntimeError("Could not start the Tag Receptacles transaction group.")
+        transaction = Transaction(doc, "Create receptacle tags")
+        if transaction.Start() != TransactionStatus.Started:
+            raise RuntimeError("Could not start the receptacle tag transaction.")
+
+        # Resolve any native Revit failure dialog before attempting to finish
+        # the group; a modeless pending commit cannot be assimilated safely.
+        options = transaction.GetFailureHandlingOptions()
+        options.SetForcedModalHandling(True)
+        transaction.SetFailureHandlingOptions(options)
+
+        for job in jobs:
+            (view, element, symbol, point, elbow, head,
+             direction, tagType, issues) = job
+            sub = SubTransaction(doc)
+            try:
+                if sub.Start() != TransactionStatus.Started:
+                    raise RuntimeError("Could not start the tag subtransaction.")
+                if not symbol.IsActive:
+                    symbol.Activate()
+                    doc.Regenerate()
+
+                reference = Reference(element)
+                tag = IndependentTag.Create(
+                    doc, symbol.Id, view.Id, reference, True,
+                    TagOrientation.Horizontal, head)
+                doc.Regenerate()
+                tag.TagHeadPosition = head
+                doc.Regenerate()
+                if tag.CanLeaderEndConditionBeAssigned(LeaderEndCondition.Free):
+                    tag.LeaderEndCondition = LeaderEndCondition.Free
+                    tag.SetLeaderEnd(reference, point)
+                tag.SetLeaderElbow(reference, elbow)
+                doc.Regenerate()
+                if sub.Commit() != TransactionStatus.Committed:
+                    raise RuntimeError("Revit did not commit the tag subtransaction.")
+            except Exception as ex:
+                errors.append("ERROR {} | {}".format(element.Id.Value, ex))
+                RollBackIfStarted(sub)
+                continue
+            finally:
+                sub.Dispose()
+
+            createdIds.Add(tag.Id)
+            committedLogs.append(
+                "CREATED | Element {} | Tag {} | {} | {}".format(
+                    element.Id.Value, tag.Id.Value, direction, tagType))
+
+        if transaction.Commit() != TransactionStatus.Committed:
+            raise RuntimeError("Revit did not commit the receptacle tag transaction.")
+        if group.Assimilate() != TransactionStatus.Committed:
+            raise RuntimeError("Revit did not commit the Tag Receptacles transaction group.")
+    except Exception:
+        # Roll back the group even if closing the inner transaction fails.
+        try:
+            RollBackIfStarted(transaction)
+        finally:
+            RollBackIfStarted(group)
+        raise
+    finally:
+        try:
+            if transaction is not None:
+                transaction.Dispose()
+        finally:
+            group.Dispose()
+
+    logs.extend(committedLogs)
+    return createdIds
 
 
 # ==========================================================
 # FFE AUTOMATIC RECEPTACLE TAGGING - VERSION 8.3
-# Revit 2026 / Dynamo CPython3
-#
-# IN[0] LA tag family name
-# IN[1] Write True/False
-# IN[2] Landing length - paper inches
-# IN[3] Diagonal offset - paper inches
+# Reference algorithm preserved from Dynamo; Revit 2025/2026 / pyRevit.
 #
 # ALL FFE receptacles receive a tag:
 #
@@ -102,17 +220,19 @@ from RevitServices.Transactions import TransactionManager
 # ==========================================================
 
 
-def main():
+def RunTagging(doc, uidoc, settings):
+    """Run the reference v8.3 algorithm using explicit host and settings inputs."""
 
-    doc = DocumentManager.Instance.CurrentDBDocument
     active = doc.ActiveView
 
-    LA_FAMILY = str(IN[0]).strip()
-    RA_FAMILY = LA_FAMILY.replace("(LA)", "(RA)")
+    settings = ValidateSettings(settings["write"],
+                                settings["landing"], settings["offset"])
+    LA_FAMILY = LA_TAG_FAMILY
+    RA_FAMILY = RA_TAG_FAMILY
 
-    WRITE = IN[1] == True
-    LANDING = float(IN[2])
-    OFFSET = float(IN[3])
+    WRITE = settings["write"]
+    LANDING = settings["landing"]
+    OFFSET = settings["offset"]
 
     STANDARD_HEIGHT = 18.0
     HEIGHT_TOLERANCE = 0.1
@@ -147,12 +267,6 @@ def main():
     COST_INWARD = 120.0
     COST_ROOM = 2.0
     COST_RA_DEFAULT = 0.5
-
-    if "(LA)" not in LA_FAMILY:
-        return ["ERROR: Supply the LA tag family name."]
-
-    if LANDING <= 0 or OFFSET <= 0:
-        return ["ERROR: Leader dimensions must be positive."]
 
     logs = []
     errors = []
@@ -504,6 +618,7 @@ def main():
     if missing:
         return [
             "ERROR: Missing tag types.",
+            "Required families: {} and {}.".format(LA_FAMILY, RA_FAMILY),
             ", ".join(missing)
         ]
 
@@ -701,6 +816,8 @@ def main():
     # ======================================================
 
     def make_option(item, direction, view):
+        # LA/RA describe text alignment. A tag to the right of the device uses
+        # LA so its leader meets the left text edge; a tag to the left uses RA.
         sign = 1.0 if direction == "LA" else -1.0
 
         diagonal = model_distance(
@@ -1353,96 +1470,8 @@ def main():
 
     if WRITE and jobs:
 
-        TransactionManager.Instance.EnsureInTransaction(doc)
-
-        try:
-            for job in jobs:
-                (
-                    view,
-                    element,
-                    symbol,
-                    point,
-                    elbow,
-                    head,
-                    direction,
-                    tag_type,
-                    issues
-                ) = job
-
-                sub = SubTransaction(doc)
-
-                try:
-                    sub.Start()
-
-                    if not symbol.IsActive:
-                        symbol.Activate()
-                        doc.Regenerate()
-
-                    ref = Reference(element)
-
-                    tag = IndependentTag.Create(
-                        doc,
-                        symbol.Id,
-                        view.Id,
-                        ref,
-                        True,
-                        TagOrientation.Horizontal,
-                        head
-                    )
-
-                    doc.Regenerate()
-
-                    tag.TagHeadPosition = head
-                    doc.Regenerate()
-
-                    if tag.CanLeaderEndConditionBeAssigned(
-                        LeaderEndCondition.Free
-                    ):
-                        tag.LeaderEndCondition = (
-                            LeaderEndCondition.Free
-                        )
-
-                        tag.SetLeaderEnd(
-                            ref,
-                            point
-                        )
-
-                    tag.SetLeaderElbow(
-                        ref,
-                        elbow
-                    )
-
-                    doc.Regenerate()
-                    sub.Commit()
-
-                    created_ids.Add(tag.Id)
-                    created += 1
-
-                    logs.append(
-                        "CREATED | Element {} | Tag {} | "
-                        "{} | {}".format(
-                            eid(element),
-                            eid(tag),
-                            direction,
-                            tag_type
-                        )
-                    )
-
-                except Exception as ex:
-                    try:
-                        sub.RollBack()
-                    except:
-                        pass
-
-                    errors.append(
-                        "ERROR {} | {}".format(
-                            eid(element),
-                            str(ex)
-                        )
-                    )
-
-        finally:
-            TransactionManager.Instance.TransactionTaskDone()
+        created_ids = CreateTags(doc, jobs, logs, errors)
+        created = created_ids.Count
 
     # ======================================================
     # AUTOMATICALLY SELECT NEWLY CREATED TAGS
@@ -1453,12 +1482,6 @@ def main():
     if WRITE and created_ids.Count > 0:
 
         try:
-            uiapp = (
-                DocumentManager.Instance.CurrentUIApplication
-            )
-
-            uidoc = uiapp.ActiveUIDocument
-
             uidoc.Selection.SetElementIds(
                 created_ids
             )
@@ -1525,11 +1548,36 @@ def main():
     return report
 
 
-try:
-    OUT = main()
+# ____________________________________________________________________ ENTRY / REPORTING
+def RunCommand():
+    """Get settings and print results, including startup and fatal diagnostics."""
+    try:
+        uidoc = __revit__.ActiveUIDocument
+        if uidoc is None:
+            print("ERROR: Open a Revit project before running Tag Receptacles.")
+            return
+        doc = uidoc.Document
+        if doc.IsFamilyDocument:
+            print("ERROR: Open a project floor plan or sheet, not a family document.")
+            return
 
-except Exception:
-    OUT = [
-        "FATAL SCRIPT ERROR",
-        traceback.format_exc()
-    ]
+        dialog = SettingsDialog()
+        dialog.ShowDialog()
+        settings = dialog.Settings
+        if settings is None:
+            return
+        if settings["write"] and (doc.IsReadOnly or doc.IsModifiable):
+            print("ERROR: The project is read-only or already has an open transaction. "
+                  "Finish the current operation or choose Preview.")
+            return
+
+        script.get_output()
+        for line in RunTagging(doc, uidoc, settings):
+            print(line)
+    except Exception:
+        print("FATAL SCRIPT ERROR")
+        print(traceback.format_exc())
+
+
+if __name__ == "__main__":
+    RunCommand()
