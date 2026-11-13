@@ -2,16 +2,16 @@
 """Convert the original v8.3 receptacle workflow into a standalone command.
 
 Key behaviors: report-only Preview, best-effort Write, existing-tag protection,
-and automatic left/right text alignment using the fixed FFE receptacle families.
+automatic text alignment, flexible leaders, and aligned stacks for nearby devices.
 Revit API notes: targets Revit 2025/2026; uses ElementId.Value and native
 transactions. Runs on pyRevit's default IronPython engine with WPF forms.
-Design decisions: keep the reference algorithm intact; isolate settings and
-transaction management so Dynamo is not required and Write has one Undo step.
+Design decisions: refine the original layout with length variations and group
+stacks. Stacks can vary leader slope and height. Write has one Undo step.
 """
 
 __title__     = "Tag Receptacles"
-__version__   = "Version = v0.1"
-__doc__       = """Version = v0.1
+__version__   = "Version = v0.3"
+__doc__       = """Version = v0.3
 Date    = 11.13.2026
 ______________________________________________________________
 Description:
@@ -22,9 +22,13 @@ How-to:
 -> Open a floor/engineering plan or a sheet containing eligible plans.
 -> Choose Preview or Write and paper-inch dimensions.
 -> FFE_Tag_EF_Receptacle (LA)/(RA) is selected automatically per tag.
+-> Enter preferred lengths; conflicting tags can use 75%-200% of those values.
+-> Nearby receptacles can use aligned stacks with extra vertical spacing.
 -> Review the results and any placement warnings in the pyRevit output.
 ______________________________________________________________
 Last update:
+- [11.13.2026] - v0.3 Aligned tag stacks for nearby receptacles.
+- [11.13.2026] - v0.2 Flexible offset and landing lengths to reduce collisions.
 - [11.13.2026] - v0.1 BETA RELEASE
 ______________________________________________________________
 Author: Joshua Zolla/Kyle Guggenheim"""
@@ -55,6 +59,9 @@ LA_TAG_FAMILY = "FFE_Tag_EF_Receptacle (LA)"
 RA_TAG_FAMILY = "FFE_Tag_EF_Receptacle (RA)"
 DEFAULT_LANDING = 0.074
 DEFAULT_OFFSET = 0.375
+OFFSET_FACTORS = (1.0, 0.75, 1.25, 1.5, 2.0)
+LANDING_FACTORS = (1.0, 0.75, 1.5, 2.0)
+STACK_MAX_GROUP_SIZE = 12
 
 
 # ____________________________________________________________________ SETTINGS UI
@@ -194,7 +201,7 @@ The outer group also protects against a failed final commit or assimilation.
 
 # ==========================================================
 # FFE AUTOMATIC RECEPTACLE TAGGING - VERSION 8.3
-# Reference algorithm preserved from Dynamo; Revit 2025/2026 / pyRevit.
+# Based on Dynamo v8.3 with bounded leader-length refinement; Revit 2025/2026.
 #
 # ALL FFE receptacles receive a tag:
 #
@@ -221,7 +228,7 @@ The outer group also protects against a failed final commit or assimilation.
 
 
 def RunTagging(doc, uidoc, settings):
-    """Run the reference v8.3 algorithm using explicit host and settings inputs."""
+    """Classify receptacles and refine the v8.3 layout with flexible leader lengths."""
 
     active = doc.ActiveView
 
@@ -257,6 +264,11 @@ def RunTagging(doc, uidoc, settings):
 
     PASSES = 16
     PAIR_PASSES = 3
+    FLEX_PASSES = 4
+    COST_LENGTH_CHANGE = 4.0
+    STACK_ROW_GAP = 0.06  # Paper inches between estimated text rectangles.
+    COST_UNSTACKED_GROUP = 8.0  # Aesthetic preference, below any collision cost.
+    COST_STACK_FAN_PREFERENCE = 0.5
 
     # Collision priorities
     COST_CROSSING = 1200.0
@@ -280,6 +292,8 @@ def RunTagging(doc, uidoc, settings):
     la_count = 0
     ra_count = 0
     review_count = 0
+    adjusted_count = 0
+    stacked_count = 0
 
     type_counts = {
         "PANEL/CIRCUIT": 0,
@@ -815,17 +829,23 @@ def RunTagging(doc, uidoc, settings):
     # PROPOSED TAG GEOMETRY
     # ======================================================
 
-    def make_option(item, direction, view):
+    def make_option(item, direction, view, landing_inches=None, offset_inches=None,
+                    head_xy=None):
+        """Build one alignment/length option in view coordinates and paper inches."""
+        if landing_inches is None:
+            landing_inches = LANDING
+        if offset_inches is None:
+            offset_inches = OFFSET
         # LA/RA describe text alignment. A tag to the right of the device uses
         # LA so its leader meets the left text edge; a tag to the left uses RA.
         sign = 1.0 if direction == "LA" else -1.0
 
         diagonal = model_distance(
-            OFFSET, view
+            offset_inches, view
         )
 
         landing = model_distance(
-            LANDING, view
+            landing_inches, view
         )
 
         if item["tag_type"] in [
@@ -845,11 +865,18 @@ def RunTagging(doc, uidoc, settings):
         vr = view.RightDirection
         vu = view.UpDirection
 
-        elbow = point.Add(
-            vr.Multiply(diagonal * sign)
-        ).Add(
-            vu.Multiply(diagonal)
-        )
+        if head_xy is None:
+            elbow = point.Add(vr.Multiply(diagonal * sign)).Add(vu.Multiply(diagonal))
+        else:
+            # A shared text column requires independent horizontal and vertical
+            # offsets. Keep the original horizontal landing and family correction.
+            origin = xy(point, view)
+            elbow = point.Add(vr.Multiply(model_distance(
+                head_xy[0] - origin[0] - landing_inches * sign, view
+            ))).Add(vu.Multiply(model_distance(
+                head_xy[1] - origin[1] - correction, view
+            )))
+            offset_inches = abs(head_xy[1] - origin[1] - correction)
 
         head = elbow.Add(
             vr.Multiply(landing * sign)
@@ -863,24 +890,41 @@ def RunTagging(doc, uidoc, settings):
         elbow_xy = xy(elbow, view)
 
         landing_xy = (
-            elbow_xy[0] + LANDING * sign,
+            elbow_xy[0] + landing_inches * sign,
             elbow_xy[1]
         )
+        horizontalOffset = abs(elbow_xy[0] - origin_xy[0])
+        offsetDeparture = abs(offset_inches / OFFSET - 1.0)
+        if head_xy is not None:
+            offsetDeparture = (offsetDeparture + abs(horizontalOffset / OFFSET - 1.0)) / 2.0
+
+        rect = proposed_rect(head, direction, item["lines"], view)
+        # Include text and both leader segments. Padding also preserves the
+        # original nearby-device penalty when leaders themselves do not touch.
+        bounds = expand_rect((
+            min(rect[0], origin_xy[0], elbow_xy[0], landing_xy[0]),
+            min(rect[1], origin_xy[1], elbow_xy[1], landing_xy[1]),
+            max(rect[2], origin_xy[0], elbow_xy[0], landing_xy[0]),
+            max(rect[3], origin_xy[1], elbow_xy[1], landing_xy[1])
+        ), NEIGHBOR_DISTANCE / 2.0 + 1e-9)
 
         return {
             "direction": direction,
+            "landing": landing_inches,
+            "offset": offset_inches,
+            "horizontal_offset": horizontalOffset,
+            "stacked": head_xy is not None,
+            "length_cost": COST_LENGTH_CHANGE * (
+                abs(landing_inches / LANDING - 1.0) +
+                offsetDeparture),
+            "bounds": bounds,
             "symbol": tag_types[direction][
                 item["tag_type"]
             ],
             "elbow": elbow,
             "head": head,
             "origin_xy": origin_xy,
-            "rect": proposed_rect(
-                head,
-                direction,
-                item["lines"],
-                view
-            ),
+            "rect": rect,
             "segments": [
                 (origin_xy, elbow_xy),
                 (elbow_xy, landing_xy)
@@ -943,6 +987,10 @@ def RunTagging(doc, uidoc, settings):
     def pair_score(a, oa, b, ob):
         score = 0.0
         issues = []
+
+        # Distant options cannot collide or incur the nearby-device penalty.
+        if not rect_overlap(oa["bounds"], ob["bounds"]):
+            return score, issues
 
         if leader_crosses(oa, ob):
             score += COST_CROSSING
@@ -1061,6 +1109,16 @@ def RunTagging(doc, uidoc, settings):
 
             return score
 
+        def PairLocalScore(i, di, j, dj, choices):
+            """Score only terms changed by a pair move instead of the whole view."""
+            score = (items[i]["static"][di][0] + items[j]["static"][dj][0]
+                     + pair_value(i, di, j, dj))
+            for k in range(n):
+                if k != i and k != j:
+                    score += pair_value(i, di, k, choices[k])
+                    score += pair_value(j, dj, k, choices[k])
+            return score
+
         starts = [
             ["LA"] * n,
             ["RA"] * n,
@@ -1117,7 +1175,7 @@ def RunTagging(doc, uidoc, settings):
                 for i in range(n):
                     for j in range(i + 1, n):
 
-                        current = total_score(choices)
+                        current = PairLocalScore(i, choices[i], j, choices[j], choices)
                         best_pair = None
                         pair_best = current
 
@@ -1127,10 +1185,7 @@ def RunTagging(doc, uidoc, settings):
                         for di in ["LA", "RA"]:
                             for dj in ["LA", "RA"]:
 
-                                choices[i] = di
-                                choices[j] = dj
-
-                                trial = total_score(choices)
+                                trial = PairLocalScore(i, di, j, dj, choices)
 
                                 if trial < pair_best - 1e-7:
                                     pair_best = trial
@@ -1152,26 +1207,253 @@ def RunTagging(doc, uidoc, settings):
                 best_value = value
                 best = list(choices)
 
+        # Retain the preferred-length solution unless a candidate reduces its
+        # collision cost. Avoid precomputing every combination of flexible
+        # lengths for every pair: only compare against the current placements.
+        selected = [items[i]["options"][best[i]] for i in range(n)]
+        for i, item in enumerate(items):
+            for direction in ("LA", "RA"):
+                item["options"][direction]["static"] = item["static"][direction]
+
+        def PlacementScore(i, option):
+            """Compute the affected score and whether this tag has any conflict."""
+            score = option["static"][0] + option["length_cost"]
+            hasConflict = bool(option["static"][1])
+            for j in range(n):
+                if j == i:
+                    continue
+                value, issues = pair_score(items[i], option, items[j], selected[j])
+                score += value
+                hasConflict = hasConflict or bool(issues)
+            return score, hasConflict
+
+        def BuildFlexibleOptions(item):
+            """Cache bounded alternatives only for tags involved in a conflict."""
+            if "flex_options" not in item:
+                options = []
+                for offsetFactor in OFFSET_FACTORS:
+                    for landingFactor in LANDING_FACTORS:
+                        for direction in ("LA", "RA"):
+                            if offsetFactor == 1.0 and landingFactor == 1.0:
+                                option = item["options"][direction]
+                            else:
+                                option = make_option(
+                                    item, direction, view,
+                                    LANDING * landingFactor, OFFSET * offsetFactor)
+                                option["static"] = static_score(item, option, tags, equipment)
+                            options.append(option)
+                item["flex_options"] = options
+            return item["flex_options"]
+
+        for iteration in range(FLEX_PASSES):
+            changed = False
+            order = list(range(n))
+            if iteration % 2:
+                order.reverse()
+            for i in order:
+                option = selected[i]
+                currentScore, hasConflict = PlacementScore(i, option)
+                if not hasConflict and option["length_cost"] == 0:
+                    continue
+                chosen = option
+                for candidate in BuildFlexibleOptions(items[i]):
+                    score, unused = PlacementScore(i, candidate)
+                    if score < currentScore - 1e-7:
+                        chosen, currentScore = candidate, score
+                if chosen is not option:
+                    selected[i] = chosen
+                    changed = True
+            if not changed:
+                break
+
+        def BuildNearbyGroups():
+            """Find bounded groups in paper space without chaining along a whole wall."""
+            positions = [xy(item["point"], view) for item in items]
+            remaining = set(range(n))
+            groups = []
+            for seed in range(n):
+                if seed not in remaining:
+                    continue
+                group = [seed]
+                remaining.remove(seed)
+                cursor = 0
+                while cursor < len(group) and len(group) < STACK_MAX_GROUP_SIZE:
+                    anchor = positions[group[cursor]]
+                    for j in sorted(remaining):
+                        point = positions[j]
+                        if math.hypot(point[0] - anchor[0], point[1] - anchor[1]) > NEIGHBOR_DISTANCE:
+                            continue
+                        xs = [positions[k][0] for k in group] + [point[0]]
+                        ys = [positions[k][1] for k in group] + [point[1]]
+                        if max(xs) - min(xs) > 1.5 or max(ys) - min(ys) > 1.5:
+                            continue
+                        group.append(j)
+                        remaining.remove(j)
+                        if len(group) >= STACK_MAX_GROUP_SIZE:
+                            break
+                    cursor += 1
+                if len(group) > 1:
+                    groups.append(tuple(sorted(group)))
+            return groups, positions
+
+        groups, positions = BuildNearbyGroups()
+        stackCache = {}
+
+        def StackStyleCost(group, options):
+            """Prefer compact columns over splitting a pair into two singleton stacks."""
+            if not all(options[i]["stacked"] for i in group):
+                return COST_UNSTACKED_GROUP * len(group)
+            columns = {}
+            for i in group:
+                headX, headY = xy(options[i]["head"], view)
+                key = (options[i]["direction"], round(headX, 8))
+                columns.setdefault(key, []).append((headY, options[i]["rect"]))
+            score = 6.0 * (len(columns) - 1)
+            # Favor the upper-right / lower-left fan-out from the reference
+            # arrangement when room clearance and collision scores are comparable.
+            for i in group:
+                vertical = (xy(options[i]["elbow"], view)[1] - positions[i][1])
+                if ((options[i]["direction"] == "LA" and vertical < 0)
+                        or (options[i]["direction"] == "RA" and vertical > 0)):
+                    score += COST_STACK_FAN_PREFERENCE
+            for rows in columns.values():
+                rows.sort(key=lambda row: row[0])
+                for k in range(1, len(rows)):
+                    lowerY, lowerRect = rows[k - 1]
+                    upperY, upperRect = rows[k]
+                    expectedGap = ((lowerRect[3] - lowerRect[1] + upperRect[3] - upperRect[1])
+                                   / 2.0 + STACK_ROW_GAP)
+                    score += COST_UNSTACKED_GROUP * max(0.0, (upperY - lowerY) / expectedGap - 1.0)
+            return score
+
+        def GroupScore(group, options):
+            """Score all changed static and pair terms once, including outside tags."""
+            members = set(group)
+            score = sum(options[i]["static"][0] + options[i]["length_cost"] for i in group)
+            for i in group:
+                for j in range(n):
+                    if j == i or (j in members and j < i):
+                        continue
+                    other = options[j] if j in members else selected[j]
+                    score += pair_score(items[i], options[i], items[j], other)[0]
+            # Prefer an ordered column over scattered but equally clear tags.
+            # Even a small collision costs far more than this style preference.
+            return score + StackStyleCost(group, options)
+
+        def BuildStack(group, members, direction, verticalSign, distanceFactor):
+            """Align text heads, space rows by label height, and fan leaders in order."""
+            key = (group, tuple(members), direction, verticalSign, distanceFactor)
+            if key in stackCache:
+                return stackCache[key]
+            sign = 1.0 if direction == "LA" else -1.0
+            xs = [positions[i][0] for i in group]
+            columnX = ((max(xs) if sign > 0 else min(xs))
+                       + sign * (OFFSET * distanceFactor + LANDING))
+            # Rank by a 45-degree routing projection, rather than element ID,
+            # so adjacent devices fan toward their rows without swapping order.
+            ordered = sorted(members, key=lambda i: (
+                -(positions[i][1] - verticalSign * sign * positions[i][0]),
+                items[i]["id"]))
+            rowOrder = list(reversed(ordered)) if verticalSign > 0 else ordered
+            first = rowOrder[0]
+            base = items[first]["options"][direction]
+            correction = xy(base["head"], view)[1] - xy(base["elbow"], view)[1]
+            edgeY = (max(positions[i][1] for i in group) if verticalSign > 0
+                     else min(positions[i][1] for i in group))
+            centerY = edgeY + verticalSign * OFFSET * distanceFactor + correction
+            previousHeight = None
+            options = {}
+            for i in rowOrder:
+                rect = items[i]["options"][direction]["rect"]
+                height = rect[3] - rect[1]
+                if previousHeight is not None:
+                    centerY += verticalSign * ((previousHeight + height) / 2.0 + STACK_ROW_GAP)
+                option = make_option(items[i], direction, view, head_xy=(columnX, centerY))
+                option["static"] = static_score(items[i], option, tags, equipment)
+                options[i] = option
+                previousHeight = height
+            stackCache[key] = options
+            return options
+
+        def StackLayouts(group):
+            """Try a single stack and split stacks above/below or left/right."""
+            xOrder = sorted(group, key=lambda i: (positions[i][0], -positions[i][1], items[i]["id"]))
+            yOrder = sorted(group, key=lambda i: (-positions[i][1], positions[i][0], items[i]["id"]))
+            risingOrder = sorted(group, key=lambda i: (-(positions[i][1] + positions[i][0]), items[i]["id"]))
+            fallingOrder = sorted(group, key=lambda i: (-(positions[i][1] - positions[i][0]), items[i]["id"]))
+
+            def SplitCoordinate(i, axis):
+                if axis < 2:
+                    return positions[i][axis]
+                return positions[i][1] + (1 if axis == 2 else -1) * positions[i][0]
+
+            for distanceFactor in (1.0, 1.5, 2.0):
+                for direction in ("LA", "RA"):
+                    for verticalSign in (1, -1):
+                        yield BuildStack(group, group, direction, verticalSign, distanceFactor)
+                for order, axis in ((xOrder, 0), (yOrder, 1), (risingOrder, 2), (fallingOrder, 3)):
+                    if len(group) <= 6:
+                        cuts = range(1, len(group))
+                    else:
+                        # Bound the template count for larger groups: balanced
+                        # splits and the largest physical gap cover common rows.
+                        largestGap = max(range(1, len(group)), key=lambda k:
+                            abs(SplitCoordinate(order[k], axis) - SplitCoordinate(order[k - 1], axis)))
+                        cuts = sorted(set((len(group) // 2, largestGap)))
+                    for cut in cuts:
+                        first, second = order[:cut], order[cut:]
+                        for a in (1, -1):
+                            for b in (1, -1):
+                                if axis == 0:
+                                    left = BuildStack(group, first, "RA", a, distanceFactor)
+                                    right = BuildStack(group, second, "LA", b, distanceFactor)
+                                else:
+                                    left = BuildStack(group, first, "LA" if a > 0 else "RA", 1, distanceFactor)
+                                    right = BuildStack(group, second, "LA" if b > 0 else "RA", -1, distanceFactor)
+                                options = dict(left)
+                                options.update(right)
+                                yield options
+
+        # Move a whole nearby group together: individually moving one tag can
+        # look worse until its neighbors also occupy their assigned stack rows.
+        for stackPass in range(2):
+            changed = False
+            for group in groups:
+                chosen = {i: selected[i] for i in group}
+                currentScore = GroupScore(group, chosen)
+                for candidate in StackLayouts(group):
+                    score = GroupScore(group, candidate)
+                    if score < currentScore - 1e-7:
+                        chosen, currentScore = candidate, score
+                if any(selected[i] is not chosen[i] for i in group):
+                    for i in group:
+                        selected[i] = chosen[i]
+                    changed = True
+            if not changed:
+                break
+
         results = []
+        best_value = sum(option["static"][0] + option["length_cost"]
+                         for option in selected)
+        for i in range(n):
+            for j in range(i + 1, n):
+                best_value += pair_score(items[i], selected[i], items[j], selected[j])[0]
+        for group in groups:
+            best_value += StackStyleCost(group, {i: selected[i] for i in group})
 
         for i, item in enumerate(items):
-            direction = best[i]
-            issues = list(
-                item["static"][direction][1]
-            )
+            option = selected[i]
+            direction = option["direction"]
+            issues = list(option["static"][1])
 
             for j in range(n):
                 if i == j:
                     continue
 
                 if i < j:
-                    pair = pairs[(
-                        i, j, direction, best[j]
-                    )]
+                    pair = pair_score(item, option, items[j], selected[j])
                 else:
-                    pair = pairs[(
-                        j, i, best[j], direction
-                    )]
+                    pair = pair_score(items[j], selected[j], item, option)
 
                 for issue in pair[1]:
                     issues.append(
@@ -1184,7 +1466,7 @@ def RunTagging(doc, uidoc, settings):
             results.append({
                 "item": item,
                 "direction": direction,
-                "option": item["options"][direction],
+                "option": option,
                 "issues": sorted(set(issues))
             })
 
@@ -1417,6 +1699,13 @@ def RunTagging(doc, uidoc, settings):
             option = result["option"]
             issues = result["issues"]
 
+            if (abs(option["landing"] - LANDING) > 1e-9
+                    or abs(option["offset"] - OFFSET) > 1e-9
+                    or abs(option["horizontal_offset"] - OFFSET) > 1e-9):
+                adjusted_count += 1
+            if option["stacked"]:
+                stacked_count += 1
+
             if direction == "LA":
                 la_count += 1
             else:
@@ -1426,7 +1715,7 @@ def RunTagging(doc, uidoc, settings):
                 s for s in issues
                 if (
                     "CROSSING" in s or
-                    "OVERLAP" in s or
+                    "overlap" in s.lower() or
                     "over electrical" in s or
                     "near electrical" in s or
                     "crosses" in s or
@@ -1450,11 +1739,14 @@ def RunTagging(doc, uidoc, settings):
             ))
 
             logs.append(
-                "CANDIDATE {} | {} | {} | {}".format(
+                "CANDIDATE {} | {} | {} | {} | Landing {:.4f} in | Offset {:.4f} in{}".format(
                     item["id"],
                     item["type_name"],
                     direction,
-                    item["tag_type"]
+                    item["tag_type"],
+                    option["landing"],
+                    option["offset"],
+                    " | Stacked" if option["stacked"] else ""
                 )
             )
 
@@ -1504,7 +1796,7 @@ def RunTagging(doc, uidoc, settings):
     # ======================================================
 
     report = [
-        "FFE RECEPTACLE TAGGING - VERSION 8.3",
+        "FFE RECEPTACLE TAGGING - v0.3",
         "======================================",
         "Mode: {}".format(
             "WRITE" if WRITE else "PREVIEW"
@@ -1529,6 +1821,8 @@ def RunTagging(doc, uidoc, settings):
         "--------------------------------------",
         "LA candidates: {}".format(la_count),
         "RA candidates: {}".format(ra_count),
+        "Adjusted leader lengths: {}".format(adjusted_count),
+        "Stacked tag candidates: {}".format(stacked_count),
         "Manual review candidates: {}".format(
             review_count
         ),

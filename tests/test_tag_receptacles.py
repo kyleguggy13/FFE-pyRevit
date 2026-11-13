@@ -1,7 +1,7 @@
 """Verify the standalone tagging command without loading Revit.
 
 Key behaviors: validate/cancel settings, preserve classification and scope,
-isolate per-tag failures, and publish IDs only after a successful group commit.
+refine lengths and stacks, isolate failures, and commit before selection.
 Revit API notes: mock the 2025/2026 transaction and ElementId.Value boundaries.
 Design decisions: execute the real functions; substitute only host APIs and UI.
 """
@@ -240,6 +240,32 @@ class TagReceptaclesTests(unittest.TestCase):
             LookupParameter=lambda key: NS(StorageType="Double", AsDouble=lambda: height / 12.0),
             Location=FakeLocation(Vector(value * 20, 0)), get_BoundingBox=lambda view: None)
 
+    def MakeExistingTag(self, value, x1, y1, x2, y2):
+        """Provide a fixed existing annotation obstacle without any tagged fixture."""
+        return NS(Id=NS(Value=value), GetTaggedLocalElementIds=lambda: [],
+                  get_BoundingBox=lambda view: NS(Min=Vector(x1, y1), Max=Vector(x2, y2)))
+
+    def MakeCluster(self, coordinates, names=None, heights=None):
+        """Build small fixture symbols in paper coordinates, including rotated views."""
+        factor = self.view.Scale / 12.0
+        fixtures = []
+        for i, (x, y) in enumerate(coordinates):
+            fixture = self.MakeFixture(i + 1, name=names[i] if names else "USB",
+                                       height=heights[i] if heights else 18)
+            point = self.view.RightDirection.Multiply(20 + x * factor).Add(
+                self.view.UpDirection.Multiply(y * factor))
+            fixture.Location.Point = point
+            radius = 0.045 * factor
+            fixture.get_BoundingBox = lambda view, p=point, r=radius: NS(
+                Min=p.Add(Vector(-r, -r)), Max=p.Add(Vector(r, r)))
+            fixtures.append(fixture)
+        self.doc.fixtures[10] = fixtures
+
+    def HeadCoordinates(self, tag):
+        """Return a created tag's view-plane head in paper inches."""
+        return (tag.TagHeadPosition.DotProduct(self.view.RightDirection) * 12 / self.view.Scale,
+                tag.TagHeadPosition.DotProduct(self.view.UpDirection) * 12 / self.view.Scale)
+
     def RunTagging(self, write=False):
         self.settings["write"] = write
         return "\n".join(self.api["RunTagging"](self.doc, self.uidoc, self.settings))
@@ -319,6 +345,156 @@ class TagReceptaclesTests(unittest.TestCase):
                 self.assertLess(headX, elbowX)
                 self.assertLess(elbowX, endX)
 
+    def test_flexible_offset_avoids_existing_tags_at_multiple_scales(self):
+        for scale in (24, 48, 96):
+            with self.subTest(scale=scale):
+                self.setUp()
+                self.view.Scale = scale
+                factor = scale / 48.0
+                self.doc.existing[10] = [
+                    self.MakeExistingTag(500, 20 + 4 * factor, 1.4 * factor,
+                                         20 + 8 * factor, 2.2 * factor),
+                    self.MakeExistingTag(501, 20 - 8 * factor, 1.4 * factor,
+                                         20 - 4 * factor, 2.2 * factor)]
+                report = self.RunTagging(write=True)
+                self.assertIn("Adjusted leader lengths: 1", report)
+                self.assertIn("Manual review candidates: 0", report)
+                self.assertIn("Offset 0.7500 in", report)
+                tag = self.doc.tags[0]
+                elbow = tag.SetLeaderElbow.call_args.args[1]
+                self.assertAlmostEqual(elbow.Y * 12.0 / scale, 0.75)
+                self.assertAlmostEqual(abs(tag.TagHeadPosition.X - elbow.X) * 12.0 / scale,
+                                       self.settings["landing"])
+                self.assertEqual([t.Id.Value for t in self.doc.existing[10]], [500, 501])
+
+    def test_flexible_landing_can_shorten_without_changing_offset(self):
+        self.doc.existing[10] = [self.MakeExistingTag(500, 27.82, 1.6, 27.92, 2),
+                                 self.MakeExistingTag(501, 12.08, 1.6, 12.18, 2)]
+        report = self.RunTagging(write=True)
+        self.assertIn("Adjusted leader lengths: 1", report)
+        self.assertIn("Manual review candidates: 0", report)
+        self.assertIn("Landing 0.0555 in | Offset 0.3750 in", report)
+        tag = self.doc.tags[0]
+        elbow = tag.SetLeaderElbow.call_args.args[1]
+        self.assertAlmostEqual(abs(tag.TagHeadPosition.X - elbow.X) / 4.0, 0.074 * 0.75)
+        self.assertAlmostEqual(elbow.Y / 4.0, 0.375)
+
+    def test_crowded_new_tags_improve_and_preview_matches_written_layout(self):
+        # Keep this regression focused on the individual length search; stacks
+        # are exercised separately with their own alignment/spacing assertions.
+        self.api["STACK_MAX_GROUP_SIZE"] = 1
+        self.doc.fixtures[10] = [self.MakeFixture(i) for i in (1, 2, 3)]
+        for fixture in self.doc.fixtures[10]:
+            fixture.Location.Point = Vector(20 + (fixture.Id.Value - 1) * 2, 0)
+        offsetFactors, landingFactors = self.api["OFFSET_FACTORS"], self.api["LANDING_FACTORS"]
+        self.api["OFFSET_FACTORS"], self.api["LANDING_FACTORS"] = (1.0,), (1.0,)
+        fixedReport = self.RunTagging()
+        self.assertIn("TAG TEXT OVERLAP", fixedReport)
+        self.api["OFFSET_FACTORS"], self.api["LANDING_FACTORS"] = offsetFactors, landingFactors
+        preview = self.RunTagging()
+        self.assertIn("Manual review candidates: 0", preview)
+        self.assertNotIn("TAG TEXT OVERLAP", preview)
+        self.assertEqual(self.events, [])
+        written = self.RunTagging(write=True)
+        self.assertEqual([line for line in preview.splitlines() if line.startswith("CANDIDATE")],
+                         [line for line in written.splitlines() if line.startswith("CANDIDATE")])
+        self.assertIn("Tags created: 3", written)
+        for tag in self.doc.tags:
+            elbow = tag.SetLeaderElbow.call_args.args[1]
+            offset = elbow.Y / 4.0
+            landing = abs(tag.TagHeadPosition.X - elbow.X) / 4.0
+            self.assertGreaterEqual(offset, 0.375 * 0.75 - 1e-9)
+            self.assertLessEqual(offset, 0.375 * 2.0 + 1e-9)
+            self.assertGreaterEqual(landing, 0.074 * 0.75 - 1e-9)
+            self.assertLessEqual(landing, 0.074 * 2.0 + 1e-9)
+            symbol = next(symbol for symbol in self.doc.symbols if symbol.Id == tag.symbolId)
+            expectedSuffix = "(LA)" if tag.TagHeadPosition.X > tag.element.Location.Point.X else "(RA)"
+            self.assertTrue(symbol.Family.Name.endswith(expectedSuffix))
+
+    def test_unresolved_existing_tag_overlap_remains_flagged_for_review(self):
+        self.doc.existing[10] = [self.MakeExistingTag(500, 0, -5, 40, 5)]
+        report = self.RunTagging(write=True)
+        self.assertIn("Tags created: 1", report)
+        self.assertIn("Manual review candidates: 1", report)
+        self.assertIn("Existing tag overlap 500", report)
+
+    def test_close_pair_stacks_in_one_column_with_even_rows(self):
+        self.MakeCluster([(0, 0), (0.23, 0)], names=["USB", "GF"])
+        preview = self.RunTagging()
+        self.assertEqual(self.events, [])
+        written = self.RunTagging(write=True)
+        self.assertIn("Stacked tag candidates: 2", written)
+        self.assertIn("Manual review candidates: 0", written)
+        heads = [self.HeadCoordinates(tag) for tag in self.doc.tags]
+        self.assertAlmostEqual(heads[0][0], heads[1][0])
+        self.assertAlmostEqual(abs(heads[0][1] - heads[1][1]), 0.38)
+        self.assertEqual([line for line in preview.splitlines() if line.startswith("CANDIDATE")],
+                         [line for line in written.splitlines() if line.startswith("CANDIDATE")])
+
+    def test_six_device_group_uses_clear_aligned_stacks(self):
+        self.MakeCluster([(0, 0), (0.23, 0), (0.46, 0),
+                          (0, -0.35), (0.23, -0.35), (0.46, -0.35)],
+                         names=["USB", "GF", "EM", "USB", "GF", "EM"])
+        report = self.RunTagging(write=True)
+        self.assertIn("Stacked tag candidates: 6", report)
+        self.assertIn("Manual review candidates: 0", report)
+        self.assertNotIn("LEADER CROSSING", report)
+        self.assertNotIn("TAG TEXT OVERLAP", report)
+        columns = {}
+        for tag in self.doc.tags:
+            x, y = self.HeadCoordinates(tag)
+            columns.setdefault(round(x, 8), []).append(y)
+            symbol = next(symbol for symbol in self.doc.symbols if symbol.Id == tag.symbolId)
+            deviceX = tag.element.Location.Point.DotProduct(self.view.RightDirection) / 4.0
+            self.assertTrue(symbol.Family.Name.endswith("(LA)" if x > deviceX else "(RA)"))
+        self.assertLessEqual(len(columns), 2)
+        self.assertTrue(any(len(rows) >= 3 for rows in columns.values()))
+        for rows in columns.values():
+            rows.sort()
+            for lower, upper in zip(rows, rows[1:]):
+                self.assertGreaterEqual(upper - lower, 0.38 - 1e-9)
+
+    def test_stack_spacing_accounts_for_two_line_tags(self):
+        self.MakeCluster([(0, 0), (0, -0.23)], names=["USB", "GF"], heights=[18, 24])
+        report = self.RunTagging(write=True)
+        self.assertIn("Manual review candidates: 0", report)
+        heads = [self.HeadCoordinates(tag) for tag in self.doc.tags]
+        self.assertAlmostEqual(heads[0][0], heads[1][0])
+        self.assertAlmostEqual(abs(heads[0][1] - heads[1][1]), 0.465)
+
+    def test_existing_tag_obstacle_can_force_a_left_hand_stack(self):
+        self.MakeCluster([(0, 0), (0.23, 0)], names=["USB", "GF"])
+        existing = self.MakeExistingTag(500, 22, -10, 35, 10)
+        self.doc.existing[10] = [existing]
+        report = self.RunTagging(write=True)
+        self.assertIn("Stacked tag candidates: 2", report)
+        self.assertIn("Manual review candidates: 0", report)
+        heads = [self.HeadCoordinates(tag) for tag in self.doc.tags]
+        self.assertAlmostEqual(heads[0][0], heads[1][0])
+        self.assertTrue(all(x < 5.0 for x, y in heads))
+        self.assertIs(self.doc.existing[10][0], existing)
+
+    def test_stacks_use_paper_spacing_in_rotated_views_at_multiple_scales(self):
+        for scale in (24, 48, 96):
+            with self.subTest(scale=scale):
+                self.setUp()
+                self.view.Scale = scale
+                self.view.RightDirection = Vector(0, 1)
+                self.view.UpDirection = Vector(-1, 0)
+                self.MakeCluster([(0, 0), (0.23, 0)], names=["USB", "GF"])
+                report = self.RunTagging(write=True)
+                self.assertIn("Stacked tag candidates: 2", report)
+                self.assertIn("Manual review candidates: 0", report)
+                heads = [self.HeadCoordinates(tag) for tag in self.doc.tags]
+                self.assertAlmostEqual(heads[0][0], heads[1][0])
+                self.assertAlmostEqual(abs(heads[0][1] - heads[1][1]), 0.38)
+
+    def test_stack_assignment_does_not_depend_on_collection_order(self):
+        self.MakeCluster([(0, 0), (0.23, 0), (0.46, 0)], names=["USB", "GF", "EM"])
+        first = self.RunTagging()
+        self.doc.fixtures[10].reverse()
+        self.assertEqual(self.RunTagging(), first)
+
     def test_invalid_settings_rejected(self):
         validate = self.api["ValidateSettings"]
         for invalid in ("", "text", 0, -1, "nan", "inf", "-inf", "1e999"):
@@ -388,6 +564,8 @@ class TagReceptaclesTests(unittest.TestCase):
         report = self.RunTagging(write=True)
         self.assertIn("Tags created: 1", report)
         self.assertIn("Tags selected: 1", report)
+        self.assertIn("Adjusted leader lengths: 0", report)
+        self.assertIn("Stacked tag candidates: 0", report)
         tag = self.doc.tags[0]
         self.assertEqual(tag.viewId.Value, 10)
         self.assertEqual(tag.symbolId.Value, self.doc.symbols[0].Id.Value)

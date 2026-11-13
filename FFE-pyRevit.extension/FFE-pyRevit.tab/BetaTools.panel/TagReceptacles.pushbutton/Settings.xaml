@@ -47,6 +47,9 @@
             </StackPanel>
         </Grid>
 
+        <TextBlock Margin="0,8,0,0" Foreground="#555555" TextWrapping="Wrap"
+                   Text="Preferred lengths. Individual tags may use 75%-200%. Nearby tags can stack in aligned columns with extra vertical spacing."/>
+
         <TextBlock x:Name="errorText" Foreground="#AD2020" TextWrapping="Wrap"
                    MinHeight="20" Margin="0,14,0,10"/>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
