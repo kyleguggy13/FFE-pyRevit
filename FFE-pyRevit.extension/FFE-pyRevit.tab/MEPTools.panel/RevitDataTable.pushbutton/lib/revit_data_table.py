@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Purpose: collect read-only Space snapshots and validate table navigation.
-Behaviors: preserve project formatting, numeric values, phases, and row identity.
+Behaviors: collect parameter definitions and selected values, preserving units and identity.
 Revit API: Revit 2025/2026, ElementId.Value; callers supply a valid API context.
 Design: inject DB/ID collection boundaries so behavior can be tested without Revit.
 No transactions, model writes, UI objects, or dispatcher calls belong here.
@@ -61,9 +61,153 @@ def TryMeasurement(readValue, units, spec, db, label, warnings):
         return value, u"\u2014"
 
 
-def BuildSnapshot(document, documentKey, db):
+def GetParameterType(parameter, document, db):
+    """Classify origin separately from the definition's value/specification type."""
+    if parameter.Id.Value < -1:
+        return "Built-In"
+    try:
+        if parameter.IsShared:
+            return "Shared Parameter"
+    except Exception:
+        pass
+    if document is not None and parameter.Id.Value > 0:
+        try:
+            element = document.GetElement(parameter.Id)
+            # Shared and global definitions derive from ParameterElement, so
+            # check those specific origins before the general project definition.
+            for typeName, label in (("SharedParameterElement", "Shared Parameter"),
+                                    ("GlobalParameter", "Global Parameter"),
+                                    ("ParameterElement", "Project Parameter")):
+                elementType = getattr(db, typeName, None)
+                if elementType is not None and isinstance(element, elementType):
+                    return label
+        except Exception:
+            pass
+    return "Other"
+
+
+def GetParameterIdentity(parameter, document):
+    """Persist built-in IDs, shared GUIDs, or definition UniqueIds across sessions."""
+    if parameter.Id.Value < -1:
+        return "builtin:" + IdText(parameter.Id)
+    try:
+        if parameter.IsShared:
+            return "shared:" + str(parameter.GUID).lower()
+    except Exception:
+        pass
+    if document is not None and parameter.Id.Value > 0:
+        try:
+            element = document.GetElement(parameter.Id)
+            if element is not None:
+                try:
+                    return "shared:" + str(element.GuidValue).lower()
+                except AttributeError:
+                    return "project:" + element.UniqueId
+        except Exception:
+            pass
+    return None
+
+
+def BuildParameterDescriptor(parameter, db, document=None):
+    """Identify parameters by ID so equal names never merge unrelated definitions."""
+    parameterId = IdText(parameter.Id)
+    storageType = str(parameter.StorageType)
+    dataType = {"String": "Text", "Integer": "Integer", "Double": "Number",
+                "ElementId": "Element reference", "None": "Unknown"}.get(storageType, storageType)
+    typeId = ""
+    try:
+        spec = parameter.Definition.GetDataType()
+        typeId = spec.TypeId
+        if typeId:
+            dataType = db.LabelUtils.GetLabelForSpec(spec) or dataType
+    except Exception:
+        # Some built-ins (including levels) have an empty or unlabeled spec.
+        # Their storage type is still useful and must not hide the parameter.
+        pass
+    isBoolean = False
+    try:
+        isBoolean = bool(typeId) and typeId == db.SpecTypeId.Boolean.YesNo.TypeId
+    except Exception:
+        pass
+    baseField = ""
+    for builtInName, field in (("ROOM_LEVEL_ID", "level"), ("ROOM_NUMBER", "number"),
+                               ("ROOM_NAME", "name"), ("ROOM_AREA", "areaValue"),
+                               ("ROOM_HEIGHT", "heightValue"), ("ROOM_PHASE_ID", "phase"),
+                               ("ROOM_PHASE", "phase")):
+        try:
+            if parameterId == str(int(getattr(db.BuiltInParameter, builtInName))):
+                baseField = field
+                break
+        except (AttributeError, TypeError, ValueError):
+            continue
+    return {"id": parameterId, "key": "p" + parameterId,
+            "name": parameter.Definition.Name, "dataType": dataType,
+            "storageType": storageType, "dataTypeId": typeId, "isBoolean": isBoolean,
+            "baseField": baseField, "parameterType": GetParameterType(parameter, document, db),
+            "identity": GetParameterIdentity(parameter, document)}
+
+
+def ReadParameterValue(parameter, descriptor, document, elementNames):
+    """Return a sortable raw value and Revit-formatted text for a selected column."""
+    if not parameter.HasValue:
+        return None, u"\u2014"
+    storageType = descriptor["storageType"]
+    if storageType == "String":
+        value = parameter.AsString()
+        return value, value if value is not None else u"\u2014"
+    if storageType in ("Double", "Integer"):
+        value = float(parameter.AsDouble()) if storageType == "Double" else int(parameter.AsInteger())
+        if math.isnan(value) or math.isinf(value):
+            raise ValueError("not a finite value")
+        if descriptor["isBoolean"]:
+            return value, "Yes" if value else "No"
+        text = parameter.AsValueString()
+        if text is None and storageType == "Double":
+            raise ValueError("formatted value unavailable")
+        return value, text if text is not None else str(value)
+    if storageType == "ElementId":
+        elementId = parameter.AsElementId()
+        value = IdText(elementId)
+        text = parameter.AsValueString()
+        if text:
+            return value, text
+        if value not in elementNames:
+            element = document.GetElement(elementId) if elementId.Value > 0 else None
+            elementNames[value] = element.Name if element else (u"\u2014" if value == "-1" else value)
+        return value, elementNames[value]
+    return None, u"\u2014"
+
+
+def CollectSpaceParameters(space, document, db, catalog, selectedIds, elementNames, warnings):
+    """Union all instance definitions, reading values only for requested columns."""
+    values, texts = {}, {}
+    try:
+        parameters = space.Parameters
+    except Exception as error:
+        warnings.append("Space parameters unavailable: {0}".format(error))
+        return values, texts
+    for parameter in parameters:
+        try:
+            parameterId = IdText(parameter.Id)
+            if parameterId not in catalog:
+                catalog[parameterId] = BuildParameterDescriptor(parameter, db, document)
+            descriptor = catalog[parameterId]
+            if parameterId in selectedIds:
+                try:
+                    value, text = ReadParameterValue(parameter, descriptor, document, elementNames)
+                except Exception as error:
+                    value, text = None, u"\u2014"
+                    warnings.append("{0} unavailable: {1}".format(descriptor["name"], error))
+                values[descriptor["key"]] = value
+                texts[descriptor["key"]] = text
+        except Exception as error:
+            warnings.append("Parameter definition unavailable: {0}".format(error))
+    return values, texts
+
+
+def BuildSnapshot(document, documentKey, db, selectedParameterIds=None):
     """Collect all host Spaces once; filtering operates on this immutable snapshot."""
-    phases = [{"id": IdText(phase.Id), "name": phase.Name}
+    phases = [{"id": IdText(phase.Id), "name": phase.Name, "uniqueId": getattr(phase, "UniqueId", None)}
               for phase in document.Phases]
     phaseNames = dict((phase["id"], phase["name"]) for phase in phases)
     defaultPhaseId = phases[-1]["id"] if phases else "all"
@@ -77,6 +221,9 @@ def BuildSnapshot(document, documentKey, db):
         pass
 
     units = document.GetUnits()
+    selectedIds = set(selectedParameterIds or [])
+    catalog = {}
+    elementNames = {}
     levels = {}
     rows = []
     issues = []
@@ -95,6 +242,7 @@ def BuildSnapshot(document, documentKey, db):
                     "id": levelId,
                     "name": level.Name if level else u"\u2014",
                     "elevation": float(level.Elevation) if level else None,
+                    "uniqueId": getattr(level, "UniqueId", None) if level else None,
                 }
             level = levels[levelId]
             if level["elevation"] is None:
@@ -111,6 +259,8 @@ def BuildSnapshot(document, documentKey, db):
                 warnings.append("Zero area; the Space may be unenclosed or redundant.")
             if phaseId not in phaseNames:
                 warnings.append("Space phase is unavailable; view it under All phases.")
+            parameterValues, parameterTexts = CollectSpaceParameters(
+                space, document, db, catalog, selectedIds, elementNames, warnings)
             rows.append({
                 "id": elementId,
                 "uniqueId": space.UniqueId,
@@ -127,6 +277,8 @@ def BuildSnapshot(document, documentKey, db):
                 "areaText": areaText,
                 "heightValue": heightValue,
                 "heightText": heightText,
+                "parameterValues": parameterValues,
+                "parameterTexts": parameterTexts,
                 "warnings": warnings,
             })
         except Exception as error:
@@ -145,6 +297,9 @@ def BuildSnapshot(document, documentKey, db):
         "defaultPhaseId": defaultPhaseId,
         "phases": phases,
         "levels": list(levels.values()),
+        "parameters": sorted(catalog.values(), key=lambda item: (item["name"].lower(), item["id"])),
+        "selectedParameterIds": [parameterId for parameterId in (selectedParameterIds or [])
+                                 if parameterId in catalog],
         "rows": rows,
         "skippedCount": skippedCount,
         "issues": issues,
@@ -158,12 +313,44 @@ def ValidateRequest(message, documentKey, snapshot):
     action = message.get("action")
     if action == "ready":
         return {"action": "ready"}
-    if action not in ("refresh", "select", "show"):
+    tableActions = ("loadTable", "saveTable", "renameTable", "deleteTable")
+    if action not in ("refresh", "select", "show", "closeWindow") + tableActions:
         raise ValueError("Unknown table action.")
     if message.get("documentKey") != documentKey:
         raise ValueError("This request belongs to another document. Reopen the table.")
-    if action == "refresh":
+    if action == "closeWindow":
         return {"action": action}
+    if action in tableActions:
+        tableId = message.get("tableId", "")
+        revision = message.get("revision", "")
+        requestId = message.get("requestId")
+        if (not isinstance(tableId, StringTypes) or len(tableId) > 36 or
+                not isinstance(revision, StringTypes) or len(revision) > 36 or
+                not isinstance(requestId, StringTypes) or not requestId or len(requestId) > 100):
+            raise ValueError("Invalid saved-table request.")
+        if action in ("renameTable", "deleteTable") and not tableId:
+            raise ValueError("Choose a saved table first.")
+        name = message.get("name", "")
+        if action in ("saveTable", "renameTable"):
+            if not isinstance(name, StringTypes) or not name.strip() or len(name) > 100:
+                raise ValueError("Enter a table name of 1 to 100 characters.")
+        if action == "saveTable" and not isinstance(message.get("layout"), dict):
+            raise ValueError("Invalid table layout.")
+        return {"action": action, "tableId": tableId, "revision": revision, "requestId": requestId,
+                "name": name.strip(), "layout": message.get("layout")}
+    if action == "refresh":
+        parameterIds = message.get("parameterIds", snapshot.get("selectedParameterIds", []))
+        if not isinstance(parameterIds, list):
+            raise ValueError("Expected a list of Space parameter IDs.")
+        knownParameters = set(parameter["id"] for parameter in snapshot.get("parameters", []))
+        selected, seen = [], set()
+        for parameterId in parameterIds:
+            if not isinstance(parameterId, StringTypes) or parameterId not in knownParameters:
+                raise ValueError("A parameter is no longer in this table. Refresh and reopen Parameters.")
+            if parameterId not in seen:
+                selected.append(parameterId)
+                seen.add(parameterId)
+        return {"action": action, "parameterIds": selected}
     elementIds = message.get("elementIds")
     if not isinstance(elementIds, list) or not elementIds:
         raise ValueError("Select at least one Space in the table.")

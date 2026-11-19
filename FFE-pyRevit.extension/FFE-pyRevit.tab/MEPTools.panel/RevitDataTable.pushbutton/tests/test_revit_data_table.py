@@ -26,6 +26,9 @@ fixtureSpec.loader.exec_module(loader_fixture)
 spec = importlib.util.spec_from_file_location('revit_data_table', LIBRARY / 'revit_data_table.py')
 core = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(core)
+savedSpec = importlib.util.spec_from_file_location('saved_tables_host_tests', LIBRARY / 'saved_tables.py')
+saved = importlib.util.module_from_spec(savedSpec)
+savedSpec.loader.exec_module(saved)
 NS = types.SimpleNamespace
 
 
@@ -48,6 +51,7 @@ class Space:
         self.Name = 'Combined name 010'
         self.Location = object() if placed else None
         self.Category = NS(Id=Id(-3600))
+        self.Parameters = []
 
     def get_Parameter(self, parameter):
         if parameter in ('spacePhaseId', 'spacePhase'):
@@ -68,6 +72,21 @@ class Collector:
 
     def WhereElementIsNotElementType(self):
         return self.document.spaces
+
+
+class Parameter:
+    """Expose the parameter API, recording which values were actually read."""
+    def __init__(self, valueId, name, storageType, value, dataTypeId='', text=None, isShared=False):
+        self.Id = Id(valueId)
+        self.Definition = NS(Name=name, GetDataType=lambda: NS(TypeId=dataTypeId))
+        self.StorageType = storageType
+        self.HasValue = value is not None
+        self.IsShared = isShared
+        self.AsString = mock.Mock(return_value=value)
+        self.AsDouble = mock.Mock(return_value=value)
+        self.AsInteger = mock.Mock(return_value=value)
+        self.AsElementId = mock.Mock(return_value=Id(value))
+        self.AsValueString = mock.Mock(return_value=text)
 
 
 class SpaceSnapshotTests(unittest.TestCase):
@@ -93,7 +112,9 @@ class SpaceSnapshotTests(unittest.TestCase):
                      BuiltInCategory=NS(OST_MEPSpaces=-3600),
                      BuiltInParameter=NS(VIEW_PHASE='viewPhase', ROOM_NAME='name', ROOM_NUMBER='number',
                                          ROOM_PHASE_ID='spacePhaseId', ROOM_PHASE='spacePhase'),
-                     SpecTypeId=NS(Area='area', Length='length'),
+                     SpecTypeId=NS(Area='area', Length='length', Boolean=NS(YesNo=NS(TypeId='spec:yesno'))),
+                     LabelUtils=NS(GetLabelForSpec=lambda spec: {
+                         'spec:flow': 'Air Flow', 'spec:text': 'Text', 'spec:yesno': 'Yes/No'}[spec.TypeId]),
                      UnitFormatUtils=NS(Format=format_value))
 
     def snapshot(self):
@@ -189,6 +210,142 @@ class SpaceSnapshotTests(unittest.TestCase):
         self.document.spaces = []
         self.assertEqual([], self.snapshot()['rows'])
 
+    def test_parameter_catalog_unions_all_spaces_and_keeps_same_named_definitions_distinct(self):
+        flow = Parameter(-200, 'Supply Airflow', 'Double', 125, 'spec:flow', '125 CFM')
+        custom = Parameter(9007199254740993, 'Supply Airflow', 'String', 'custom', 'spec:text')
+        other = Space(2)
+        self.space.Parameters = [flow]
+        other.Parameters = [flow, custom]
+        self.document.spaces.append(other)
+        snapshot = self.snapshot()
+        self.assertEqual({'-200', '9007199254740993'}, {item['id'] for item in snapshot['parameters']})
+        self.assertEqual({'Air Flow', 'Text'}, {item['dataType'] for item in snapshot['parameters']})
+        self.assertEqual({}, snapshot['rows'][0]['parameterValues'])
+        flow.AsDouble.assert_not_called()
+        custom.AsString.assert_not_called()
+
+    def test_selected_parameter_values_keep_units_zero_boolean_and_large_reference_ids(self):
+        self.space.Parameters = [
+            Parameter(-200, 'Supply Airflow', 'Double', 125, 'spec:flow', '125 CFM'),
+            Parameter(201, 'Count', 'Integer', 0),
+            Parameter(202, 'Conditioned', 'Integer', 1, 'spec:yesno'),
+            Parameter(203, 'Reference', 'ElementId', 9007199254740993, text='Referenced Space'),
+        ]
+        snapshot = core.BuildSnapshot(self.document, 'document-key', self.db, ['-200', '201', '202', '203'])
+        row = snapshot['rows'][0]
+        self.assertEqual({'p-200': 125, 'p201': 0, 'p202': 1, 'p203': '9007199254740993'}, row['parameterValues'])
+        self.assertEqual({'p-200': '125 CFM', 'p201': '0', 'p202': 'Yes', 'p203': 'Referenced Space'}, row['parameterTexts'])
+        self.assertEqual(['-200', '201', '202', '203'], snapshot['selectedParameterIds'])
+        json.dumps(snapshot, allow_nan=False)
+
+    def test_unset_missing_and_unreadable_parameters_do_not_hide_spaces(self):
+        broken = Parameter(201, 'Broken', 'Double', 1, text='1')
+        broken.AsDouble.side_effect = ValueError('read failed')
+        unset = Parameter(202, 'Unset', 'String', None)
+        self.space.Parameters = [broken, unset]
+        snapshot = core.BuildSnapshot(self.document, 'document-key', self.db, ['201', '202', 'removed'])
+        self.assertEqual(0, snapshot['skippedCount'])
+        self.assertEqual(['201', '202'], snapshot['selectedParameterIds'])
+        row = snapshot['rows'][0]
+        self.assertEqual({'p201': None, 'p202': None}, row['parameterValues'])
+        self.assertEqual({'p201': '—', 'p202': '—'}, row['parameterTexts'])
+        self.assertTrue(any('Broken unavailable' in warning for warning in row['warnings']))
+        unset.AsString.assert_not_called()
+
+    def test_parameter_missing_on_another_space_remains_empty(self):
+        self.space.Parameters = [Parameter(201, 'Comments', 'String', '<literal text>', 'spec:text')]
+        self.document.spaces.append(Space(2))
+        snapshot = core.BuildSnapshot(self.document, 'document-key', self.db, ['201'])
+        self.assertEqual('<literal text>', snapshot['rows'][0]['parameterTexts']['p201'])
+        self.assertEqual({}, snapshot['rows'][1]['parameterValues'])
+
+    def test_empty_or_unsupported_spec_uses_storage_type_label(self):
+        parameter = Parameter(201, 'Associated Level', 'ElementId', 20)
+        descriptor = core.BuildParameterDescriptor(parameter, self.db)
+        self.assertEqual('Element reference', descriptor['dataType'])
+        value, text = core.ReadParameterValue(parameter, descriptor, self.document, {})
+        self.assertEqual(('20', 'Level 1'), (value, text))
+
+    def test_starter_columns_match_builtin_ids_instead_of_parameter_names(self):
+        for name, parameterId, field in (
+                ('ROOM_LEVEL_ID', -1006916, 'level'), ('ROOM_NUMBER', -1006901, 'number'),
+                ('ROOM_NAME', -1006900, 'name'), ('ROOM_AREA', -1006902, 'areaValue'),
+                ('ROOM_HEIGHT', -1006920, 'heightValue'), ('ROOM_PHASE_ID', -1012112, 'phase'),
+                ('ROOM_PHASE', -1012113, 'phase')):
+            with self.subTest(name=name):
+                setattr(self.db.BuiltInParameter, name, parameterId)
+                parameter = Parameter(parameterId, 'Localized label', 'String', 'value')
+                self.assertEqual(field, core.BuildParameterDescriptor(parameter, self.db)['baseField'])
+        custom = Parameter(900, 'Name', 'String', 'custom')
+        self.assertEqual('', core.BuildParameterDescriptor(custom, self.db)['baseField'])
+
+    def test_parameter_origin_distinguishes_builtin_shared_project_global_and_other(self):
+        class ProjectDefinition:
+            pass
+
+        class SharedDefinition(ProjectDefinition):
+            pass
+
+        class GlobalDefinition(ProjectDefinition):
+            pass
+
+        self.db.ParameterElement = ProjectDefinition
+        self.db.SharedParameterElement = SharedDefinition
+        self.db.GlobalParameter = GlobalDefinition
+        self.elements.update({202: ProjectDefinition(), 203: GlobalDefinition(), 205: SharedDefinition()})
+        self.space.Parameters = [
+            Parameter(-200, 'Built-in', 'String', 'value'),
+            Parameter(201, 'Shared', 'String', 'value', isShared=True),
+            Parameter(202, 'Project', 'String', 'value'),
+            Parameter(203, 'Global', 'String', 'value'),
+            Parameter(204, 'Other', 'String', 'value'),
+            Parameter(205, 'Shared definition', 'String', 'value'),
+        ]
+        snapshot = self.snapshot()
+        self.assertEqual({'-200': 'Built-In', '201': 'Shared Parameter', '202': 'Project Parameter',
+                          '203': 'Global Parameter', '204': 'Other', '205': 'Shared Parameter'},
+                         {item['id']: item['parameterType'] for item in snapshot['parameters']})
+        self.assertEqual(0, snapshot['skippedCount'])
+
+    def test_unresolved_parameter_origin_does_not_guess_project_parameter(self):
+        parameter = Parameter(201, 'Unknown', 'String', 'value')
+        self.document.GetElement = mock.Mock(side_effect=ValueError('definition inaccessible'))
+        self.assertEqual('Other', core.BuildParameterDescriptor(parameter, self.db, self.document)['parameterType'])
+        parameter.Id = Id(-1)
+        self.assertEqual('Other', core.GetParameterType(parameter, self.document, self.db))
+
+    def test_parameter_and_filter_identities_are_persistent_and_not_display_names(self):
+        builtin = Parameter(-200, 'Builtin', 'String', 'value')
+        shared = Parameter(201, 'Same name', 'String', 'value', isShared=True)
+        shared.GUID = '6CBA6914-A10E-4BE7-900A-B8A85FB041D8'
+        project = Parameter(202, 'Same name', 'String', 'value')
+        self.elements[202] = NS(UniqueId='project-definition-uid')
+        self.elements[10].UniqueId = 'phase-uid'
+        self.elements[20].UniqueId = 'level-uid'
+        self.space.Parameters = [builtin, shared, project]
+        snapshot = self.snapshot()
+        self.assertEqual({'-200': 'builtin:-200', '201': 'shared:6cba6914-a10e-4be7-900a-b8a85fb041d8',
+                          '202': 'project:project-definition-uid'},
+                         {item['id']: item['identity'] for item in snapshot['parameters']})
+        self.assertEqual('phase-uid', snapshot['phases'][0]['uniqueId'])
+        self.assertEqual('level-uid', snapshot['levels'][0]['uniqueId'])
+
+    def test_bad_parameter_definition_is_reported_without_skipping_row(self):
+        parameter = Parameter(201, 'Good', 'String', 'value')
+        broken = NS(Id=Id(202), StorageType='Double', Definition=None)
+        self.space.Parameters = [broken, parameter]
+        snapshot = self.snapshot()
+        self.assertEqual(['201'], [item['id'] for item in snapshot['parameters']])
+        self.assertEqual(0, snapshot['skippedCount'])
+        self.assertTrue(any('Parameter definition unavailable' in warning for warning in snapshot['rows'][0]['warnings']))
+
+    def test_nonfinite_selected_parameter_is_reported_without_invalid_json(self):
+        self.space.Parameters = [Parameter(201, 'Invalid Number', 'Double', float('inf'), text='infinity')]
+        snapshot = core.BuildSnapshot(self.document, 'document-key', self.db, ['201'])
+        self.assertIsNone(snapshot['rows'][0]['parameterValues']['p201'])
+        self.assertEqual(0, snapshot['skippedCount'])
+        json.dumps(snapshot, allow_nan=False)
+
     def test_navigation_skips_deleted_rows_and_selects_remaining_spaces(self):
         other = Space(2)
         self.document.spaces.append(other)
@@ -230,6 +387,25 @@ class SpaceSnapshotTests(unittest.TestCase):
 
 
 class RequestTests(unittest.TestCase):
+    def test_saved_table_requests_are_document_bound_and_validated_before_queueing(self):
+        message = {'action': 'saveTable', 'requestId': 'table-1', 'tableId': '', 'revision': '',
+                   'documentKey': 'doc', 'name': '  Review  ', 'layout': {}}
+        self.assertEqual('Review', core.ValidateRequest(message, 'doc', {})['name'])
+        for changes in ({'documentKey': 'other'}, {'name': ''}, {'name': None}, {'layout': []},
+                        {'requestId': None}, {'tableId': 123}, {'revision': []}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                core.ValidateRequest(dict(message, **changes), 'doc', {})
+
+    def test_parameter_selection_accepts_only_known_string_ids_and_preserves_refresh_selection(self):
+        snapshot = {'parameters': [{'id': '1'}, {'id': '2'}], 'selectedParameterIds': ['2']}
+        request = core.ValidateRequest({'action': 'refresh', 'documentKey': 'doc'}, 'doc', snapshot)
+        self.assertEqual(['2'], request['parameterIds'])
+        request = core.ValidateRequest({'action': 'refresh', 'documentKey': 'doc', 'parameterIds': ['1', '1']}, 'doc', snapshot)
+        self.assertEqual(['1'], request['parameterIds'])
+        for ids in ('1', [1], ['unknown'], None):
+            with self.subTest(ids=ids), self.assertRaises(ValueError):
+                core.ValidateRequest({'action': 'refresh', 'documentKey': 'doc', 'parameterIds': ids}, 'doc', snapshot)
+
     def test_rejects_malformed_foreign_and_unknown_element_requests(self):
         invalid = [None, [], {'action': 'save'}, {'action': 'refresh', 'documentKey': 'other'},
                    {'action': 'select', 'documentKey': 'doc', 'elementIds': [1]},
@@ -253,6 +429,7 @@ def host_classes():
     api = {'Window': object, 'IExternalEventHandler': object, 'collections': collections,
            'json': json, 'ValidateRequest': core.ValidateRequest, 'Logger': mock.Mock(),
            'Visibility': NS(Collapsed=0, Visible=1), 'DB': object(), '_DATA_TABLE_WINDOWS': []}
+    api.update({name: getattr(saved, name) for name in ('CaptureLayout', 'ResolveLayout', 'TableMetadata', 'ValidateLayout')})
     exec(compile(ast.Module(body=classes, type_ignores=[]), str(COMMAND), 'exec'), api)
     return api
 
@@ -303,6 +480,90 @@ class HostSafetyTests(unittest.TestCase):
         self.assertEqual(0, len(self.handler.Requests))
         self.assertIn('Activate', self.window.SendResult.call_args.args[1])
 
+    def test_saved_table_failure_is_correlated_and_preserves_the_working_snapshot(self):
+        self.window.Document = NS(IsValidObject=True, Equals=lambda document: True)
+        self.window.Send = mock.Mock()
+        self.window.TableStore = NS(Write=mock.Mock(side_effect=ValueError('owned by another user')))
+        self.api['CaptureLayout'] = mock.Mock(return_value={'portable': 'layout'})
+        before = self.window.Snapshot
+        self.send({'action': 'saveTable', 'requestId': 'table-1', 'documentKey': 'doc',
+                   'name': 'Review', 'layout': {}})
+        self.window.TableStore.Write.assert_not_called()
+        self.handler.Execute(NS(ActiveUIDocument=NS(Document=self.window.Document)))
+        self.assertIs(before, self.window.Snapshot)
+        self.assertFalse(self.window.WritingTables)
+        response = self.window.Send.call_args.args[0]
+        self.assertEqual(('tableResult', 'table-1', False),
+                         (response['type'], response['requestId'], response['success']))
+        self.assertIn('owned', response['message'])
+
+    def test_saved_table_bridge_transacts_metadata_and_loads_fresh_space_values(self):
+        import test_saved_tables as fixtures
+        host = fixtures.StoreHost()
+        host.document.IsValidObject = True
+        host.document.Equals = lambda document: document is host.document
+        self.window.Document = host.document
+        self.window.TableStore = host.store
+        self.window.Send = mock.Mock()
+        self.window.Snapshot = dict(fixtures.snapshot(), documentKey='doc', rows=[])
+        self.api['DB'] = host.db
+        self.send({'action': 'saveTable', 'documentKey': 'doc', 'requestId': 'save-1',
+                   'name': 'Review', 'layout': fixtures.runtime()})
+        self.handler.Execute(NS(ActiveUIDocument=NS(Document=host.document)))
+        response = self.window.Send.call_args.args[0]
+        self.assertTrue(response['success'])
+        self.assertEqual(1, len(host.elements))
+        tableId = response['table']['id']
+        self.assertEqual(tableId, response['catalog']['savedTables'][0]['id'])
+        self.assertTrue(host.transactions[0].disposed)
+        host.definitions[fixtures.SHARED_GUID] = NS(Id=NS(Value=201))
+        current = dict(fixtures.snapshot(), documentKey='doc', rows=[{'fresh': 'Space values'}])
+        self.api['BuildSnapshot'] = mock.Mock(return_value=current)
+        self.send({'action': 'loadTable', 'documentKey': 'doc', 'requestId': 'load-2', 'tableId': tableId})
+        self.handler.Execute(NS(ActiveUIDocument=NS(Document=host.document)))
+        response = self.window.Send.call_args.args[0]
+        self.assertTrue(response['success'])
+        self.assertEqual([{'fresh': 'Space values'}], response['snapshot']['rows'])
+        self.assertEqual(fixtures.runtime(), response['layout'])
+        self.assertEqual(['201'], self.api['BuildSnapshot'].call_args.args[3])
+        self.assertEqual(1, len(host.transactions), 'opening a saved view does not create transactions')
+
+    def test_native_close_waits_for_browser_choice_and_closed_documents_bypass_prompt(self):
+        self.window.Ready = True
+        self.window.ClosePermit = False
+        self.window.Document = NS(IsValidObject=True)
+        self.window.Send = mock.Mock()
+        args = NS(Cancel=False)
+        self.window.HandleClosing(None, args)
+        self.assertTrue(args.Cancel)
+        self.window.Send.assert_called_once_with({'type': 'closeRequest'})
+        self.window.Document.IsValidObject = False
+        args = NS(Cancel=False)
+        self.window.HandleClosing(None, args)
+        self.assertFalse(args.Cancel)
+
+    def test_confirmed_close_needs_no_document_action_even_when_another_model_is_active(self):
+        self.window.DocumentActive = False
+        self.window.Close = mock.Mock()
+        self.send({'action': 'closeWindow', 'documentKey': 'doc'})
+        self.window.Close.assert_called_once()
+        self.assertTrue(self.window.ClosePermit)
+        self.assertEqual(0, len(self.handler.Requests))
+
+    def test_parameter_selection_is_read_inside_external_event_and_published_in_snapshot(self):
+        self.window.Document = NS(IsValidObject=True, Equals=lambda document: True)
+        self.window.SendSnapshot = mock.Mock()
+        self.window.SendContext = mock.Mock()
+        snapshot = {'rows': [], 'skippedCount': 0, 'selectedParameterIds': ['1']}
+        buildSnapshot = mock.Mock(return_value=snapshot)
+        self.api['BuildSnapshot'] = buildSnapshot
+        self.handler.Requests.append({'action': 'refresh', 'parameterIds': ['1']})
+        self.handler.Execute(NS(ActiveUIDocument=NS(Document=self.window.Document)))
+        self.assertEqual(['1'], buildSnapshot.call_args.args[3])
+        self.assertIs(snapshot, self.window.Snapshot)
+        self.assertFalse(self.window.Outdated)
+        self.window.SendSnapshot.assert_called_once()
+
     def test_model_change_marks_stale_without_replacing_snapshot(self):
         snapshot = self.window.Snapshot
         self.window.Document = object()
@@ -350,6 +611,8 @@ class HostSafetyTests(unittest.TestCase):
         self.window.Browser.CoreWebView2InitializationCompleted += self.window.OnCoreInitialized
         self.window.Loaded = Event()
         self.window.Loaded += self.window.OnLoaded
+        self.window.Closing = Event()
+        self.window.Closing += self.window.HandleClosing
         self.window.Closed = Event()
         self.window.Closed += self.window.HandleClosed
         self.window.ExternalEvent = NS(Dispose=mock.Mock())
@@ -358,7 +621,7 @@ class HostSafetyTests(unittest.TestCase):
         self.window.HandleClosed(None, None)
         self.window.HandleClosed(None, None)  # Cleanup is idempotent.
         for event in [documentChanged, documentClosed, viewActivated, *coreEvents,
-                      self.window.Loaded, self.window.Closed,
+                      self.window.Loaded, self.window.Closing, self.window.Closed,
                       self.window.Browser.CoreWebView2InitializationCompleted]:
             self.assertEqual([], event.handlers)
         self.window.Browser.Dispose.assert_called_once()

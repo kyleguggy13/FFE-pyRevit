@@ -42,7 +42,58 @@
     return rows.filter(row => ids.has(row.id) && matches(row, filters)).map(row => row.id);
   }
 
-  const model = { compareNatural, compareNumeric, compareLevel, matches, reconcileFilters, selectedVisibleIds };
+  function groupValue(row, field) {
+    if (field === "level") return row.levelId ?? row.level;
+    if (field === "phase") return row.phaseId ?? row.phase;
+    if (field.startsWith("parameterValues.")) return row.parameterValues?.[field.slice("parameterValues.".length)];
+    return row[field];
+  }
+
+  function groupKey(row, field) {
+    const value = groupValue(row, field);
+    // Typed keys preserve zero, leading zeros, exact IDs, and literal text without
+    // colliding with missing values or object property names inside the grid.
+    return JSON.stringify(value == null || value === "" ? ["missing"] : [typeof value, value]);
+  }
+
+  function groupLabel(row, field) {
+    const value = groupValue(row, field);
+    if (value == null || value === "") return "No value";
+    let text = row[field];
+    if (field === "areaValue") text = row.areaText;
+    else if (field === "heightValue") text = row.heightText;
+    else if (field.startsWith("parameterValues.")) text = row.parameterTexts?.[field.slice("parameterValues.".length)];
+    return String(text ?? value);
+  }
+
+  /** Keep surviving header bands disjoint and arrange their members together. */
+  function headerLayout(fields, groups) {
+    const available = new Set(fields);
+    const assigned = new Set();
+    const bands = [];
+    for (const group of groups) {
+      const members = fields.filter(field => available.has(field) && group.fields.includes(field) && !assigned.has(field));
+      members.forEach(field => assigned.add(field));
+      if (members.length) bands.push({ name: group.name, fields: members });
+    }
+    const membership = new Map(bands.flatMap(group => group.fields.map(field => [field, group])));
+    const emitted = new Set();
+    const ordered = [];
+    const orderedBands = [];
+    for (const field of fields) {
+      const band = membership.get(field);
+      if (!band) ordered.push(field);
+      else if (!emitted.has(band)) {
+        emitted.add(band);
+        ordered.push(...band.fields);
+        orderedBands.push(band);
+      }
+    }
+    return { fields: ordered, groups: orderedBands };
+  }
+
+  const model = { compareNatural, compareNumeric, compareLevel, matches, reconcileFilters,
+    selectedVisibleIds, groupKey, groupLabel, headerLayout };
   if (typeof module !== "undefined" && module.exports) module.exports = model;
   else scope.RevitTableModel = model;
 })(typeof globalThis === "undefined" ? this : globalThis);

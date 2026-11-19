@@ -9,18 +9,34 @@
   <link rel="stylesheet" href="styles.css">
   <script src="vendor/tabulator.min.js" defer></script>
   <script src="table_model.js" defer></script>
+  <script src="saved_tables.js" defer></script>
+  <script src="column_grouping.js" defer></script>
+  <script src="header_groups.js" defer></script>
   <script src="site.js" defer></script>
 </head>
 <body>
   <header class="header">
     <div>
       <div class="eyebrow">FFE · MECHANICAL</div>
-      <h1>Spaces <span class="readonly">Read only</span></h1>
-      <p id="document-title">Connecting to Revit…</p>
+      <h1>Spaces <span class="readonly">Space values read only</span></h1>
     </div>
-    <button id="refresh" class="primary" disabled>Refresh</button>
+    <div class="header-actions">
+      <button id="column-groups" disabled>Column groups…</button>
+      <button id="parameters" disabled>Parameters…</button>
+      <button id="refresh" class="primary" disabled>Refresh</button>
+    </div>
   </header>
   <main>
+    <div class="saved-tables" aria-label="Shared saved tables">
+      <label>Table <select id="saved-table" disabled><option value="">Unsaved table</option></select></label>
+      <span id="table-dirty" role="status"></span>
+      <button id="table-reopen" title="Reload the selected saved definition and current Space data" disabled>Reopen</button>
+      <button id="table-save" disabled>Save</button>
+      <button id="table-save-as" disabled>Save As…</button>
+      <button id="table-rename" disabled>Rename…</button>
+      <button id="table-delete" disabled>Delete…</button>
+    </div>
+    <div id="table-note" class="notice" role="status" hidden></div>
     <div class="toolbar" aria-label="Space filters">
       <label class="search">Search Spaces
         <input id="search" type="search" placeholder="Number, name, or level…" autocomplete="off" disabled>
@@ -34,6 +50,13 @@
       <button id="select-revit" disabled>Select in Revit</button>
       <button id="show-revit" disabled>Show in Revit</button>
     </div>
+    <div class="grouping-bar">
+      <div id="group-drop-zone" class="group-drop-zone" role="group" aria-label="Column grouping drop area" aria-disabled="true" tabindex="-1">
+        <ol id="group-chips" aria-label="Grouping hierarchy, outermost first"></ol>
+        <span id="group-drop-label" aria-live="polite">Drag column headers here to group</span>
+        <button id="group-clear" type="button" title="Clear all grouping" hidden>Clear all</button>
+      </div>
+    </div>
     <div id="context" class="notice" role="status" hidden></div>
     <div id="grid" aria-label="Revit Spaces table" tabindex="0"></div>
     <details id="issues" hidden>
@@ -46,5 +69,64 @@
     <span id="refreshed">Not refreshed yet</span>
   </footer>
   <div class="hint">Click rows to select · Shift+click selects a range · ↑/↓ moves focus · Space toggles selection · Ctrl+click a header adds a sort · Height is unbounded height</div>
+  <dialog id="parameter-dialog" aria-labelledby="parameter-title" aria-describedby="parameter-help">
+    <form id="parameter-form" method="dialog">
+      <div class="parameter-heading">
+        <h2 id="parameter-title">Space parameters</h2>
+        <p id="parameter-help">Displayed columns are checked. The five starter columns stay checked and visible.</p>
+        <label for="parameter-search">Search parameters</label>
+        <input id="parameter-search" type="search" placeholder="Parameter name, data type, or parameter type…" autocomplete="off" autofocus>
+        <label class="parameter-checked-toggle">
+          <input id="parameter-checked-only" type="checkbox" role="switch">
+          Show checked only
+        </label>
+      </div>
+      <div class="parameter-scroll">
+        <table class="parameter-list">
+          <thead><tr>
+            <th class="checkbox-column"><input id="parameters-all" type="checkbox" aria-label="Select all filtered parameters"></th>
+            <th scope="col">Parameter name</th><th scope="col">Data type</th><th scope="col">Parameter type</th>
+          </tr></thead>
+          <tbody id="parameter-list"></tbody>
+        </table>
+        <p id="parameters-empty" hidden>No parameters match your search.</p>
+      </div>
+      <div class="parameter-footer">
+        <span id="parameter-count" role="status" aria-live="polite"></span>
+        <button id="parameter-cancel" type="button">Cancel</button>
+        <button id="parameter-apply" class="primary" type="submit">Apply</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="header-groups-dialog" aria-labelledby="header-groups-title" aria-describedby="header-groups-help">
+    <form id="header-groups-form" method="dialog">
+      <div class="header-groups-intro">
+        <h2 id="header-groups-title">Column groups</h2>
+        <p id="header-groups-help">Name a header band and choose its columns. Each column can belong to one band. Applying moves its columns together at the first member's position.</p>
+        <button id="header-group-add" type="button">Add header group</button>
+      </div>
+      <div id="header-group-list"></div>
+      <p id="header-groups-empty">No header groups. Add a group to organize related columns.</p>
+      <div class="header-groups-footer">
+        <span id="header-groups-error" role="alert"></span>
+        <button id="header-groups-cancel" type="button">Cancel</button>
+        <button id="header-groups-apply" class="primary" type="submit">Apply</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="table-dialog" aria-labelledby="table-dialog-title" aria-describedby="table-dialog-message">
+    <form id="table-dialog-form" method="dialog">
+      <h2 id="table-dialog-title">Saved table</h2>
+      <p id="table-dialog-message"></p>
+      <label id="table-name-label">Table name
+        <input id="table-name" type="text" maxlength="100" required autocomplete="off">
+      </label>
+      <div class="dialog-actions">
+        <button id="table-dialog-cancel" type="button">Cancel</button>
+        <button id="table-dialog-discard" type="button" hidden>Discard</button>
+        <button id="table-dialog-confirm" class="primary" type="submit">Save</button>
+      </div>
+    </form>
+  </dialog>
 </body>
 </html>

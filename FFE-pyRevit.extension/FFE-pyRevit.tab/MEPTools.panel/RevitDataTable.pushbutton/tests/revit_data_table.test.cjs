@@ -42,3 +42,43 @@ test('navigation and refresh selection exclude deleted and filtered rows without
   assert.deepEqual(model.selectedVisibleIds(rows, ['9007199254740993', '9007199254740994', 'deleted'],
     { phase: '2', level: 'all', query: '' }), ['9007199254740994']);
 });
+
+test('grouping distinguishes missing values, zero, leading zeros, and exact element identities', () => {
+  assert.notEqual(model.groupKey({ number: '002' }, 'number'), model.groupKey({ number: '2' }, 'number'));
+  assert.notEqual(model.groupKey({ areaValue: 0 }, 'areaValue'), model.groupKey({ areaValue: null }, 'areaValue'));
+  assert.equal(model.groupKey({}, 'name'), model.groupKey({ name: '' }, 'name'));
+  assert.notEqual(model.groupKey({ levelId: '9007199254740993', level: 'Same name' }, 'level'),
+    model.groupKey({ levelId: '9007199254740994', level: 'Same name' }, 'level'));
+  assert.notEqual(model.groupKey({ name: '__proto__' }, 'name'), '__proto__');
+});
+
+test('parameter group labels use Revit formatting while group identity uses the raw value', () => {
+  const row = { parameterValues: { p1: 0, p2: null, p3: '<literal>' },
+    parameterTexts: { p1: '0 CFM', p2: '—', p3: '<literal>' }, areaValue: 100, areaText: '100 ft²' };
+  assert.equal(model.groupLabel(row, 'parameterValues.p1'), '0 CFM');
+  assert.equal(model.groupLabel(row, 'parameterValues.p2'), 'No value');
+  assert.equal(model.groupLabel(row, 'parameterValues.p3'), '<literal>');
+  assert.equal(model.groupLabel(row, 'areaValue'), '100 ft²');
+  assert.equal(model.groupLabel({ name: 'No value' }, 'name'), 'No value');
+  assert.notEqual(model.groupKey(row, 'parameterValues.p2'), model.groupKey({ name: 'No value' }, 'name'));
+});
+
+test('header bands collect nonadjacent members at the first member and keep leaf order', () => {
+  const fields = ['level', 'number', 'name', 'areaValue', 'heightValue'];
+  const groups = [{ name: 'Dimensions', fields: ['heightValue', 'areaValue'] },
+    { name: 'Identity', fields: ['name', 'level'] }];
+  assert.deepEqual(model.headerLayout(fields, groups), {
+    fields: ['level', 'name', 'number', 'areaValue', 'heightValue'],
+    groups: [{ name: 'Identity', fields: ['level', 'name'] },
+      { name: 'Dimensions', fields: ['areaValue', 'heightValue'] }],
+  });
+  assert.deepEqual(fields, ['level', 'number', 'name', 'areaValue', 'heightValue']);
+  assert.deepEqual(groups[0].fields, ['heightValue', 'areaValue']);
+});
+
+test('header bands drop unavailable members and empty bands without duplicating columns', () => {
+  assert.deepEqual(model.headerLayout(['level', 'name'], [
+    { name: 'Identity', fields: ['level', 'missing'] },
+    { name: 'Duplicate', fields: ['level'] }, { name: 'Removed', fields: ['missing'] },
+  ]), { fields: ['level', 'name'], groups: [{ name: 'Identity', fields: ['level'] }] });
+});

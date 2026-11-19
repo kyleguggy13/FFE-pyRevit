@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """Purpose: browse host-model Spaces in a modeless, offline WebView2 data grid.
-Behaviors: phase/level filtering, explicit refresh, selection and show in Revit.
+Behaviors: complete shared saved views, filtering/grouping, refresh, and navigation.
 Revit API: 2025/2026, persistent IronPython engine, queued ExternalEvent requests.
 Design: browser callbacks use snapshots only; all document reads and navigation
-run in API callbacks. This command opens no transactions and writes no model data.
+run in API callbacks. Saved-table operations transact metadata; Space values stay read-only.
 """
 __title__ = "Revit Data\nTable"
-__version__ = "0.1.1"
+__version__ = "0.9.0"
 __min_revit_ver__ = 2025
 __persistentengine__ = True
 
@@ -27,7 +27,6 @@ from System.Collections.Generic import List
 from System.Windows import (Window, WindowState, WindowStartupLocation,
                             Thickness, Visibility, TextWrapping)
 from System.Windows.Controls import Grid, TextBlock
-from System.Windows.Interop import WindowInteropHelper
 from Autodesk.Revit.UI import ExternalEvent, IExternalEventHandler
 from pyrevit import DB, forms, script
 
@@ -40,6 +39,7 @@ if LibraryDirectory not in sys.path:
 
 from ffe_webview2 import load_webview2_types, format_webview2_error
 from revit_data_table import BuildSnapshot, ValidateRequest, NavigateSpaces
+from saved_tables import RevitTableStore, CaptureLayout, ResolveLayout, TableMetadata, ValidateLayout
 
 try:
     _DATA_TABLE_WINDOWS
@@ -72,32 +72,39 @@ class DataTableEventHandler(IExternalEventHandler):
                         not window.Document.Equals(uiDocument.Document)):
                     raise ValueError("Activate this table's model in Revit, then retry.")
                 if request["action"] == "refresh":
-                    snapshot = BuildSnapshot(window.Document, window.DocumentKey, DB)
-                    window.Snapshot = snapshot
+                    snapshot = BuildSnapshot(window.Document, window.DocumentKey, DB,
+                                             request.get("parameterIds", window.Snapshot.get("selectedParameterIds", [])))
+                    window.SetSnapshot(snapshot)
                     window.Outdated = False
                     window.SendSnapshot()
                     window.SendContext()
                     window.SendResult("warning" if snapshot["skippedCount"] else "success",
                                       "Refreshed {0} Space(s). Skipped {1}.".format(
                         len(snapshot["rows"]), snapshot["skippedCount"]))
+                elif request.get("requestId"):
+                    window.HandleTableRequest(request)
                 else:
                     result = NavigateSpaces(uiDocument, window.Snapshot, request, DB,
                                             lambda ids: List[DB.ElementId](ids))
                     window.SendResult(result["kind"], result["message"])
             except Exception as error:
                 Logger.warning("Data table request failed: {0}".format(error))
-                window.SendResult("error", str(error))
+                if request.get("requestId"):
+                    window.SendTableFailure(request, error)
+                else:
+                    window.SendResult("error", str(error))
 
 
 class DataTableWindow(Window):
     """Own a document-bound WebView and release all modeless resources on close."""
 
     def __init__(self, uiApplication, document, snapshot, handler, externalEvent,
-                 webViewType, creationType):
+                 webViewType, creationType, tableStore=None):
         Window.__init__(self)
         self.Document = document
         self.DocumentKey = snapshot["documentKey"]
-        self.Snapshot = snapshot
+        self.TableStore = tableStore
+        self.SetSnapshot(snapshot)
         self.Handler = handler
         self.ExternalEvent = externalEvent
         self.Application = uiApplication
@@ -107,14 +114,19 @@ class DataTableWindow(Window):
         self.Ready = False
         self.Subscribed = False
         self.Core = None
+        self.ClosePermit = False
+        self.WritingTables = False
         self.IndexUri = Uri(os.path.abspath(os.path.join(SupportDirectory, "index.html"))).AbsoluteUri
         self.Title = "Revit Data Table - " + snapshot["documentTitle"]
         self.Width = 1160
         self.Height = 740
         self.MinWidth = 760
         self.MinHeight = 480
-        self.WindowStartupLocation = WindowStartupLocation.CenterOwner
-        WindowInteropHelper(self).Owner = uiApplication.MainWindowHandle
+        # An owned window always stays above Revit. Keep this modeless window
+        # independent so normal focus changes can put Revit in front of it.
+        self.WindowStartupLocation = WindowStartupLocation.CenterScreen
+        self.Topmost = False
+        self.ShowInTaskbar = True
 
         self.StatusText = TextBlock()
         self.StatusText.Text = "Loading Revit Data Table..."
@@ -138,6 +150,7 @@ class DataTableWindow(Window):
         self.Content = content
 
         self.Loaded += self.OnLoaded
+        self.Closing += self.HandleClosing
         self.Closed += self.HandleClosed
         self.Browser.CoreWebView2InitializationCompleted += self.OnCoreInitialized
         handler.Window = self
@@ -191,6 +204,7 @@ class DataTableWindow(Window):
         """Parse snapshot-only requests; never access the document from this callback."""
         if self.IsClosed or args.Source != self.IndexUri:
             return
+        message = None
         try:
             message = json.loads(args.WebMessageAsJson)
             request = ValidateRequest(message, self.DocumentKey, self.Snapshot)
@@ -199,6 +213,10 @@ class DataTableWindow(Window):
                 self.StatusText.Visibility = Visibility.Collapsed
                 self.SendSnapshot()
                 self.SendContext()
+                return
+            if request["action"] == "closeWindow":
+                self.ClosePermit = True
+                self.Close()
                 return
             if not self.DocumentActive:
                 raise ValueError("Activate this table's model in Revit, then retry.")
@@ -213,7 +231,59 @@ class DataTableWindow(Window):
                 self.Handler.Requests.pop()
                 raise
         except Exception as error:
-            self.SendResult("error", str(error))
+            if isinstance(message, dict) and message.get("requestId"):
+                self.SendTableFailure(message, error)
+            else:
+                self.SendResult("error", str(error))
+
+    def SetSnapshot(self, snapshot):
+        """Attach the latest model catalog without creating storage on read."""
+        store = getattr(self, "TableStore", None)
+        if store is not None:
+            try:
+                records, issues = store.List()
+                snapshot["savedTables"] = sorted([TableMetadata(record) for element, record in records],
+                                                 key=lambda item: (item["name"].lower(), item["id"]))
+                snapshot["tableIssues"] = issues
+                snapshot["canSaveTables"] = not self.Document.IsReadOnly
+            except Exception as error:
+                snapshot["savedTables"] = []
+                snapshot["tableIssues"] = ["Could not read saved tables: {0}".format(error)]
+                snapshot["canSaveTables"] = False
+        self.Snapshot = snapshot
+
+    def HandleTableRequest(self, request):
+        """Read or transact table definitions only from the external-event handler."""
+        action = request["action"]
+        if action == "loadTable":
+            record = self.TableStore.Read(request["tableId"])[1] if request["tableId"] else None
+            selectedIds = self.TableStore.ResolveParameterIds(record["layout"]) if record else []
+            snapshot = BuildSnapshot(self.Document, self.DocumentKey, DB, selectedIds)
+            layout, warnings = ResolveLayout(record["layout"], snapshot) if record else (None, [])
+            self.SetSnapshot(snapshot)
+            self.Outdated = False
+            self.SendContext()
+            self.Send({"type": "tableResult", "action": action, "requestId": request["requestId"],
+                       "success": True, "table": TableMetadata(record) if record else None,
+                       "snapshot": snapshot, "layout": layout, "warnings": warnings})
+            return
+        layout = CaptureLayout(request["layout"], self.Snapshot) if action == "saveTable" else None
+        self.WritingTables = True
+        try:
+            record = self.TableStore.Write(action, request["tableId"], request["revision"],
+                                           request["name"], layout)
+        finally:
+            self.WritingTables = False
+        self.SetSnapshot(self.Snapshot)
+        self.Send({"type": "tableResult", "action": action, "requestId": request["requestId"],
+                   "success": True, "table": TableMetadata(record) if record else None,
+                   "catalog": {key: self.Snapshot.get(key) for key in ("savedTables", "tableIssues", "canSaveTables")},
+                   "layout": ValidateLayout(request["layout"]) if action == "saveTable" else None})
+
+    def SendTableFailure(self, request, error):
+        """Retain the browser's working view when saving/loading cannot complete."""
+        self.Send({"type": "tableResult", "action": request.get("action"),
+                   "requestId": request.get("requestId"), "success": False, "message": str(error)})
 
     def Send(self, payload):
         """Post structured JSON instead of interpolating model text into scripts."""
@@ -239,10 +309,11 @@ class DataTableWindow(Window):
         """Leave initialization/transport errors readable even if JavaScript fails."""
         self.StatusText.Text = str(message)
         self.StatusText.Visibility = Visibility.Visible
+        self.Ready = False
 
     def OnDocumentChanged(self, sender, args):
         """Invalidate after edits, undo, or redo without replacing the displayed rows."""
-        if not self.IsClosed and args.GetDocument().Equals(self.Document):
+        if not self.IsClosed and not getattr(self, "WritingTables", False) and args.GetDocument().Equals(self.Document):
             self.Outdated = True
             self.SendContext()
 
@@ -258,7 +329,15 @@ class DataTableWindow(Window):
     def OnDocumentClosed(self, sender, args):
         """A closed document must never leave a navigable table behind."""
         if not self.IsClosed and not self.Document.IsValidObject:
+            self.ClosePermit = True
             self.Close()
+
+    def HandleClosing(self, sender, args):
+        """Let the browser resolve Save/Discard/Cancel before the native window closes."""
+        if self.IsClosed or self.ClosePermit or not self.Ready or not self.Document.IsValidObject:
+            return
+        args.Cancel = True
+        self.Send({"type": "closeRequest"})
 
     def HandleClosed(self, sender, args):
         """Detach delegates before disposing their browser/event targets."""
@@ -285,6 +364,7 @@ class DataTableWindow(Window):
                 Logger.warning("Data table browser cleanup: {0}".format(error))
         self.Browser.CoreWebView2InitializationCompleted -= self.OnCoreInitialized
         self.Loaded -= self.OnLoaded
+        self.Closing -= self.HandleClosing
         self.Closed -= self.HandleClosed
         for resource in (self.Browser, self.ExternalEvent):
             try:
@@ -329,7 +409,7 @@ def Main():
         handler = DataTableEventHandler()
         externalEvent = ExternalEvent.Create(handler)
         window = DataTableWindow(uiApplication, document, snapshot, handler, externalEvent,
-                                 webViewType, creationType)
+                                 webViewType, creationType, RevitTableStore(document, DB))
         window.Subscribe()
         _DATA_TABLE_WINDOWS.append(window)
         window.Show()
