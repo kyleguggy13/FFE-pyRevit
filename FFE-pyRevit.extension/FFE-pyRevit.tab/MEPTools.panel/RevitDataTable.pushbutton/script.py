@@ -5,8 +5,8 @@ Revit API: 2025/2026, persistent IronPython engine, queued ExternalEvent request
 Design: browser callbacks use snapshots only; all document reads and navigation
 run in API callbacks. Saved-table operations transact metadata; Space values stay read-only.
 """
-__title__ = "Revit Data\nTable"
-__version__ = "0.9.0"
+__title__ = "HVAC Data"
+__version__ = "0.9.3"
 __min_revit_ver__ = 2025
 __persistentengine__ = True
 
@@ -59,7 +59,7 @@ class DataTableEventHandler(IExternalEventHandler):
 
     def GetName(self):
         """Describe this bridge in Revit's event diagnostics."""
-        return "FFE Revit Data Table"
+        return "HVAC Data"
 
     def Execute(self, uiApplication):
         """Recheck document identity at execution time, including queued requests."""
@@ -117,7 +117,7 @@ class DataTableWindow(Window):
         self.ClosePermit = False
         self.WritingTables = False
         self.IndexUri = Uri(os.path.abspath(os.path.join(SupportDirectory, "index.html"))).AbsoluteUri
-        self.Title = "Revit Data Table - " + snapshot["documentTitle"]
+        self.Title = "HVAC Data - " + snapshot["documentTitle"]
         self.Width = 1160
         self.Height = 740
         self.MinWidth = 760
@@ -129,7 +129,7 @@ class DataTableWindow(Window):
         self.ShowInTaskbar = True
 
         self.StatusText = TextBlock()
-        self.StatusText.Text = "Loading Revit Data Table..."
+        self.StatusText.Text = "Loading HVAC Data..."
         self.StatusText.Margin = Thickness(24)
         self.StatusText.TextWrapping = TextWrapping.Wrap
         self.Browser = webViewType()
@@ -392,7 +392,7 @@ def Main():
     uiApplication = __revit__
     uiDocument = uiApplication.ActiveUIDocument
     if uiDocument is None or uiDocument.Document.IsFamilyDocument:
-        forms.alert("Open a Revit project to browse Spaces.", title="Revit Data Table")
+        forms.alert("Open a Revit project to browse Spaces.", title="HVAC Data")
         return
     document = uiDocument.Document
     for window in list(_DATA_TABLE_WINDOWS):
@@ -419,8 +419,8 @@ def Main():
             window.Close()
         elif externalEvent is not None:
             externalEvent.Dispose()
-        Logger.exception("Could not open Revit Data Table")
-        forms.alert("Could not open Revit Data Table.\n\n{0}".format(error), title="Revit Data Table")
+        Logger.exception("Could not open HVAC Data")
+        forms.alert("Could not open HVAC Data.\n\n{0}".format(error), title="HVAC Data")
 
 
 if __name__ == "__main__":

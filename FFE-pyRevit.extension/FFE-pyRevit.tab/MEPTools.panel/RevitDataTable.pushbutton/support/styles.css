@@ -1,11 +1,8 @@
 :root { color-scheme: light; --ink: #203039; --muted: #637780; --border: #d9e2e5; --accent: #166d72; }
 * { box-sizing: border-box; }
 body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; background: #f4f7f8; color: var(--ink); font: 14px "Segoe UI", sans-serif; }
-.header { display: flex; align-items: center; justify-content: space-between; padding: 22px 28px 18px; border-bottom: 1px solid var(--border); background: white; }
-.eyebrow { color: var(--accent); font-size: 11px; letter-spacing: .14em; font-weight: 700; }
-h1 { display: flex; align-items: center; gap: 12px; margin: 4px 0; font-size: 27px; font-weight: 600; }
-.readonly { font-size: 11px; font-weight: 500; color: var(--muted); background: #edf3f4; border-radius: 4px; padding: 4px 7px; }
-.header-actions { display: flex; align-items: center; gap: 8px; }
+.header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 12px 24px; border-bottom: 1px solid var(--border); background: white; }
+.header-actions { display: flex; align-items: center; flex-shrink: 0; gap: 6px; }
 button, input, select { font: inherit; color: var(--ink); border: 1px solid #c8d5da; border-radius: 5px; background: white; min-height: 34px; padding: 6px 11px; }
 button { cursor: pointer; white-space: nowrap; }
 button:hover:enabled { background: #eaf3f3; border-color: var(--accent); }
@@ -14,18 +11,20 @@ button.primary:hover:enabled { background: #10595e; }
 button:disabled, input:disabled, select:disabled { opacity: .5; cursor: default; }
 :focus-visible { outline: 2px solid #168c97; outline-offset: 2px; }
 main { min-height: 0; flex: 1; display: flex; flex-direction: column; padding: 18px 24px 0; gap: 12px; }
-.saved-tables { display: flex; align-items: center; gap: 8px; }
+.saved-tables { display: flex; flex: 1; flex-wrap: wrap; min-width: 0; align-items: center; gap: 6px; }
 .saved-tables label { flex-direction: row; align-items: center; min-width: 0; }
-.saved-tables select { width: 210px; }
-#table-dirty { margin-right: auto; font-size: 11px; color: #82601b; }
+.saved-tables select { width: 170px; height: 30px; min-height: 30px; padding: 5px 8px; font-size: 12px; }
+.header button { height: 30px; min-height: 30px; min-width: 0; padding: 5px 9px; font-size: 12px; line-height: 18px; }
+#table-dirty { font-size: 11px; color: #82601b; }
+#table-dirty:empty { display: none; }
 #table-note { white-space: pre-wrap; max-height: 65px; overflow: auto; flex-shrink: 0; }
 #table-dialog { width: min(460px, calc(100vw - 32px)); border: 1px solid var(--border); border-radius: 8px; padding: 22px; color: var(--ink); }
 #table-dialog::backdrop { background: #182b3866; }
 #table-dialog h2 { margin: 0 0 12px; font-size: 21px; font-weight: 600; }
 #table-dialog p { color: var(--muted); line-height: 1.5; margin: 0 0 18px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
-@media (max-height: 600px) { .header { padding-top: 10px; padding-bottom: 10px; } .hint { display: none; } main { gap: 8px; } }
-@media (max-width: 850px) { .saved-tables select { width: 170px; } .saved-tables button { padding-left: 8px; padding-right: 8px; } }
+@media (max-height: 600px) { .hint { display: none; } main { gap: 8px; } }
+@media (max-width: 850px) { .saved-tables select { width: 150px; } }
 .toolbar { display: flex; align-items: flex-end; gap: 12px; }
 label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; font-weight: 600; color: var(--muted); min-width: 140px; }
 label.search { flex: 1; }
@@ -57,7 +56,7 @@ select { max-width: 230px; }
 .tabulator-col.column-drop-before::before, .tabulator-col.column-drop-after::after { content: ""; position: absolute; top: 0; bottom: 0; width: 3px; background: var(--accent); z-index: 15; pointer-events: none; }
 .tabulator-col.column-drop-before::before { left: 0; }
 .tabulator-col.column-drop-after::after { right: 0; }
-@media (max-height: 600px) { .header { padding-top: 8px; padding-bottom: 8px; } .header .eyebrow { display: none; } .header h1 { font-size: 20px; } main { gap: 6px; padding-top: 8px; } button, input, select { min-height: 28px; } label { gap: 2px; } .group-drop-zone { min-height: 30px; } }
+@media (max-height: 600px) { .header { padding-top: 8px; padding-bottom: 8px; } main { gap: 6px; padding-top: 8px; } button, input, select { min-height: 28px; } label { gap: 2px; } .group-drop-zone { min-height: 30px; } }
 .tabulator .tabulator-row.tabulator-group { background: #e8f1f2; color: var(--ink); border-bottom: 1px solid var(--border); padding-top: 2px; padding-bottom: 2px; }
 .tabulator .tabulator-group .group-toggle { border: 0; background: transparent; color: inherit; min-height: 20px; padding: 1px 6px; text-align: left; font-size: 12px; font-weight: 600; }
 .notice { padding: 9px 12px; background: #fff5d9; border: 1px solid #ead59b; border-radius: 5px; font-size: 13px; }
@@ -66,6 +65,8 @@ select { max-width: 230px; }
 .tabulator .tabulator-header { border-bottom: 1px solid var(--border); background: #eef3f5; color: var(--ink); }
 .tabulator .tabulator-header .tabulator-col { background: #eef3f5; border-right: 1px solid var(--border); }
 .tabulator .tabulator-header .tabulator-col .tabulator-col-content { padding: 6px 12px; }
+.tabulator .tabulator-header .tabulator-col.multi-sort > .tabulator-col-content .tabulator-col-title { padding-right: 38px; }
+.tabulator .tabulator-header .sort-priority { position: relative; top: 4px; margin-left: 2px; min-width: 5px; font-size: 8px; line-height: 1; font-weight: 600; text-align: center; color: var(--ink); pointer-events: none; }
 .tabulator-row { background: white; border-bottom: 1px solid #edf1f3; min-height: 24px; }
 .tabulator-row.tabulator-row-even { background: #f9fbfc; }
 .tabulator-row .tabulator-cell { padding: 4px 12px; border-right: 1px solid #edf1f3; }

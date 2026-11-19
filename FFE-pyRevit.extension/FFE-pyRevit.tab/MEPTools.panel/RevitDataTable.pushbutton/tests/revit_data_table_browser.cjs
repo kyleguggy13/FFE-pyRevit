@@ -69,6 +69,7 @@ async function main() {
       if (field) await dragColumn(field, '#group-drop-zone');
     };
     const grouped = 'Array.from(document.querySelectorAll(".group-chip"), chip => chip.dataset.field)';
+    const sortPriorities = 'Array.from(document.querySelectorAll("#grid .sort-priority"), number => ({field: number.closest(".tabulator-col").getAttribute("tabulator-field"), priority: number.textContent}))';
     const bands = `${grid}.getColumns(true).filter(column => column.getSubColumns().length).map(column => ({name: column.getDefinition().title, fields: column.getSubColumns().map(child => child.getField())}))`;
     const configureHeaders = async (groups, apply = true) => {
       await evaluate(`document.getElementById('column-groups').click();
@@ -243,6 +244,7 @@ async function main() {
     assert.equal(await evaluate('Boolean(document.getElementById("group-by") || document.getElementById("document-title"))'), false);
     const originalOrder = await evaluate(`${grid}.getColumns().map(column => column.getField())`);
     const originalSort = await evaluate(`${grid}.getSorters().map(sorter => ({field:sorter.field, dir:sorter.dir}))`);
+    assert.deepEqual(await evaluate(sortPriorities), [{field:'level',priority:'1'},{field:'number',priority:'2'}], 'multi-sort badges reflect actual comparator priority');
     await dragColumn('level', '#group-drop-zone');
     assert.equal(await evaluate('document.querySelector(".group-chip")?.dataset.field || ""'), 'level');
     assert.equal(await evaluate('document.querySelector(".group-chip-name").textContent'), 'Level');
@@ -285,6 +287,7 @@ async function main() {
     await evaluate(`${grid}.selectRow('9007199254740993')`);
     await configureHeaders(headerGroups);
     assert.deepEqual(await evaluate(bands), headerGroups, 'named native bands contain the chosen leaf columns');
+    assert.deepEqual(await evaluate(sortPriorities), [{field:'level',priority:'1'},{field:'number',priority:'2'}], 'rebuilding grouped headers retains priority badges on leaf columns');
     assert.deepEqual(await evaluate(`${grid}.getColumns().map(column => column.getField())`),
       ['level','name','number','areaValue','heightValue','phase'], 'nonadjacent members move together');
     assert.deepEqual(await evaluate(`${grid}.getSelectedData().map(row => row.id)`), ['9007199254740993'], 'applying header bands retains row selection');
@@ -358,7 +361,54 @@ async function main() {
     await command('Input.dispatchMouseEvent', { type: 'mousePressed', ...clickPoint, button: 'left', buttons: 1, clickCount: 1 });
     await command('Input.dispatchMouseEvent', { type: 'mouseReleased', ...clickPoint, button: 'left', buttons: 0, clickCount: 1 });
     assert.equal(await evaluate(`${grid}.getSorters()[0].field`), 'name', 'clicking draggable headers still sorts');
+    assert.deepEqual(await evaluate(sortPriorities), [], 'single-column sorting has no priority badge');
+    const primaryNameOrder = await evaluate(`${grid}.getRows('active').map(row => row.getData().name)`);
+    const areaSortPoint = await evaluate(`(() => {
+      const bounds = ${grid}.getColumn('areaValue').getElement().getBoundingClientRect();
+      return {x: bounds.left + 35, y: bounds.top + bounds.height / 2};
+    })()`);
+    const ctrlClickArea = async () => {
+      await command('Input.dispatchMouseEvent', {type:'mousePressed', ...areaSortPoint, button:'left', buttons:1, clickCount:1, modifiers:2});
+      await command('Input.dispatchMouseEvent', {type:'mouseReleased', ...areaSortPoint, button:'left', buttons:0, clickCount:1, modifiers:2});
+    };
+    await ctrlClickArea();
+    assert.deepEqual(await evaluate(sortPriorities), [{field:'name',priority:'1'},{field:'areaValue',priority:'2'}], 'Ctrl+click updates sorting priorities immediately');
+    assert.deepEqual(await evaluate(`${grid}.getRows('active').map(row => row.getData().name)`), primaryNameOrder, 'the first selection remains the primary sort');
+    assert.deepEqual(await evaluate(`${grid}.getRows('active').filter(row => row.getData().name === 'Office').map(row => row.getData().areaValue)`), [0,100], 'the second selection breaks ties in the first');
+    await ctrlClickArea();
+    assert.deepEqual(await evaluate(sortPriorities), [{field:'name',priority:'1'},{field:'areaValue',priority:'2'}], 'direction changes retain priority');
+    assert.deepEqual(await evaluate(`${grid}.getRows('active').map(row => row.getData().name)`), primaryNameOrder);
+    assert.deepEqual(await evaluate(`${grid}.getRows('active').filter(row => row.getData().name === 'Office').map(row => row.getData().areaValue)`), [100,0]);
+    const shiftClickNumber = async () => {
+      const point = await evaluate(`(() => {
+        const bounds = ${grid}.getColumn('number').getElement().getBoundingClientRect();
+        return {x: bounds.left + 35, y: bounds.top + bounds.height / 2};
+      })()`);
+      await command('Input.dispatchMouseEvent', {type:'mousePressed', ...point, button:'left', buttons:1, clickCount:1, modifiers:8});
+      await command('Input.dispatchMouseEvent', {type:'mouseReleased', ...point, button:'left', buttons:0, clickCount:1, modifiers:8});
+    };
+    await shiftClickNumber();
+    assert.deepEqual(await evaluate(`${grid}.getSorters().map(sorter => sorter.field)`), ['name','areaValue','number'], 'Shift+click appends the third selection');
+    assert.deepEqual(await evaluate(sortPriorities), [{field:'number',priority:'3'},{field:'name',priority:'1'},{field:'areaValue',priority:'2'}]);
+    const ctrlClickName = async () => {
+      await command('Input.dispatchMouseEvent', {type:'mousePressed', ...clickPoint, button:'left', buttons:1, clickCount:1, modifiers:2});
+      await command('Input.dispatchMouseEvent', {type:'mouseReleased', ...clickPoint, button:'left', buttons:0, clickCount:1, modifiers:2});
+    };
+    await ctrlClickName();
+    assert.deepEqual(await evaluate(`${grid}.getSorters().map(sorter => ({field:sorter.field,dir:sorter.dir}))`),
+      [{field:'name',dir:'desc'},{field:'areaValue',dir:'desc'},{field:'number',dir:'asc'}], 'changing the first sort direction preserves its original priority');
+    assert.deepEqual(await evaluate(sortPriorities), [{field:'number',priority:'3'},{field:'name',priority:'1'},{field:'areaValue',priority:'2'}]);
+    await ctrlClickName();
+    assert.deepEqual(await evaluate(sortPriorities), [{field:'number',priority:'2'},{field:'areaValue',priority:'1'}], 'removing the primary sort renumbers the remaining selections');
+    await ctrlClickArea();
+    assert.deepEqual(await evaluate(sortPriorities), [], 'removing the secondary sort clears all badges for the single remaining column');
+    await ctrlClickName();
+    assert.deepEqual(await evaluate(`${grid}.getSorters().map(sorter => sorter.field)`), ['number','name'], 'a removed column is appended when selected again');
+    assert.deepEqual(await evaluate(sortPriorities), [{field:'number',priority:'1'},{field:'name',priority:'2'}]);
+    await evaluate(`${grid}.clearSort()`);
+    assert.deepEqual(await evaluate(sortPriorities), [], 'cleared sorting leaves no badges');
     await evaluate(`${grid}.setSort(${JSON.stringify(originalSort.map(sorter => ({ column: sorter.field, dir: sorter.dir })))})`);
+    assert.deepEqual(await evaluate(sortPriorities), [{field:'level',priority:'1'},{field:'number',priority:'2'}]);
     const widthBeforeResize = await evaluate(`${grid}.getColumn('number').getWidth()`);
     const resizePoint = await evaluate(`(() => {
       const handle = ${grid}.getColumn('number').getElement().nextElementSibling;
@@ -551,6 +601,7 @@ async function main() {
     await dragColumn('areaValue', 'band:parameterValues.p201', false, false, 'band');
     assert.deepEqual((await evaluate(bands)).map(group => group.name), ['Dimensions','Ventilation'], 'whole-band drag order is the saved working order');
     const appliedSavedBands = await evaluate(bands);
+    await evaluate(`${grid}.setSort([{column:'number',dir:'asc'},{column:'parameterValues.p-200',dir:'desc'}])`);
     const bandsScreenshot = await command('Page.captureScreenshot', {format:'png'});
     fs.writeFileSync(path.join(profile, 'column-header-groups.png'), Buffer.from(bandsScreenshot.data, 'base64'));
     await evaluate('document.getElementById("table-save-as").click()');
@@ -596,6 +647,8 @@ async function main() {
     assert.equal(await evaluate('document.getElementById("search").value'), 'Office');
     assert.deepEqual(await evaluate(grouped), ['level', 'parameterValues.p-200'], 'saved definitions restore hierarchy order');
     assert.deepEqual(await evaluate(bands), appliedSavedBands, 'reopening restores named header bands and dynamic members');
+    assert.deepEqual((await evaluate(sortPriorities)).sort((a,b) => a.field.localeCompare(b.field)),
+      [{field:'number',priority:'1'},{field:'parameterValues.p-200',priority:'2'}], 'saved-table restoration recreates dynamic column sort priorities');
     assert.equal(await evaluate(`${grid}.getRow('9007199254740993').getCell('parameterValues.p-200').getElement().textContent`), '1500 CFM', 'opening a definition reads current values');
     await evaluate('document.getElementById("table-save-as").click()');
     await nameDialog('Ventilation copy');
@@ -714,7 +767,7 @@ async function main() {
     assert.equal(await evaluate('document.getElementById("select-revit").disabled'), true);
     assert.equal(await evaluate('document.getElementById("show-revit").disabled'), true);
     assert.deepEqual(errors, [], 'no uncaught browser exceptions');
-    console.log(`Browser checks passed: whole-band drag/reorder/cancel/save/reopen, named column bands, nested row grouping, leaf dragging, picker/filtering, and 6,000 grouped rows (${largeTableMs}ms).`);
+    console.log(`Browser checks passed: multi-sort priority subscripts, Ctrl+click sort/direction/clear, saved priorities, whole-band dragging, row grouping, picker/filtering, and 6,000 grouped rows (${largeTableMs}ms).`);
     console.log(`Screenshot: ${screenshotPath}`);
     console.log(`Grouping hierarchy: ${path.join(profile, 'grouping-hierarchy.png')}`);
     console.log(`Column header groups: ${path.join(profile, 'column-header-groups.png')}`);

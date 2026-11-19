@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'">
-  <title>Revit Data Table</title>
+  <title>HVAC Data</title>
   <link rel="stylesheet" href="vendor/tabulator.min.css">
   <link rel="stylesheet" href="styles.css">
   <script src="vendor/tabulator.min.js" defer></script>
@@ -16,17 +16,6 @@
 </head>
 <body>
   <header class="header">
-    <div>
-      <div class="eyebrow">FFE · MECHANICAL</div>
-      <h1>Spaces <span class="readonly">Space values read only</span></h1>
-    </div>
-    <div class="header-actions">
-      <button id="column-groups" disabled>Column groups…</button>
-      <button id="parameters" disabled>Parameters…</button>
-      <button id="refresh" class="primary" disabled>Refresh</button>
-    </div>
-  </header>
-  <main>
     <div class="saved-tables" aria-label="Shared saved tables">
       <label>Table <select id="saved-table" disabled><option value="">Unsaved table</option></select></label>
       <span id="table-dirty" role="status"></span>
@@ -36,6 +25,13 @@
       <button id="table-rename" disabled>Rename…</button>
       <button id="table-delete" disabled>Delete…</button>
     </div>
+    <div class="header-actions">
+      <button id="column-groups" disabled>Column groups…</button>
+      <button id="parameters" disabled>Parameters…</button>
+      <button id="refresh" class="primary" disabled>Refresh</button>
+    </div>
+  </header>
+  <main>
     <div id="table-note" class="notice" role="status" hidden></div>
     <div class="toolbar" aria-label="Space filters">
       <label class="search">Search Spaces

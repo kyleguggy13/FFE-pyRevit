@@ -44,6 +44,51 @@
     byId("context").hidden = !messages.length;
     if (savedTables) savedTables.update();
     if (columnGrouping) columnGrouping.update();
+    if (state.table) updateSortPriorities();
+  }
+
+  // The grid is configured so the first selected sort is the primary key.
+  function updateSortPriorities() {
+    const sorters = state.table.getSorters().filter(sorter => ["asc", "desc"].includes(sorter.dir));
+    const priorities = new Map(sorters.map((sorter, index) => [sorter.field, index + 1]));
+    for (const column of state.table.getColumns()) {
+      const header = column.getElement();
+      const sorter = header.querySelector(".tabulator-col-sorter");
+      const priority = sorters.length > 1 ? priorities.get(column.getField()) : null;
+      const existing = sorter?.querySelector(".sort-priority");
+      header.classList.toggle("multi-sort", Boolean(priority));
+      if (!priority || !sorter) {
+        existing?.remove();
+        continue;
+      }
+      const number = existing || document.createElement("sub");
+      number.className = "sort-priority";
+      number.textContent = String(priority);
+      number.setAttribute("aria-label", `Sort priority ${priority} of ${sorters.length}`);
+      number.title = `Sort priority ${priority} of ${sorters.length}`;
+      if (!existing) sorter.append(number);
+    }
+  }
+
+  // Tabulator normally moves a changed multi-sort to the end. Keep its original slot.
+  function preserveSortPriority(event) {
+    if (!(event.ctrlKey || event.shiftKey) || event.button !== 0 ||
+        event.target.closest(".tabulator-col-resize-handle")) return;
+    const header = event.target.closest(".tabulator-col[tabulator-field]");
+    if (!header) return;
+    const field = header.getAttribute("tabulator-field");
+    const sorters = state.table.getSorters().map(sorter => ({ column: sorter.field, dir: sorter.dir }));
+    const index = sorters.findIndex(sorter => sorter.column === field);
+    if (index < 0) return;
+    const definition = state.table.getColumn(field).getDefinition();
+    if (definition.headerSort === false) return;
+    const starting = definition.headerSortStartingDir || "asc";
+    const next = sorters[index].dir === starting ? (starting === "asc" ? "desc" : "asc")
+      : definition.headerSortTristate ? "none" : starting;
+    event.stopPropagation();
+    if (next === "none") sorters.splice(index, 1);
+    else sorters[index].dir = next;
+    state.table.setSort(sorters);
   }
 
   function request(action, options = {}) {
@@ -314,6 +359,7 @@
       // Native header drag/drop handles grouping and reordering together; the
       // grid's separate mouse-based mover would compete with those gestures.
       movableColumns: false, selectableRows: true, selectableRowsRangeMode: "click",
+      sortOrderReverse: true,
       groupStartOpen: true, groupToggleElement: "header",
       groupHeader(value, count, rows, group) {
         // Functions used for typed keys have no column field; parent depth identifies it.
@@ -547,6 +593,7 @@
         }),
       });
       byId("refresh").addEventListener("click", () => request("refresh"));
+      byId("grid").addEventListener("click", preserveSortPriority, true);
       byId("parameters").addEventListener("click", openParameters);
       byId("parameter-search").addEventListener("input", renderParameters);
       byId("parameter-checked-only").addEventListener("change", renderParameters);

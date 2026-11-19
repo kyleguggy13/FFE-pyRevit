@@ -1,14 +1,15 @@
-# Revit Data Table acceptance checks
+# HVAC Data acceptance checks
 
 Run in both Revit 2025 and Revit 2026 with the installed extension and supported pyRevit IronPython engine. These checks require an actual Revit project; the automated browser test uses a simulated bridge.
 
 ## Startup and coexistence
 
-1. Reload pyRevit and launch **MEPTools → Revit Data Table** from a project. Verify the window is modeless and independent, with Level, Number, Name, Area, and Height columns. Click Revit and verify it can cover the table. Restore the table through its taskbar/Alt+Tab entry and verify it remains usable; minimizing Revit must not force the table to minimize.
-2. Launch it again for the same model, including while the window is minimized. Verify the existing window is restored and focused.
-3. In fresh Revit sessions, test opening this tool before and after Keynotes and pyRevit's output window. All tools must continue working without mixed WebView2 assembly versions.
-4. Disconnect the network and reopen the tool. Its local assets and full grid functionality must still load.
-5. Launch with no document, a family document, and a project containing no Spaces. Verify a clear prompt or a valid empty table, without an unhandled exception.
+1. Reload pyRevit and launch **MEPTools → HVAC Data** from a project. Verify the window title begins with HVAC Data and the window is modeless and independent, with Level, Number, Name, Area, and Height columns. Click Revit and verify it can cover the table. Restore the table through its taskbar/Alt+Tab entry and verify it remains usable; minimizing Revit must not force the table to minimize.
+2. Verify saved-table controls appear on the left side of the header and Column groups, Parameters, and Refresh remain on the right with matching button height, font, and padding. The old FFE · MECHANICAL and Spaces heading must be absent. Check with and without Unsaved changes, at the normal/minimum window sizes and common display scaling settings; all controls must remain visible.
+3. Launch it again for the same model, including while the window is minimized. Verify the existing window is restored and focused.
+4. In fresh Revit sessions, test opening this tool before and after Keynotes and pyRevit's output window. All tools must continue working without mixed WebView2 assembly versions.
+5. Disconnect the network and reopen the tool. Its local assets and full grid functionality must still load.
+6. Launch with no document, a family document, and a project containing no Spaces. Verify a clear prompt or a valid empty table, without an unhandled exception.
 
 ## Data and units
 
@@ -46,6 +47,7 @@ Run in both Revit 2025 and Revit 2026 with the installed extension and supported
 ## Navigation and general interaction
 
 1. Verify initial ordering by level elevation, then natural number order. Sort multiple columns, resize/reorder headers, and select a range of rows. Refresh must retain valid filters, sorting, column layout, and selection.
+   Select a first sort, then Ctrl/Shift+click two more columns: verify priorities 1, 2, and 3 in selection order and actual rows ordered by the first key, then its ties by the second/third keys. Change the first key's direction without changing its priority. Remove a sort and verify renumbering; re-add it at the end. Switch to one column and clear sorting: remove badges immediately. Include added parameters and leaf headers inside named bands. Refresh and saved-table restoration must reproduce the priority order; unsorted columns and band titles must have no badges.
 2. Verify Up/Down, Home/End, and Space after focusing the grid. Tab must reach filters and navigation buttons, with visible focus.
 3. Select several rows and use Select in Revit. Show placed Spaces in a suitable plan/3D view. Try Show for unplaced Spaces and from a view that cannot display them; verify an actionable skipped/failure report.
 4. Rename, add, or delete Spaces in Revit while the table is open. Verify Out of date appears and rows remain unchanged until Refresh. Try navigation to a deleted Space before Refresh; it must skip that row safely. Repeat after undo/redo.
