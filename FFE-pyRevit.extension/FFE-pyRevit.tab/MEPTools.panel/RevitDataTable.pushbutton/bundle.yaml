@@ -1,0 +1,4 @@
+title: Revit Data Table
+tooltip: Browse host-model Spaces by phase and level. Search, sort, select, and show Spaces without changing model data.
+author: Kyle Guggenheim
+min_revit_version: 2025

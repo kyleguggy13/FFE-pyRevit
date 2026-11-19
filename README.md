@@ -24,6 +24,7 @@ FFE's pyRevit add-in extension.
 
 ### MEPTools
 - Duct Network Summary
+- Revit Data Table
 
 ### BetaTools
 - Text Leader Position

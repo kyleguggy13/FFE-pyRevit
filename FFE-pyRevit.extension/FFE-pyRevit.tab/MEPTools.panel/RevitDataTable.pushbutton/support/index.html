@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'">
+  <title>Revit Data Table</title>
+  <link rel="stylesheet" href="vendor/tabulator.min.css">
+  <link rel="stylesheet" href="styles.css">
+  <script src="vendor/tabulator.min.js" defer></script>
+  <script src="table_model.js" defer></script>
+  <script src="site.js" defer></script>
+</head>
+<body>
+  <header class="header">
+    <div>
+      <div class="eyebrow">FFE · MECHANICAL</div>
+      <h1>Spaces <span class="readonly">Read only</span></h1>
+      <p id="document-title">Connecting to Revit…</p>
+    </div>
+    <button id="refresh" class="primary" disabled>Refresh</button>
+  </header>
+  <main>
+    <div class="toolbar" aria-label="Space filters">
+      <label class="search">Search Spaces
+        <input id="search" type="search" placeholder="Number, name, or level…" autocomplete="off" disabled>
+      </label>
+      <label>Phase <select id="phase" disabled><option value="all">All phases</option></select></label>
+      <label>Level <select id="level" disabled><option value="all">All levels</option></select></label>
+      <button id="clear-filters" disabled>Clear filters</button>
+    </div>
+    <div class="table-actions">
+      <div class="counts" id="counts" aria-live="polite">0 Spaces</div>
+      <button id="select-revit" disabled>Select in Revit</button>
+      <button id="show-revit" disabled>Show in Revit</button>
+    </div>
+    <div id="context" class="notice" role="status" hidden></div>
+    <div id="grid" aria-label="Revit Spaces table" tabindex="0"></div>
+    <details id="issues" hidden>
+      <summary id="issues-summary">Space warnings</summary>
+      <ul id="issues-list"></ul>
+    </details>
+  </main>
+  <footer>
+    <span id="status" role="status" aria-live="polite">Loading table…</span>
+    <span id="refreshed">Not refreshed yet</span>
+  </footer>
+  <div class="hint">Click rows to select · Shift+click selects a range · ↑/↓ moves focus · Space toggles selection · Ctrl+click a header adds a sort · Height is unbounded height</div>
+</body>
+</html>
