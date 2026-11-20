@@ -3,6 +3,15 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const model = require('../support/table_model.js');
 
+test('header colors follow bands through reordering and missing members', () => {
+  assert.deepEqual(model.headerLayout(['name', 'level'], [
+    { name: 'Identity', fields: ['level', 'name', 'missing'], color: '#123456' },
+  ]), {
+    fields: ['name', 'level'],
+    groups: [{ name: 'Identity', fields: ['name', 'level'], color: '#123456' }],
+  });
+});
+
 const rows = [
   { id: '9007199254740993', phaseId: '1', levelId: '10', level: 'Ground', levelElevation: 0,
     number: '002', name: 'Office', areaValue: 100, heightValue: 9 },

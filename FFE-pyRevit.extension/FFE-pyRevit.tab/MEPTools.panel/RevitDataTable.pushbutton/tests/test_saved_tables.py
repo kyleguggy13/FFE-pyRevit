@@ -38,6 +38,31 @@ def runtime():
 
 
 class LayoutTests(unittest.TestCase):
+    def test_colors_round_trip_with_stable_parameter_identities(self):
+        layout = runtime()
+        layout['columns'][-1]['color'] = '#123456'
+        layout['headerGroups'][1]['color'] = '#abcdef'
+        portable = saved.CaptureLayout(layout, snapshot())
+        current = snapshot()
+        current['parameters'][0].update(id='999', key='p999')
+        restored, warnings = saved.ResolveLayout(portable, current)
+        self.assertEqual('#123456', restored['columns'][-1]['color'])
+        self.assertEqual('parameterValues.p999', restored['columns'][-1]['field'])
+        self.assertEqual({'name': 'Notes', 'fields': ['parameterValues.p999'], 'color': '#abcdef'},
+                         restored['headerGroups'][1])
+        self.assertEqual([], warnings)
+
+    def test_invalid_colors_are_rejected_on_columns_and_groups(self):
+        for value in (None, 123, {}, '#fff', 'red', '#123456\n', '#123456; color:red'):
+            for key in ('columns', 'headerGroups'):
+                layout = runtime()
+                layout[key][0]['color'] = value
+                with self.subTest(value=value, key=key), self.assertRaises(ValueError):
+                    saved.ValidateLayout(layout)
+        layout = runtime()
+        layout['columns'][0]['color'] = '#AABBCC'
+        self.assertEqual('#aabbcc', saved.ValidateLayout(layout)['columns'][0]['color'])
+
     def test_complete_layout_round_trip_preserves_order_width_sort_group_and_filters(self):
         portable = saved.CaptureLayout(runtime(), snapshot())
         self.assertEqual('phase-uid', portable['filters']['phase'])
@@ -296,7 +321,7 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(transactionCount, len(self.host.transactions))
         updated = self.host.store.Write('saveTable', restored['id'], restored['revision'],
                                         restored['name'], restored['layout'])
-        self.assertEqual(3, updated['version'])
+        self.assertEqual(4, updated['version'])
         self.assertEqual(['shared:' + SHARED_GUID], updated['layout']['groupFields'])
 
     def test_save_reopen_rename_and_delete_are_separate_metadata_transactions(self):
@@ -394,7 +419,7 @@ class StorageTests(unittest.TestCase):
 
     def test_future_or_corrupt_record_is_reported_without_replacing_it(self):
         record = self.host.create()
-        unsupported = dict(record, id=str(uuid.uuid4()), version=4)
+        unsupported = dict(record, id=str(uuid.uuid4()), version=5)
         element = DataStorage.Create(self.host.document)
         element.text = json.dumps(unsupported)
         records, issues = self.host.store.List()

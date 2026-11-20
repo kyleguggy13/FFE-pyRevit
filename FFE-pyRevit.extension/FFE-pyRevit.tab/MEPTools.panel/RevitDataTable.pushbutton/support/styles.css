@@ -84,6 +84,13 @@ footer { display: flex; gap: 12px; justify-content: space-between; padding: 12px
 #refreshed { flex-shrink: 0; }
 .hint { color: var(--muted); padding: 4px 24px 12px; font-size: 11px; }
 [hidden] { display: none !important; }
+#header-color-menu { position: fixed; z-index: 100; min-width: 170px; padding: 4px; border: 1px solid var(--border); border-radius: 6px; background: white; box-shadow: 0 4px 18px #182b3833; }
+#header-color-menu button { display: block; width: 100%; border: 0; border-radius: 3px; text-align: left; font-size: 12px; }
+#header-color-dialog { width: min(420px, calc(100vw - 32px)); padding: 22px; border: 1px solid var(--border); border-radius: 8px; color: var(--ink); }
+#header-color-dialog::backdrop { background: #182b3866; }
+#header-color-dialog h2 { margin: 0 0 12px; font-size: 21px; }
+#header-color-dialog p { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+#header-color-input { width: 100%; height: 44px; padding: 4px; cursor: pointer; }
 #header-groups-dialog { width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 0; border: 1px solid var(--border); border-radius: 9px; color: var(--ink); }
 #header-groups-dialog::backdrop { background: #182b3866; }
 #header-groups-form { display: flex; flex-direction: column; max-height: calc(100vh - 36px); }

@@ -42,7 +42,7 @@
           byId("header-groups-error").textContent = "Give every group a name and select at least one column.";
           return;
         }
-        this.options.setGroups(this.draft.map(group => ({ name: group.name.trim(), fields: [...group.fields] })));
+        this.options.setGroups(this.draft.map(group => ({ ...group, name: group.name.trim(), fields: [...group.fields] })));
         byId("header-groups-dialog").close();
       });
     }
@@ -50,7 +50,7 @@
     /** Start each editing session from the currently applied header bands. */
     open() {
       if (!this.options.isReady()) return;
-      this.draft = this.options.getGroups().map(group => ({ name: group.name, fields: [...group.fields] }));
+      this.draft = this.options.getGroups().map(group => ({ ...group, fields: [...group.fields] }));
       byId("header-groups-error").textContent = "";
       this.render();
       byId("header-groups-dialog").showModal();

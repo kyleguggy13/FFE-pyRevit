@@ -5,10 +5,11 @@
   const byId = id => document.getElementById(id);
   const state = { snapshot: null, filters: null, active: true, outdated: false,
     busy: false, loading: false, table: null, focusId: null,
-    draftParameterIds: new Set(), columnMetadata: new Map(), groupFields: [], headerGroups: [] };
+    draftParameterIds: new Set(), columnMetadata: new Map(), columnColors: new Map(), groupFields: [], headerGroups: [] };
   const bridge = window.chrome?.webview;
   let savedTables = null;
   let columnGrouping = null;
+  let headerColors = null;
 
   function status(message, kind = "info") {
     byId("status").textContent = message;
@@ -44,6 +45,7 @@
     byId("context").hidden = !messages.length;
     if (savedTables) savedTables.update();
     if (columnGrouping) columnGrouping.update();
+    if (headerColors) headerColors.update();
     if (state.table) updateSortPriorities();
   }
 
@@ -161,6 +163,7 @@
       if (field.startsWith("parameterValues.") && !fields.has(field)) {
         await column.delete();
         state.columnMetadata.delete(field);
+        state.columnColors.delete(field);
       }
     }
     for (const parameter of parameters) {
@@ -328,7 +331,7 @@
     }
     const fields = state.table.getColumns().map(column => column.getField()).filter(field => field !== source);
     fields.splice(fields.indexOf(target) + (after ? 1 : 0), 0, source);
-    const groups = state.headerGroups.map(group => ({ name: group.name,
+    const groups = state.headerGroups.map(group => ({ ...group,
       fields: group.fields.filter(field => field !== source),
     }));
     const targetGroup = groups.find(group => group.fields.includes(target));
@@ -475,6 +478,8 @@
     updateControls();
     try {
       const sameDocument = state.snapshot?.documentKey === snapshot.documentKey;
+      if (layout || !sameDocument) state.columnColors = new Map(
+        (layout?.columns || []).filter(column => column.color).map(column => [column.field, column.color]));
       const headerGroups = layout ? layout.headerGroups || [] : sameDocument ? state.headerGroups : [];
       state.table.setGroupBy(false);
       if (state.headerGroups.length) rebuildHeaders([]);
@@ -573,6 +578,21 @@
         moveBand: moveHeaderBand,
       });
       state.table.on("tableDestroyed", () => columnGrouping.destroy());
+      headerColors = new window.HeaderColorControls({ table: state.table,
+        isReady: () => Boolean(state.snapshot) && !state.loading && !state.busy,
+        getGroups: () => state.headerGroups, getColumnColors: () => state.columnColors,
+        setColor(target, color) {
+          if (target.group) {
+            const group = state.headerGroups.find(group => group.fields.includes(target.field));
+            if (!group) return;
+            if (color) group.color = color;
+            else delete group.color;
+          } else if (color) state.columnColors.set(target.field, color);
+          else state.columnColors.delete(target.field);
+          updateControls();
+        },
+      });
+      state.table.on("tableDestroyed", () => headerColors.destroy());
       new window.HeaderGroupControls({
         isReady: () => Boolean(state.snapshot) && !state.loading && !state.busy,
         getGroups: () => state.headerGroups, setGroups: setHeaderGroups,
@@ -586,9 +606,10 @@
         setBusy: value => { state.busy = value; updateControls(); },
         getLayout: () => ({
           columns: state.table.getColumns().map(column => ({ field: column.getField(),
-            width: Math.max(110, Math.min(3000, Math.round(column.getWidth() || column.getDefinition().width || 140))) })),
+            width: Math.max(110, Math.min(3000, Math.round(column.getWidth() || column.getDefinition().width || 140))),
+            ...(state.columnColors.has(column.getField()) ? { color: state.columnColors.get(column.getField()) } : {}) })),
           sorters: state.table.getSorters().map(sorter => ({ field: sorter.field, dir: sorter.dir })),
-          groupFields: [...state.groupFields], headerGroups: state.headerGroups.map(group => ({ name: group.name, fields: [...group.fields] })),
+          groupFields: [...state.groupFields], headerGroups: state.headerGroups.map(group => ({ ...group, fields: [...group.fields] })),
           filters: { ...state.filters },
         }),
       });

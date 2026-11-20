@@ -231,6 +231,8 @@
     }
 
     close() {
+      const colorDialog = element("header-color-dialog");
+      if (colorDialog?.open) { colorDialog.returnValue = "cancel"; colorDialog.close(); }
       if (element("parameter-dialog").open) element("parameter-dialog").close();
       if (element("header-groups-dialog").open) element("header-groups-dialog").close();
       this.guard(() => this.options.bridge?.postMessage({ action: "closeWindow",

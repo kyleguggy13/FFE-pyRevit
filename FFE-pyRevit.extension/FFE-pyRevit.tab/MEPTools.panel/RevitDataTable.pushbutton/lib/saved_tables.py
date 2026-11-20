@@ -7,6 +7,7 @@ One DataStorage element per definition keeps unrelated tables independently edit
 """
 import json
 import math
+import re
 import time
 import uuid
 
@@ -26,6 +27,16 @@ def RequireText(value, label, maximum=1000):
     return value
 
 
+def ColorSettings(settings):
+    """Keep optional opaque RGB fills bounded and safe for browser CSS."""
+    if "color" not in settings:
+        return {}
+    color = settings["color"]
+    if not isinstance(color, StringTypes) or not re.match(r"^#[0-9a-fA-F]{6}\Z", color):
+        raise ValueError("Invalid column color; use a six-digit hex color.")
+    return {"color": color.lower()}
+
+
 def ValidateLayout(layout):
     """Validate portable or runtime layout structure without trusting model JSON."""
     if not isinstance(layout, dict):
@@ -42,7 +53,7 @@ def ValidateLayout(layout):
         if (not field or field in fields or isinstance(width, bool) or
                 not isinstance(width, (int, float)) or math.isnan(width) or math.isinf(width) or not 60 <= width <= 3000):
             raise ValueError("Invalid or duplicate table column/width.")
-        normalized.append({"field": field, "width": width})
+        normalized.append(dict({"field": field, "width": width}, **ColorSettings(column)))
         fields.add(field)
     sorters = layout.get("sorters", [])
     if not isinstance(sorters, list) or len(sorters) > len(columns):
@@ -76,7 +87,7 @@ def ValidateLayout(layout):
                 len(set(members)) != len(members)):
             raise ValueError("Invalid column header group name or membership.")
         assigned.update(members)
-        normalizedHeaders.append({"name": name, "fields": list(members)})
+        normalizedHeaders.append(dict({"name": name, "fields": list(members)}, **ColorSettings(header)))
     filters = layout.get("filters")
     if not isinstance(filters, dict):
         raise ValueError("Invalid table filters.")
@@ -97,12 +108,12 @@ def CaptureLayout(layout, snapshot):
     for column in layout["columns"]:
         if column["field"] not in references:
             raise ValueError("A column no longer resolves to a parameter. Refresh and retry.")
-    portable = {"columns": [{"field": references[column["field"]], "width": column["width"]}
+    portable = {"columns": [dict(column, field=references[column["field"]])
                              for column in layout["columns"]],
                 "sorters": [{"field": references[sorter["field"]], "dir": sorter["dir"]}
                             for sorter in layout["sorters"]],
                 "groupFields": [references[group] for group in layout["groupFields"]],
-                "headerGroups": [{"name": header["name"], "fields": [references[field] for field in header["fields"]]}
+                "headerGroups": [dict(header, fields=[references[field] for field in header["fields"]])
                                  for header in layout["headerGroups"]],
                 "filters": dict(layout["filters"])}
     for filterName, source in (("phase", "phases"), ("level", "levels")):
@@ -130,7 +141,7 @@ def ResolveLayout(layout, snapshot):
     for column in layout["columns"]:
         field = fields.get(column["field"])
         if field:
-            columns.append({"field": field, "width": column["width"]})
+            columns.append(dict(column, field=field))
         else:
             warnings.append("Unavailable column: {0}".format(column["field"]))
     present = set(column["field"] for column in columns)
@@ -165,14 +176,14 @@ def ResolveLayout(layout, snapshot):
         if len(members) != len(header["fields"]):
             warnings.append("Unavailable columns were removed from header group: {0}".format(header["name"]))
         if members:
-            headers.append({"name": header["name"], "fields": members})
+            headers.append(dict(header, fields=members))
     return {"columns": columns, "sorters": sorters, "groupFields": groups,
             "headerGroups": headers, "filters": filters}, warnings
 
 
 def ValidateRecord(record):
     """Reject unsupported definitions without replacing or deleting their storage."""
-    if not isinstance(record, dict) or record.get("version") not in (1, 2, 3):
+    if not isinstance(record, dict) or record.get("version") not in (1, 2, 3, 4):
         raise ValueError("Unsupported saved-table version.")
     for key in ("id", "revision"):
         uuid.UUID(RequireText(record.get(key), key, 36))
@@ -298,7 +309,7 @@ class RevitTableStore:
             raise ValueError("Invalid saved-table operation.")
         record = None
         if action != "deleteTable":
-            record = ValidateRecord({"version": 3, "id": tableId or str(uuid.uuid4()),
+            record = ValidateRecord({"version": 4, "id": tableId or str(uuid.uuid4()),
                                      "revision": str(uuid.uuid4()), "name": name,
                                      "modifiedBy": self.Document.Application.Username or "",
                                      "modifiedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),

@@ -74,7 +74,7 @@
     for (const group of groups) {
       const members = fields.filter(field => available.has(field) && group.fields.includes(field) && !assigned.has(field));
       members.forEach(field => assigned.add(field));
-      if (members.length) bands.push({ name: group.name, fields: members });
+      if (members.length) bands.push({ ...group, fields: members });
     }
     const membership = new Map(bands.flatMap(group => group.fields.map(field => [field, group])));
     const emitted = new Set();

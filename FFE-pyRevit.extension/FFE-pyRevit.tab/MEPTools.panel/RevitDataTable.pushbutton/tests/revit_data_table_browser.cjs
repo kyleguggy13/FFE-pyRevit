@@ -71,6 +71,32 @@ async function main() {
     const grouped = 'Array.from(document.querySelectorAll(".group-chip"), chip => chip.dataset.field)';
     const sortPriorities = 'Array.from(document.querySelectorAll("#grid .sort-priority"), number => ({field: number.closest(".tabulator-col").getAttribute("tabulator-field"), priority: number.textContent}))';
     const bands = `${grid}.getColumns(true).filter(column => column.getSubColumns().length).map(column => ({name: column.getDefinition().title, fields: column.getSubColumns().map(child => child.getField())}))`;
+    const openColorMenu = async (field, band = false) => {
+      await evaluate(`${grid}.getColumn(${JSON.stringify(field)}).scrollTo('center', true)`);
+      const point = await evaluate(`(() => {
+        const column = ${band ? `${grid}.getColumns(true).find(column => column.getSubColumns().some(child => child.getField() === ${JSON.stringify(field)}))` : `${grid}.getColumn(${JSON.stringify(field)})`};
+        const bounds = column.getElement().querySelector(':scope > .tabulator-col-content').getBoundingClientRect();
+        const gridBounds = document.getElementById('grid').getBoundingClientRect();
+        return {x:Math.min(bounds.right - 15, Math.max(bounds.left + 15, gridBounds.left + 20)),y:bounds.top + 10};
+      })()`);
+      await command('Input.dispatchMouseEvent', {type:'mousePressed', ...point, button:'right', buttons:2, clickCount:1});
+      await command('Input.dispatchMouseEvent', {type:'mouseReleased', ...point, button:'right', buttons:0, clickCount:1});
+      await waitFor('!document.getElementById("header-color-menu").hidden');
+    };
+    const chooseColor = async (field, color, band = false, apply = true) => {
+      await openColorMenu(field, band);
+      await evaluate('document.querySelector("#header-color-menu button").click()');
+      await waitFor('document.getElementById("header-color-dialog").open');
+      await evaluate(`document.getElementById('header-color-input').value = ${JSON.stringify(color)};
+        document.querySelector('#header-color-dialog button[value="${apply ? 'apply' : 'cancel'}"]').click()`);
+      await waitFor('!document.getElementById("header-color-dialog").open');
+      await evaluate('new Promise(resolve => requestAnimationFrame(resolve))');
+    };
+    const fill = field => evaluate(`getComputedStyle(${grid}.getColumn(${JSON.stringify(field)}).getElement()).backgroundColor`);
+    const resetColor = async (field, band = false) => {
+      await openColorMenu(field, band);
+      await evaluate('document.querySelectorAll("#header-color-menu button")[1].click()');
+    };
     const configureHeaders = async (groups, apply = true) => {
       await evaluate(`document.getElementById('column-groups').click();
         while (document.querySelector('.header-group-remove')) document.querySelector('.header-group-remove').click();
@@ -293,8 +319,35 @@ async function main() {
     assert.deepEqual(await evaluate(`${grid}.getSelectedData().map(row => row.id)`), ['9007199254740993'], 'applying header bands retains row selection');
     assert.deepEqual(await evaluate(`${grid}.getSorters().map(sorter => ({field:sorter.field,dir:sorter.dir}))`), originalSort, 'applying bands retains sorting');
     const originalBandWidths = await evaluate(`${grid}.getColumns().map(column => ({field:column.getField(),width:column.getWidth()}))`);
+    const requestsBeforeColors = await evaluate('window.__requests.length');
+    await chooseColor('level', '#abcdef', true);
+    assert.equal(await fill('level'), 'rgb(171, 205, 239)', 'group fills color member headers');
+    assert.equal(await fill('name'), 'rgb(171, 205, 239)');
+    await chooseColor('name', '#123456');
+    assert.equal(await fill('name'), 'rgb(18, 52, 86)', 'individual colors override group fills');
+    assert.equal(await evaluate(`getComputedStyle(${grid}.getColumn('name').getElement()).color`), 'rgb(255, 255, 255)', 'dark fills use readable text');
+    assert.equal(await evaluate(`getComputedStyle(${grid}.getRow('3').getCell('name').getElement()).backgroundColor`), 'rgb(18, 52, 86)', 'fills apply to data cells');
+    assert.notEqual(await evaluate(`getComputedStyle(${grid}.getRow('9007199254740993').getCell('name').getElement()).backgroundColor`), 'rgb(18, 52, 86)', 'selection remains visible');
+    await chooseColor('name', '#ff0000', false, false);
+    assert.equal(await fill('name'), 'rgb(18, 52, 86)', 'Cancel discards draft colors');
+    await openColorMenu('name');
+    await command('Input.dispatchKeyEvent', {type:'keyDown', key:'Escape', code:'Escape'});
+    await command('Input.dispatchKeyEvent', {type:'keyUp', key:'Escape', code:'Escape'});
+    assert.equal(await evaluate('document.getElementById("header-color-menu").hidden'), true, 'Escape dismisses the context menu');
+    await evaluate('document.getElementById("column-groups").click(); document.getElementById("header-groups-apply").click()');
+    assert.equal(await fill('level'), 'rgb(171, 205, 239)', 'editing memberships preserves group colors');
+    await deliver({type:'snapshot',snapshot});
+    await waitFor('!document.getElementById("column-groups").disabled');
+    assert.equal(await fill('name'), 'rgb(18, 52, 86)', 'Refresh preserves individual colors');
+    assert.equal(await fill('level'), 'rgb(171, 205, 239)', 'Refresh preserves group colors');
+    assert.equal(await evaluate('window.__requests.length'), requestsBeforeColors, 'color edits do not send Revit writes');
     await dragColumn('areaValue', 'band:level', false, false, 'band');
     assert.deepEqual(await evaluate(bands), [headerGroups[1], headerGroups[0]], 'dragging a band title moves the entire group before another band');
+    assert.equal(await fill('level'), 'rgb(171, 205, 239)', 'band dragging preserves colors');
+    await resetColor('name');
+    assert.equal(await fill('name'), 'rgb(171, 205, 239)', 'resetting a column restores its group color');
+    await resetColor('level', true);
+    assert.notEqual(await fill('name'), 'rgb(171, 205, 239)', 'resetting a group restores the default fill');
     assert.deepEqual(await evaluate(`${grid}.getColumns().map(column => column.getField())`),
       ['areaValue','heightValue','level','name','number','phase'], 'whole-band moves retain contiguous member order');
     assert.deepEqual(await evaluate(`${grid}.getSelectedData().map(row => row.id)`), ['9007199254740993']);
@@ -601,6 +654,8 @@ async function main() {
     await dragColumn('areaValue', 'band:parameterValues.p201', false, false, 'band');
     assert.deepEqual((await evaluate(bands)).map(group => group.name), ['Dimensions','Ventilation'], 'whole-band drag order is the saved working order');
     const appliedSavedBands = await evaluate(bands);
+    await chooseColor('parameterValues.p-200', '#123456');
+    await chooseColor('areaValue', '#abcdef', true);
     await evaluate(`${grid}.setSort([{column:'number',dir:'asc'},{column:'parameterValues.p-200',dir:'desc'}])`);
     const bandsScreenshot = await command('Page.captureScreenshot', {format:'png'});
     fs.writeFileSync(path.join(profile, 'column-header-groups.png'), Buffer.from(bandsScreenshot.data, 'base64'));
@@ -608,11 +663,17 @@ async function main() {
     await nameDialog('Ventilation Review');
     const firstSave = await respondToTable();
     const firstId = firstSave.record.id;
+    assert.equal(firstSave.request.layout.columns.find(column => column.field === 'parameterValues.p-200').color, '#123456', 'saving captures colors on added parameters');
     assert.deepEqual(firstSave.request.layout.filters, { phase: 'all', level: '10', query: 'Office' });
     assert.deepEqual(firstSave.request.layout.groupFields, ['level', 'parameterValues.p-200']);
-    assert.deepEqual(firstSave.request.layout.headerGroups, appliedSavedBands, 'saving includes custom header names and memberships');
+    assert.deepEqual(firstSave.request.layout.headerGroups, appliedSavedBands.map(group =>
+      group.name === 'Dimensions' ? {...group, color:'#abcdef'} : group), 'saving includes header names, memberships, and group colors');
     assert.equal(await evaluate('document.getElementById("saved-table").value'), firstId);
     assert.equal(await evaluate('document.getElementById("table-dirty").textContent'), '');
+    await chooseColor('parameterValues.p-200', '#abcdef');
+    assert.equal(await evaluate('document.getElementById("table-dirty").textContent'), 'Unsaved changes', 'a color-only edit marks the table dirty');
+    await chooseColor('parameterValues.p-200', '#123456');
+    assert.equal(await evaluate('document.getElementById("table-dirty").textContent'), '', 'restoring a saved color clears dirty state');
     await dragColumn('areaValue', 'band:parameterValues.p201', true, true, 'band');
     assert.equal(await evaluate('document.getElementById("table-dirty").textContent'), '', 'a cancelled band drag leaves a saved view clean');
     await dragColumn('areaValue', 'band:parameterValues.p201', true, false, 'band');
@@ -620,8 +681,10 @@ async function main() {
     await dragColumn('areaValue', 'band:parameterValues.p201', false, false, 'band');
     assert.equal(await evaluate('document.getElementById("table-dirty").textContent'), '', 'moving a band back restores the saved layout');
     await configureHeaders(appliedSavedBands.map((group,index) => ({...group,name:index ? group.name : 'Renamed band'})));
+    await chooseColor('areaValue', '#abcdef', true);
     assert.equal(await evaluate('document.getElementById("table-dirty").textContent'), 'Unsaved changes', 'a band rename alone marks the view dirty');
     await configureHeaders(appliedSavedBands);
+    await chooseColor('areaValue', '#abcdef', true);
     assert.equal(await evaluate('document.getElementById("table-dirty").textContent'), '', 'restoring just the band name restores the saved layout');
     await evaluate('document.getElementById("search").value="Changed working view"; document.getElementById("search").dispatchEvent(new Event("input"))');
     assert.equal(await evaluate('document.getElementById("table-dirty").textContent'), 'Unsaved changes');
@@ -647,6 +710,8 @@ async function main() {
     assert.equal(await evaluate('document.getElementById("search").value'), 'Office');
     assert.deepEqual(await evaluate(grouped), ['level', 'parameterValues.p-200'], 'saved definitions restore hierarchy order');
     assert.deepEqual(await evaluate(bands), appliedSavedBands, 'reopening restores named header bands and dynamic members');
+    assert.equal(await fill('parameterValues.p-200'), 'rgb(18, 52, 86)', 'reopening restores saved parameter colors');
+    assert.equal(await fill('areaValue'), 'rgb(171, 205, 239)', 'reopening restores saved group colors');
     assert.deepEqual((await evaluate(sortPriorities)).sort((a,b) => a.field.localeCompare(b.field)),
       [{field:'number',priority:'1'},{field:'parameterValues.p-200',priority:'2'}], 'saved-table restoration recreates dynamic column sort priorities');
     assert.equal(await evaluate(`${grid}.getRow('9007199254740993').getCell('parameterValues.p-200').getElement().textContent`), '1500 CFM', 'opening a definition reads current values');
@@ -767,7 +832,7 @@ async function main() {
     assert.equal(await evaluate('document.getElementById("select-revit").disabled'), true);
     assert.equal(await evaluate('document.getElementById("show-revit").disabled'), true);
     assert.deepEqual(errors, [], 'no uncaught browser exceptions');
-    console.log(`Browser checks passed: multi-sort priority subscripts, Ctrl+click sort/direction/clear, saved priorities, whole-band dragging, row grouping, picker/filtering, and 6,000 grouped rows (${largeTableMs}ms).`);
+    console.log(`Browser checks passed: header color context menus, inheritance/reset, saved colors, multi-sort priorities, whole-band dragging, row grouping, picker/filtering, and 6,000 grouped rows (${largeTableMs}ms).`);
     console.log(`Screenshot: ${screenshotPath}`);
     console.log(`Grouping hierarchy: ${path.join(profile, 'grouping-hierarchy.png')}`);
     console.log(`Column header groups: ${path.join(profile, 'column-header-groups.png')}`);
