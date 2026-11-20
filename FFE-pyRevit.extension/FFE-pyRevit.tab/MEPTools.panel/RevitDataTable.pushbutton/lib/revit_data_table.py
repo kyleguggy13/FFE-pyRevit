@@ -314,12 +314,24 @@ def ValidateRequest(message, documentKey, snapshot):
     if action == "ready":
         return {"action": "ready"}
     tableActions = ("loadTable", "saveTable", "renameTable", "deleteTable")
-    if action not in ("refresh", "select", "show", "closeWindow") + tableActions:
+    publishActions = ("publishCatalog", "publishSnapshot")
+    if action not in ("refresh", "select", "show", "closeWindow") + tableActions + publishActions:
         raise ValueError("Unknown table action.")
     if message.get("documentKey") != documentKey:
         raise ValueError("This request belongs to another document. Reopen the table.")
     if action == "closeWindow":
         return {"action": action}
+    if action in publishActions:
+        requestId = message.get("requestId")
+        if not isinstance(requestId, StringTypes) or not requestId or len(requestId) > 100:
+            raise ValueError("Invalid publish request.")
+        projectId = message.get("projectId", "")
+        if action == "publishSnapshot":
+            import uuid
+            if not isinstance(projectId, StringTypes) or len(projectId) != 36:
+                raise ValueError("Choose a cloud project before publishing.")
+            projectId = str(uuid.UUID(projectId))
+        return {"action": action, "requestId": requestId, "projectId": projectId}
     if action in tableActions:
         tableId = message.get("tableId", "")
         revision = message.get("revision", "")

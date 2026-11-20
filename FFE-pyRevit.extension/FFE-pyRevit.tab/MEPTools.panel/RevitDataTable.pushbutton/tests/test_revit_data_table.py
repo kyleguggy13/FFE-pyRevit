@@ -387,6 +387,18 @@ class SpaceSnapshotTests(unittest.TestCase):
 
 
 class RequestTests(unittest.TestCase):
+    def test_publish_requests_are_correlated_document_bound_and_require_valid_project(self):
+        import uuid
+        project = str(uuid.uuid4())
+        message = {'action': 'publishSnapshot', 'requestId': 'publish-1',
+                   'documentKey': 'doc', 'projectId': project}
+        self.assertEqual(project, core.ValidateRequest(message, 'doc', {})['projectId'])
+        self.assertEqual('publishCatalog', core.ValidateRequest(dict(message, action='publishCatalog'), 'doc', {})['action'])
+        for changes in ({'documentKey': 'other'}, {'requestId': None}, {'requestId': 'x' * 101},
+                        {'projectId': None}, {'projectId': 'not-a-uuid'}, {'projectId': []}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                core.ValidateRequest(dict(message, **changes), 'doc', {})
+
     def test_saved_table_requests_are_document_bound_and_validated_before_queueing(self):
         message = {'action': 'saveTable', 'requestId': 'table-1', 'tableId': '', 'revision': '',
                    'documentKey': 'doc', 'name': '  Review  ', 'layout': {}}
@@ -451,6 +463,66 @@ class HostSafetyTests(unittest.TestCase):
 
     def send(self, message, source='file:///index.html'):
         self.window.OnWebMessage(None, NS(Source=source, WebMessageAsJson=json.dumps(message)))
+
+    def test_publish_collects_fresh_values_in_api_context_before_deferred_network_work(self):
+        import test_cloud_publish as fixtures
+        self.api.update(CloudClient=mock.Mock(), PrepareSnapshot=fixtures.cloud.PrepareSnapshot,
+                        PublishSnapshot=fixtures.cloud.PublishSnapshot)
+        client = self.api['CloudClient'].return_value
+        client.create_model.return_value = {'revision': fixtures.REVISION}
+        client.publish_snapshot.return_value = {'revision': fixtures.REVISION}
+        self.window.Document = NS(IsValidObject=True, Equals=lambda document: True)
+        self.window.Application = NS(Application=NS(Username='Autodesk user'))
+        self.window.CloudBusy = False
+        self.window.PublishPlan = {'modelId': fixtures.MODEL, 'model': None,
+                                   'projects': [{'id': fixtures.PROJECT, 'name': 'Mechanical'}]}
+        self.window.CloudStore = NS(Ensure=mock.Mock())
+        self.window.StartCloudWork = mock.Mock()
+        self.window.SendSnapshot = mock.Mock()
+        self.window.SendContext = mock.Mock()
+        self.api['BuildSnapshot'] = mock.Mock(return_value=fixtures.snapshot())
+        self.window.Snapshot['selectedParameterIds'] = ['1']
+        self.send({'action': 'publishSnapshot', 'documentKey': 'doc', 'requestId': 'publish-1',
+                   'projectId': fixtures.PROJECT})
+        self.api['BuildSnapshot'].assert_not_called()
+        self.handler.Execute(NS(ActiveUIDocument=NS(Document=self.window.Document)))
+        self.assertEqual(['1'], self.api['BuildSnapshot'].call_args.args[3])
+        self.window.CloudStore.Ensure.assert_called_once_with(fixtures.MODEL)
+        client.publish_snapshot.assert_not_called()
+        self.assertIsNone(self.window.PublishPlan)
+        self.assertFalse(self.window.WritingTables)
+        work = self.window.StartCloudWork.call_args.args[1]
+        self.assertEqual(1, work()['rowCount'])
+        self.assertEqual('temporary-bridge', self.window.Snapshot['documentKey'])
+
+    def test_cloud_worker_returns_on_dispatcher_and_ignores_closed_windows(self):
+        # Run the worker body deterministically; its completion must still be marshalled.
+        callbacks = []
+        self.api.update(Action=lambda callback: callback,
+                        threading=NS(Thread=lambda target: NS(start=target)))
+        self.window.Dispatcher = NS(BeginInvoke=callbacks.append)
+        self.window.Send = mock.Mock()
+        request = {'action': 'publishCatalog', 'requestId': 'publish-1'}
+        data = {'projects': []}
+        self.window.StartCloudWork(request, lambda: data)
+        self.assertTrue(self.window.CloudBusy)
+        self.window.Send.assert_not_called()
+        callbacks.pop()()
+        self.assertFalse(self.window.CloudBusy)
+        self.assertIs(data, self.window.PublishPlan)
+        self.assertEqual('publishResult', self.window.Send.call_args.args[0]['type'])
+        self.window.Send.reset_mock()
+        self.window.StartCloudWork(request, lambda: data)
+        self.window.IsClosed = True
+        callbacks.pop()()
+        self.window.Send.assert_not_called()
+
+    def test_publish_failure_is_correlated_and_never_uses_saved_table_results(self):
+        self.window.Send = mock.Mock()
+        self.window.SendTableFailure({'action': 'publishSnapshot', 'requestId': 'publish-1'}, ValueError('Reload projects'))
+        response = self.window.Send.call_args.args[0]
+        self.assertEqual(('publishResult', 'publish-1', False),
+                         (response['type'], response['requestId'], response['success']))
 
     def test_queue_retains_distinct_requests_without_overwriting(self):
         self.send({'action': 'refresh', 'documentKey': 'doc'})

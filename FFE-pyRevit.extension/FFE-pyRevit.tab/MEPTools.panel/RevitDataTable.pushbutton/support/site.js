@@ -10,6 +10,7 @@
   let savedTables = null;
   let columnGrouping = null;
   let headerColors = null;
+  let cloudPublish = null;
 
   function status(message, kind = "info") {
     byId("status").textContent = message;
@@ -46,6 +47,7 @@
     if (savedTables) savedTables.update();
     if (columnGrouping) columnGrouping.update();
     if (headerColors) headerColors.update();
+    if (cloudPublish) cloudPublish.update();
     if (state.table) updateSortPriorities();
   }
 
@@ -613,6 +615,11 @@
           filters: { ...state.filters },
         }),
       });
+      cloudPublish = new window.CloudPublishControls({ bridge, status,
+        getSnapshot: () => state.snapshot, isLoading: () => state.loading,
+        isActive: () => state.active, isBusy: () => state.busy,
+        setBusy: value => { state.busy = value; updateControls(); },
+      });
       byId("refresh").addEventListener("click", () => request("refresh"));
       byId("grid").addEventListener("click", preserveSortPriority, true);
       byId("parameters").addEventListener("click", openParameters);
@@ -670,6 +677,7 @@
           const message = event.data;
           if (message.type === "snapshot") await loadSnapshot(message.snapshot);
           else if (message.type === "tableResult") await savedTables.handleResult(message);
+          else if (message.type === "publishResult") cloudPublish.handleResult(message);
           else if (message.type === "closeRequest") savedTables.close();
           else if (message.type === "context") {
             state.active = message.active;

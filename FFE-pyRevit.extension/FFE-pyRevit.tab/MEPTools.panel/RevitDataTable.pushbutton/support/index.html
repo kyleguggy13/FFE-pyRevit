@@ -13,6 +13,7 @@
   <script src="column_grouping.js" defer></script>
   <script src="header_groups.js" defer></script>
   <script src="header_colors.js" defer></script>
+  <script src="cloud_publish.js" defer></script>
   <script src="site.js" defer></script>
 </head>
 <body>
@@ -29,6 +30,7 @@
     <div class="header-actions">
       <button id="column-groups" disabled>Column groups…</button>
       <button id="parameters" disabled>Parameters…</button>
+      <button id="publish" disabled title="Publish this model's Space data to FFE Mechanical">Publish…</button>
       <button id="refresh" class="primary" disabled>Refresh</button>
     </div>
   </header>
@@ -66,6 +68,20 @@
     <span id="refreshed">Not refreshed yet</span>
   </footer>
   <div class="hint">Click rows to select · Shift+click selects a range · ↑/↓ moves focus · Space toggles selection · Ctrl+click a header adds a sort · Height is unbounded height</div>
+  <dialog id="publish-dialog" aria-labelledby="publish-title" aria-describedby="publish-scope">
+    <form id="publish-form">
+      <h2 id="publish-title">Publish to FFE Mechanical</h2>
+      <p id="publish-scope"></p>
+      <label>Project <select id="publish-project" required></select></label>
+      <p id="publish-destination"></p>
+      <p id="publish-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button id="publish-reload" type="button">Reload projects</button>
+        <button id="publish-cancel" type="button">Cancel</button>
+        <button id="publish-confirm" type="submit" class="primary" disabled>Publish</button>
+      </div>
+    </form>
+  </dialog>
   <dialog id="parameter-dialog" aria-labelledby="parameter-title" aria-describedby="parameter-help">
     <form id="parameter-form" method="dialog">
       <div class="parameter-heading">

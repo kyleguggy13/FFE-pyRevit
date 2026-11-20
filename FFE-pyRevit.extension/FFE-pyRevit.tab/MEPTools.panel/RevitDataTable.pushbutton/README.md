@@ -1,4 +1,4 @@
-# HVAC Data — v0.9.3
+# HVAC Data — v0.10.0
 
 Open **FFE-pyRevit → MEPTools → HVAC Data** in a Revit 2025 or 2026 project. Reload pyRevit after installing or renaming the command so its ribbon label updates.
 
@@ -10,7 +10,7 @@ Space phases are read from `ROOM_PHASE_ID`, falling back to `ROOM_PHASE`, using 
 
 Right-click a column header or a column group's band and choose **Change color…**. Pick a fill and click **Apply**; **Cancel** or Escape discards the draft. A group color fills its band, member headers, and data cells. Individual column colors override their group's fill; **Reset color** removes that override, or removes the band fill when used on the group. Text switches between black and white for contrast, and selected rows retain their selection highlight. Colors survive Refresh, header moves, and group edits, and are included in Save/Save As. Color changes mark the layout as unsaved and do not write to Revit until Save.
 
-Saved-table controls occupy the left side of the header; Column groups, Parameters, and Refresh stay on the right. All header buttons share a 30px height, 12px text, and matching padding. The saved-table controls wrap on smaller windows.
+Saved-table controls occupy the left side of the header; Column groups, Parameters, Publish, and Refresh stay on the right. All header buttons share a 30px height, 12px text, and matching padding. The saved-table controls wrap on smaller windows.
 
 - Click **Parameters…** to open a searchable window listing a checkbox, parameter name, Revit data type, and parameter type for every parameter found across the host model's Spaces. Parameter type distinguishes **Built-In**, **Shared Parameter**, and **Project Parameter**, with **Global Parameter** when encountered and **Other** when the origin cannot be identified. The catalog includes unset parameters. Definitions with the same name remain separate and show their parameter IDs.
 - Toggle **Show checked only** to filter the list to the current draft selections, including locked starter columns. It combines with search by name, data type, parameter type, or ID. Unchecking an editable item removes it from the filtered list immediately. Toggling the filter does not change selections, and the toggle stays set while this window is open and reopened.
@@ -31,7 +31,19 @@ Saved-table controls occupy the left side of the header; Column groups, Paramete
 - Model edits, undo, and redo mark the table **Out of date**. They do not automatically replace its rows. Deleted or replaced Spaces are checked again before navigation.
 - Each document has its own independent window, which can go behind Revit and appears in the taskbar/Alt+Tab. Reopening the command focuses that model's existing window. Activate the corresponding model before using its Refresh, Select, or Show actions. Closing the document closes its table.
 
-The warning panel reports unreadable and skipped rows. Space values remain read-only. Saved-table actions write model metadata; browsing, filtering, grouping, refreshing, and navigation do not modify the model. There is no linked-model collection, cloud storage, or network dependency.
+The warning panel reports unreadable and skipped rows. Space values remain read-only. Saved-table actions write model metadata; browsing, filtering, grouping, refreshing, and navigation do not modify the model. There is no linked-model collection. Table browsing works offline; only explicit Publish actions contact Supabase. The first publication also writes a stable cloud model link to Revit metadata.
+
+## Publish to FFE Mechanical
+
+Click **Publish…**, choose the shared project, then click **Publish**. This uploads all host-model Spaces across phases and levels, including unplaced and zero-area Spaces, with the parameter values currently loaded in the table. Filters and row selections do not restrict the upload. Current values are collected in the Revit API context when you confirm; if any Spaces are skipped, publication stops before replacing cloud data. Row-level warnings remain in the exported snapshot. An explicitly published empty model replaces the cloud dataset with zero Spaces.
+
+The destination is the same Supabase project used by FFE-Mechanical. No individual sign-in is required. `lib/ffe_supabase.py` packages its IronPython-compatible RPC client; SQL stays in `FFE-Mechanical/supabase/migrations`. The installed backend must include both `20261120000100_shared_hvac.sql` and `20261120000200_shared_access.sql`. Connection defaults are the shared project URL and publishable key already configured in that repository. There is no runtime dependency on the sibling checkout.
+
+The first publication assigns a UUID and stores it on Project Information under Extensible Storage schema `a9b98292-45e8-4539-a20c-abd263581dfb` (`FFEHVACCloudModelV1`). This is separate from the per-launch document bridge key and from saved-table storage. **Save/Sync the Revit model after the first publication** to persist/share that link. First-time linking needs an editable model and Project Information checkout; later publications reuse the link without a metadata transaction. An existing cloud model stays in its registered project. Renaming a Revit model does not create another cloud model.
+
+Publication replaces one complete Space snapshot, preserving string IDs, raw numeric values, formatted units, parameter identities, and warnings. It does not publish the current table layout or change existing cloud layouts. Revit-local saved-table catalogs are stripped from the payload. HTTPS calls run on a worker thread with bounded timeouts; Revit reads and identity transactions stay in the ExternalEvent context. The dialog captures the cloud revision the user reviewed. If another client updates it before publication, the upload fails without retrying or overwriting that revision. Use **Reload projects**, review the destination, then publish again. Failures preserve the working table; no automatic background upload occurs.
+
+This makes data available through the shared database contract. Loading it into the web application's table still depends on that application's cloud UI wiring.
 
 ## Shared saved tables
 

@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Purpose: browse host-model Spaces in a modeless, offline WebView2 data grid.
-Behaviors: complete shared saved views, filtering/grouping, refresh, and navigation.
+"""Purpose: browse host-model Spaces in a modeless WebView2 data grid.
+Behaviors: shared saved views, filtering, navigation, and explicit Supabase publishing.
 Revit API: 2025/2026, persistent IronPython engine, queued ExternalEvent requests.
 Design: browser callbacks use snapshots only; all document reads and navigation
 run in API callbacks. Saved-table operations transact metadata; Space values stay read-only.
 """
 __title__ = "HVAC Data"
-__version__ = "0.9.3"
+__version__ = "0.10.0"
 __min_revit_ver__ = 2025
 __persistentengine__ = True
 
@@ -14,6 +14,7 @@ import collections
 import json
 import os
 import sys
+import threading
 import uuid
 
 import clr
@@ -22,7 +23,7 @@ clr.AddReference("PresentationCore")
 clr.AddReference("PresentationFramework")
 clr.AddReference("WindowsBase")
 
-from System import Uri
+from System import Uri, Action
 from System.Collections.Generic import List
 from System.Windows import (Window, WindowState, WindowStartupLocation,
                             Thickness, Visibility, TextWrapping)
@@ -40,6 +41,8 @@ if LibraryDirectory not in sys.path:
 from ffe_webview2 import load_webview2_types, format_webview2_error
 from revit_data_table import BuildSnapshot, ValidateRequest, NavigateSpaces
 from saved_tables import RevitTableStore, CaptureLayout, ResolveLayout, TableMetadata, ValidateLayout
+from ffe_supabase import Client as CloudClient
+from cloud_publish import CloudModelStore, LoadCatalog, PrepareSnapshot, PublishSnapshot
 
 try:
     _DATA_TABLE_WINDOWS
@@ -81,6 +84,8 @@ class DataTableEventHandler(IExternalEventHandler):
                     window.SendResult("warning" if snapshot["skippedCount"] else "success",
                                       "Refreshed {0} Space(s). Skipped {1}.".format(
                         len(snapshot["rows"]), snapshot["skippedCount"]))
+                elif request["action"] in ("publishCatalog", "publishSnapshot"):
+                    window.HandlePublishRequest(request)
                 elif request.get("requestId"):
                     window.HandleTableRequest(request)
                 else:
@@ -116,6 +121,9 @@ class DataTableWindow(Window):
         self.Core = None
         self.ClosePermit = False
         self.WritingTables = False
+        self.CloudBusy = False
+        self.PublishPlan = None
+        self.CloudStore = CloudModelStore(document, DB)
         self.IndexUri = Uri(os.path.abspath(os.path.join(SupportDirectory, "index.html"))).AbsoluteUri
         self.Title = "HVAC Data - " + snapshot["documentTitle"]
         self.Width = 1160
@@ -192,7 +200,7 @@ class DataTableWindow(Window):
             args.Cancel = True
 
     def OnNewWindowRequested(self, sender, args):
-        """This offline table does not open browser popups."""
+        """Keep the privileged table page from opening browser popups."""
         args.Handled = True
 
     def OnNavigationCompleted(self, sender, args):
@@ -282,8 +290,76 @@ class DataTableWindow(Window):
 
     def SendTableFailure(self, request, error):
         """Retain the browser's working view when saving/loading cannot complete."""
-        self.Send({"type": "tableResult", "action": request.get("action"),
+        publish = request.get("action") in ("publishCatalog", "publishSnapshot")
+        self.Send({"type": "publishResult" if publish else "tableResult", "action": request.get("action"),
                    "requestId": request.get("requestId"), "success": False, "message": str(error)})
+
+    def HandlePublishRequest(self, request):
+        """Collect/recheck model data in Revit's API context before starting network work."""
+        if self.CloudBusy:
+            raise ValueError("A publish request is already running. Wait for it to finish.")
+        client = CloudClient(modified_by=str(self.Application.Application.Username or "")[:200])
+        if request["action"] == "publishCatalog":
+            self.PublishPlan = None
+            modelId = self.CloudStore.Read() or str(uuid.uuid4())
+            self.StartCloudWork(request, lambda: LoadCatalog(client, modelId))
+            return
+        plan = self.PublishPlan
+        # Consume the reviewed revision once. A failed write requires an explicit reload.
+        self.PublishPlan = None
+        if plan is None or not any(project["id"] == request["projectId"] for project in plan["projects"]):
+            raise ValueError("Reload projects before publishing.")
+        if plan["model"] is not None and plan["model"]["projectId"] != request["projectId"]:
+            raise ValueError("This model is already linked to another project. Reload projects.")
+        snapshot = BuildSnapshot(self.Document, self.DocumentKey, DB, self.Snapshot.get("selectedParameterIds", []))
+        payload = PrepareSnapshot(snapshot, plan["modelId"])
+        self.WritingTables = True
+        try:
+            self.CloudStore.Ensure(plan["modelId"])
+        finally:
+            self.WritingTables = False
+        self.SetSnapshot(snapshot)
+        self.Outdated = False
+        self.SendSnapshot()
+        self.SendContext()
+        self.StartCloudWork(request, lambda: PublishSnapshot(client, plan, request["projectId"], payload))
+
+    def StartCloudWork(self, request, work):
+        """Run JSON-only HTTPS calls off-thread and deliver results on the WPF dispatcher."""
+        self.CloudBusy = True
+
+        def run():
+            response = {"type": "publishResult", "action": request["action"], "requestId": request["requestId"]}
+            try:
+                result = work()
+                response.update(success=True, data=result)
+            except Exception as error:
+                message = str(error)
+                if getattr(error, "code", None) == "40001":
+                    message = "The cloud model changed. Reload projects, review the destination, and publish again."
+                response.update(success=False, message=message)
+
+            def complete():
+                if self.IsClosed:
+                    return
+                self.CloudBusy = False
+                if request["action"] == "publishCatalog" and response["success"]:
+                    self.PublishPlan = response["data"]
+                self.Send(response)
+
+            try:
+                self.Dispatcher.BeginInvoke(Action(complete))
+            except Exception:
+                # Closing Revit may dispose the dispatcher before a bounded request ends.
+                pass
+
+        worker = threading.Thread(target=run)
+        worker.daemon = True
+        try:
+            worker.start()
+        except Exception:
+            self.CloudBusy = False
+            raise
 
     def Send(self, payload):
         """Post structured JSON instead of interpolating model text into scripts."""

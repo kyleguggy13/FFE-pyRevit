@@ -23,6 +23,14 @@ main { min-height: 0; flex: 1; display: flex; flex-direction: column; padding: 1
 #table-dialog h2 { margin: 0 0 12px; font-size: 21px; font-weight: 600; }
 #table-dialog p { color: var(--muted); line-height: 1.5; margin: 0 0 18px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+#publish-dialog { width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; padding: 22px; border: 1px solid var(--border); border-radius: 8px; color: var(--ink); }
+#publish-dialog::backdrop { background: #182b3866; }
+#publish-dialog h2 { margin: 0 0 12px; font-size: 21px; }
+#publish-dialog p { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+#publish-project { max-width: none; }
+#publish-error { color: #b22d30; }
+#publish-error:empty { display: none; }
+#publish-dialog .dialog-actions { flex-wrap: wrap; }
 @media (max-height: 600px) { .hint { display: none; } main { gap: 8px; } }
 @media (max-width: 850px) { .saved-tables select { width: 150px; } }
 .toolbar { display: flex; align-items: flex-end; gap: 12px; }
