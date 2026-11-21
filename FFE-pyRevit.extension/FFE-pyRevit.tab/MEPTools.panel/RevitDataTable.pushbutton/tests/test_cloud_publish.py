@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Purpose: verify explicit cloud publishing without network access or Revit.
-Behaviors: complete JSON exports, conflict preservation, persistent model identity.
+"""Purpose: verify repository publishing without network access or Revit.
+Behaviors: typed observations, explicitly staged commits, and persistent model identity.
 Revit API: 2025/2026 boundaries use the saved-table storage fixtures.
 Design: real helpers and RPC payloads run against injected storage/transports.
 """
@@ -26,101 +26,143 @@ def load(name):
     return module
 
 
+sys.modules.setdefault('repository_collection', load('repository_collection'))
 cloud = load('cloud_publish')
 rpc = load('ffe_supabase')
 MODEL = '00000000-0000-4000-8000-000000000001'
 PROJECT = '00000000-0000-4000-8000-000000000002'
 REVISION = '00000000-0000-4000-8000-000000000003'
+HEAD = '00000000-0000-4000-8000-000000000004'
+SPACE = 'space-unique'
 
 
 def snapshot():
-    """Include strings larger than JavaScript's safe integer range and leading zeros."""
+    """Include IDs larger than JavaScript's safe integer range and leading zeros."""
     return {'documentKey': 'temporary-bridge', 'documentTitle': 'Mechanical',
-            'rows': [{'id': '9007199254740993', 'number': '002', 'parameterValues': {'p1': 12.5}}],
-            'selectedParameterIds': ['1'], 'skippedCount': 0, 'savedTables': ['local'],
-            'tableIssues': [], 'canSaveTables': True}
+            'rows': [{'id': '9007199254740993', 'uniqueId': SPACE, 'number': '002', 'name': 'Office',
+                      'parameterValues': {'p1': 12.5}, 'parameterTexts': {'p1': '12.5 L/s'}}],
+            'parameters': [{'id': '1', 'baseField': '', 'identity': 'builtin:-200', 'name': 'Airflow', 'key': 'p1',
+                            'storageType': 'Double', 'dataTypeId': 'autodesk.spec.aec:airFlow-2.0.0',
+                            'unitTypeId': 'autodesk.unit.unit:litersPerSecond-1.0.1'}],
+            'selectedParameterIds': ['1'], 'skippedCount': 0, 'issues': [], 'savedTables': ['local']}
+
+
+def candidate(field, classification='local_change', current=None, value='002'):
+    """Create the comparison item returned for a single Space field."""
+    return {'modelId': MODEL, 'spaceId': SPACE, 'field': field, 'classification': classification,
+            'current': current or {'state': 'missing'}, 'proposed': {'state': 'value', 'value': value}, 'metadata': {}}
 
 
 class PublishTests(unittest.TestCase):
     def setUp(self):
         self.client = mock.Mock()
-        self.client.list_projects.return_value = [{'id': PROJECT, 'name': 'FFE Mechanical'}]
-        self.model = {'id': MODEL, 'projectId': PROJECT, 'name': 'Mechanical', 'revision': REVISION}
-        self.client.get_snapshot.return_value = dict(self.model, snapshot={'old': 'data'})
-        self.client.create_model.return_value = self.model
-        self.client.publish_snapshot.return_value = dict(self.model, revision=str(uuid.uuid4()))
+        self.project = {'id': PROJECT, 'name': 'FFE Mechanical', 'headCommitId': HEAD}
+        self.client.list_projects.return_value = {
+            'items': [{'projectId': PROJECT, 'name': 'FFE Mechanical', 'headCommitId': HEAD}], 'nextCursor': None}
+        self.client.list_models.return_value = {'items': [{'modelId': MODEL, 'name': 'Mechanical'}], 'nextCursor': None}
+        self.client.compare_collection.return_value = {
+            'items': [candidate('@space', value={'elementId': '9007199254740993', 'context': {}}),
+                      candidate('base:number'), candidate('base:name', 'incoming')], 'nextCursor': None}
+        self.client.create_draft.return_value = {'revision': REVISION}
+        self.resolved = str(uuid.uuid4())
+        self.client.resolve_draft.return_value = {'revision': self.resolved}
+        self.client.commit_draft.return_value = {'ok': True, 'changeCount': 2}
 
-    def test_catalog_is_read_only_and_captures_reviewed_revision(self):
-        plan = cloud.LoadCatalog(self.client, MODEL)
-        self.assertEqual(self.model, plan['model'])
-        self.assertNotIn('snapshot', plan['model'])
-        self.client.create_model.assert_not_called()
-        self.client.publish_snapshot.assert_not_called()
+    def review(self, linked=True):
+        plan = cloud.LoadCatalog(self.client, MODEL, linked)
+        return cloud.ReviewCollection(self.client, plan, self.project,
+                                      cloud.PrepareCollection(snapshot(), {}), 'Mechanical', {SPACE: '002 Office'})
 
-    def test_snapshot_copy_preserves_ids_numbers_and_values_without_local_metadata(self):
-        original = snapshot()
-        payload = cloud.PrepareSnapshot(original, MODEL)
-        self.assertEqual(MODEL, payload['documentKey'])
-        self.assertEqual('temporary-bridge', original['documentKey'])
-        self.assertEqual('9007199254740993', payload['rows'][0]['id'])
-        self.assertEqual('002', payload['rows'][0]['number'])
-        self.assertEqual(12.5, payload['rows'][0]['parameterValues']['p1'])
-        self.assertFalse(set(('savedTables', 'tableIssues', 'canSaveTables')) & set(payload))
-        payload['rows'].clear()
-        self.assertEqual(1, len(original['rows']))
+    def test_catalog_pages_projects_and_finds_saved_model_without_writes(self):
+        cursor = {'offset': 1}
+        lastPage = self.client.list_projects.return_value
+        self.client.list_projects.side_effect = [{'items': [], 'nextCursor': cursor}, lastPage]
+        plan = cloud.LoadCatalog(self.client, MODEL, True)
+        self.assertEqual({'id': MODEL, 'projectId': PROJECT, 'name': 'Mechanical'}, plan['model'])
+        self.assertEqual([mock.call({'limit': 200}), mock.call({'limit': 200, 'cursor': cursor})],
+                         self.client.list_projects.call_args_list)
+        self.client.register_model.assert_not_called()
+        self.client.submit_collection.assert_not_called()
 
-    def test_incomplete_or_nonfinite_snapshot_does_not_create_or_publish(self):
-        plan = cloud.LoadCatalog(self.client, MODEL)
-        for update in ({'skippedCount': 1}, {'rows': [{'value': float('nan')}]}):
-            with self.subTest(update=update), self.assertRaises(ValueError):
-                cloud.PublishSnapshot(self.client, plan, PROJECT, dict(snapshot(), **update))
-        self.client.create_model.assert_not_called()
-        self.client.publish_snapshot.assert_not_called()
+    def test_collection_keeps_typed_values_and_suppresses_removals_when_scan_skips_spaces(self):
+        capabilities = {SPACE: {'builtin:-200': {'writable': True}}}
+        payload = cloud.PrepareCollection(dict(snapshot(), skippedCount=1), capabilities)
+        self.assertEqual({'spaces': 'full', 'successful': False}, payload['coverage'])
+        space = payload['spaces'][0]
+        self.assertEqual('9007199254740993', space['elementId'])
+        self.assertEqual(SPACE, space['uniqueId'])
+        cells = {cell['parameter']: cell for cell in space['cells']}
+        self.assertEqual('002', cells['base:number']['state']['value'])
+        self.assertEqual(12.5, cells['builtin:-200']['state']['value'])
+        self.assertEqual('12.5 L/s', cells['builtin:-200']['displayText'])
+        self.assertTrue(cells['builtin:-200']['writable'])
+        self.assertEqual('unavailable', cells['base:areaValue']['availability'])
+        self.assertNotIn('savedTables', payload)
 
-    def test_existing_model_uses_reviewed_revision_and_never_refetches_before_write(self):
-        plan = cloud.LoadCatalog(self.client, MODEL)
-        self.client.get_snapshot.reset_mock()
-        result = cloud.PublishSnapshot(self.client, plan, PROJECT, snapshot())
-        args = self.client.publish_snapshot.call_args.args
-        self.assertEqual((MODEL, REVISION), args[:2])
-        self.assertEqual((1, 1), (result['rowCount'], result['parameterCount']))
-        self.client.get_snapshot.assert_not_called()
-        self.client.create_model.assert_not_called()
+    def test_first_review_registers_and_submits_at_pinned_head_without_committing(self):
+        review = self.review(linked=False)
+        self.client.register_model.assert_called_once_with({'projectId': PROJECT, 'modelId': MODEL, 'name': 'Mechanical'})
+        submitted = self.client.submit_collection.call_args.args[0]
+        self.assertEqual(HEAD, submitted['baseCommitId'])
+        self.assertEqual(review['collectionId'], submitted['collectionId'])
+        self.assertEqual(HEAD, self.client.compare_collection.call_args.args[0]['commitId'])
+        self.assertEqual(1, review['incomingCount'])
+        self.assertEqual('002 Office', review['candidates']['1']['spaceLabel'])
+        self.client.create_draft.assert_not_called()
 
-    def test_first_publish_registers_stable_model_then_publishes_empty_dataset(self):
-        self.client.get_snapshot.return_value = None
-        plan = cloud.LoadCatalog(self.client, MODEL)
-        result = cloud.PublishSnapshot(self.client, plan, PROJECT, dict(snapshot(), rows=[]))
-        self.client.create_model.assert_called_once_with(PROJECT, MODEL, 'Mechanical')
-        self.assertEqual(0, result['rowCount'])
-
-    def test_conflicts_are_not_retried_and_wrong_project_cannot_write(self):
-        plan = cloud.LoadCatalog(self.client, MODEL)
-        self.client.publish_snapshot.side_effect = rpc.RpcError('Changed', '40001', 400)
-        with self.assertRaises(rpc.RpcError):
-            cloud.PublishSnapshot(self.client, plan, PROJECT, snapshot())
-        self.assertEqual(1, self.client.publish_snapshot.call_count)
-        other = str(uuid.uuid4())
-        plan['projects'].append({'id': other, 'name': 'Other'})
-        for project in (other, str(uuid.uuid4())):
+    def test_review_validates_selection_and_only_stages_chosen_cells(self):
+        review = self.review()
+        for selection in (['1'], ['0', 'not-reviewed']):
             with self.assertRaises(ValueError):
-                cloud.PublishSnapshot(self.client, plan, project, snapshot())
-        self.assertEqual(1, self.client.publish_snapshot.call_count)
+                cloud.CreateBatch(review, selection, 'Publish')
+        batch = cloud.CreateBatch(review, ['0'], 'Create Space')
+        result = cloud.CommitReview(self.client, review, batch)
+        self.assertTrue(result['ok'])
+        self.client.register_model.assert_not_called()
+        staged = self.client.create_draft.call_args.args[0]['changes']
+        self.assertEqual(['@space'], [change['field'] for change in staged])
+        self.assertTrue(staged[0]['staged'])
+        self.client.resolve_draft.assert_not_called()
+        self.assertEqual('Create Space', self.client.commit_draft.call_args.args[0]['message'])
 
-    def test_rpc_uses_publishable_key_and_database_signature_without_auth_token(self):
+    def test_explicitly_selected_unbased_value_resolves_against_reviewed_head(self):
+        old = {'state': 'value', 'value': '001'}
+        self.client.compare_collection.return_value['items'] = [candidate('base:number', 'unbased', old)]
+        review = self.review()
+        batch = cloud.CreateBatch(review, ['0'], 'Revise Space number')
+        cloud.CommitReview(self.client, review, batch)
+        resolved = self.client.resolve_draft.call_args.args[0]
+        self.assertEqual(HEAD, resolved['expectedHeadCommitId'])
+        self.assertEqual(old, resolved['resolutions'][0]['expectedCurrent'])
+        self.assertEqual('draft', resolved['resolutions'][0]['choice'])
+        self.assertEqual(self.resolved, self.client.commit_draft.call_args.args[0]['expectedDraftRevision'])
+
+    def test_retry_reuses_mutation_ids_and_does_not_retry_a_conflict_automatically(self):
+        review = self.review()
+        batch = cloud.CreateBatch(review, ['0', '1'], 'Publish')
+        self.client.commit_draft.side_effect = [OSError('Connection closed'), {'ok': False, 'code': 'CONFLICT'}]
+        with self.assertRaises(OSError):
+            cloud.CommitReview(self.client, review, batch)
+        self.assertEqual(1, self.client.commit_draft.call_count)
+        self.assertFalse(cloud.CommitReview(self.client, review, batch)['ok'])
+        self.assertEqual(self.client.create_draft.call_args_list[0], self.client.create_draft.call_args_list[1])
+        self.assertEqual(self.client.commit_draft.call_args_list[0], self.client.commit_draft.call_args_list[1])
+
+    def test_rpc_uses_publishable_key_and_versioned_envelope(self):
         calls = []
 
         def transport(url, headers, payload):
             calls.append((url, headers, json.loads(payload)))
-            return 200, json.dumps(self.model)
+            return 200, '{"ok":true}'
 
-        client = rpc.Client(modified_by='Autodesk user', transport=transport)
-        client.publish_snapshot(MODEL, REVISION, snapshot())
+        client = rpc.Client(client_id=MODEL, actor_name='Autodesk user', transport=transport)
+        client.commit_draft({'projectId': PROJECT, 'draftId': REVISION, 'requestId': HEAD})
         url, headers, payload = calls[0]
-        self.assertTrue(url.endswith('/rest/v1/rpc/ffe_publish_snapshot'))
+        self.assertTrue(url.endswith('/rest/v1/rpc/ffe_v2_commit_draft'))
         self.assertEqual({'apikey': rpc.PUBLISHABLE_KEY}, headers)
-        self.assertEqual({'p_model_id': MODEL, 'p_expected_revision': REVISION,
-                          'p_snapshot': snapshot(), 'p_modified_by': 'Autodesk user'}, payload)
+        self.assertEqual({'p_request': {'schemaVersion': 2, 'projectId': PROJECT, 'draftId': REVISION,
+                                       'requestId': HEAD, 'actor': {'clientId': MODEL, 'source': 'revit',
+                                                                   'name': 'Autodesk user', 'userId': ''}}}, payload)
 
 
 class IdentityTests(unittest.TestCase):

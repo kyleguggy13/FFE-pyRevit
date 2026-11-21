@@ -1,60 +1,144 @@
 # -*- coding: utf-8 -*-
-"""Purpose: publish complete HVAC snapshots using FFE-Mechanical's shared RPCs.
-Behaviors: persistent model identity, explicit destinations, revision conflict checks.
+"""Purpose: review and commit Space changes using FFE-Mechanical's repository API.
+Behaviors: persistent model identity, explicit staging, optimistic concurrency.
 Revit API: 2025/2026; CloudModelStore runs only in an ExternalEvent API context.
 Design: RPC helpers accept JSON only and run on a worker; identity writes use one
 short transaction before HTTP starts. No transaction remains open during network IO.
 """
-import json
 import uuid
 
+from repository_collection import from_snapshot
 from saved_tables import RevitTableStore
 
 CLOUD_SCHEMA_GUID = "a9b98292-45e8-4539-a20c-abd263581dfb"
 
 
-def PrepareSnapshot(snapshot, modelId):
-    """Detach plain JSON and refuse incomplete extraction before replacing cloud data."""
-    if snapshot.get("skippedCount", 0):
-        raise ValueError("Some Spaces could not be collected. Resolve the skipped-Space warnings and retry Publish.")
-    result = json.loads(json.dumps(snapshot, ensure_ascii=True, allow_nan=False))
-    for field in ("savedTables", "tableIssues", "canSaveTables"):
-        result.pop(field, None)
-    result["documentKey"] = str(uuid.UUID(modelId))
-    return result
+def PrepareCollection(snapshot, capabilities):
+    """Send supported observations and preserve coverage and extraction warnings."""
+    supported = []
+    issues = list(snapshot["issues"])
+    loaded = set(snapshot["selectedParameterIds"])
+    for parameter in snapshot["parameters"]:
+        if parameter["baseField"] or parameter["id"] not in loaded:
+            continue
+        storage = parameter["storageType"]
+        if (not parameter["identity"] or storage not in ("String", "Double", "Integer", "ElementId")
+                or (storage == "Double" and not parameter["dataTypeId"])):
+            issues.append("Cannot publish {0} ({1}): its type or stable identity is unavailable."
+                          .format(parameter["name"], parameter["id"]))
+        else:
+            supported.append(parameter)
+    return from_snapshot(dict(snapshot, parameters=supported, issues=issues), capabilities,
+                         {"spaces": "full", "successful": not snapshot["skippedCount"]})
 
 
-def LoadCatalog(client, modelId):
-    """Load projects and capture the revision the user will review before publishing."""
-    projects = client.list_projects()
-    if not isinstance(projects, list):
-        raise ValueError("Supabase returned an invalid project list.")
-    choices = []
-    for project in projects:
-        choices.append({"id": str(uuid.UUID(project["id"])), "name": project["name"]})
-    current = client.get_snapshot(modelId)
+def ReadPages(operation, request):
+    """Read the repository's cursor protocol with the original filters."""
+    page = operation(request)
+    for item in page["items"]:
+        yield item
+    while page["nextCursor"] is not None:
+        page = operation(dict(request, cursor=page["nextCursor"]))
+        for item in page["items"]:
+            yield item
+
+
+def LoadCatalog(client, modelId, linked, preferredProjectId=None, cloudContext=None):
+    """Find the stored model's project, including links created by the old command."""
+    choices = [{"id": project["projectId"], "name": project["name"], "headCommitId": project["headCommitId"]}
+               for project in ReadPages(client.list_projects, {"limit": 200})]
     model = None
-    if current is not None:
-        model = {key: current[key] for key in ("id", "projectId", "name", "revision")}
-        if model["id"] != modelId or not any(project["id"] == model["projectId"] for project in choices):
-            raise ValueError("This model's cloud destination is unavailable. Reload projects and retry.")
-        uuid.UUID(model["revision"])
-    return {"modelId": modelId, "projects": choices, "model": model}
+    if linked or preferredProjectId:
+        for project in choices:
+            if not linked and project["id"] != preferredProjectId:
+                continue
+            for candidate in ReadPages(client.list_models, {"projectId": project["id"], "limit": 200}):
+                if candidate["modelId"] == modelId:
+                    model = {"id": modelId, "projectId": project["id"], "name": candidate["name"]}
+                    break
+            if model is not None:
+                break
+    if model is not None and preferredProjectId and model["projectId"] != preferredProjectId:
+        raise ValueError("This model is linked to a different project than Autodesk Forma. Review the existing connection.")
+    return {"modelId": modelId, "projects": choices, "model": model,
+            "projectId": preferredProjectId, "cloudContext": cloudContext}
 
 
-def PublishSnapshot(client, plan, projectId, snapshot):
-    """Create only this model, then compare the reviewed revision without automatic retries."""
-    if not any(project["id"] == projectId for project in plan["projects"]):
-        raise ValueError("Choose an available cloud project.")
-    payload = PrepareSnapshot(snapshot, plan["modelId"])
-    model = plan["model"]
-    if model is not None and model["projectId"] != projectId:
-        raise ValueError("This model is already published in another project. Reload its destination.")
-    if model is None:
-        model = client.create_model(projectId, plan["modelId"], snapshot["documentTitle"][:200])
-    result = client.publish_snapshot(plan["modelId"], model["revision"], payload)
-    return {"modelId": plan["modelId"], "revision": result["revision"],
-            "rowCount": len(payload["rows"]), "parameterCount": len(payload["selectedParameterIds"])}
+def ReviewCollection(client, plan, project, collection, modelName, spaceLabels):
+    """Register this model if needed and compare observations at the reviewed head."""
+    projectId, head = project["id"], project["headCommitId"]
+    modelId = plan["modelId"]
+    if plan.get("projectId") and projectId != plan["projectId"]:
+        raise ValueError("Use this model's Autodesk Forma project.")
+    if plan["model"] is None:
+        registration = {"projectId": projectId, "modelId": modelId, "name": modelName}
+        context = plan.get("cloudContext")
+        if context and context.get("available"):
+            registration["metadata"] = {"formaProjectId": context["formaProjectId"], "cloudModelGuid": context.get("cloudModelGuid")}
+        try:
+            client.register_model(registration)
+        except Exception as error:
+            if getattr(error, "code", None) != "23505":
+                raise
+            # Another cloud copy may have registered this deterministic model ID.
+            if not any(item["modelId"] == modelId for item in ReadPages(client.list_models, {"projectId": projectId, "limit": 200})):
+                raise
+    collectionId = str(uuid.uuid4())
+    client.submit_collection({"projectId": projectId, "modelId": modelId, "collectionId": collectionId,
+                              "baseCommitId": head, "collection": collection})
+    candidates = {}
+    incomingCount = 0
+    for item in ReadPages(client.compare_collection, {"projectId": projectId, "collectionId": collectionId,
+                                                       "commitId": head, "limit": 200}):
+        classification = item["classification"]
+        if classification == "incoming":
+            incomingCount += 1
+        elif classification in ("local_change", "conflict", "unbased"):
+            item = dict(item, spaceLabel=spaceLabels.get(item["spaceId"], item["spaceId"]))
+            candidates[str(len(candidates))] = item
+    return {"collectionId": collectionId, "projectId": projectId, "headCommitId": head,
+            "candidates": candidates, "incomingCount": incomingCount, "skippedCount": collection["skippedCount"],
+            "warningCount": len(collection["warnings"])}
+
+
+def CreateBatch(review, selection, message):
+    """Accept only reviewed proposal IDs and require an explicit Space creation selection."""
+    candidates = review["candidates"]
+    if not selection or any(key not in candidates for key in selection):
+        raise ValueError("Choose changes from the current review.")
+    additions = {item["spaceId"]: key for key, item in candidates.items()
+                 if item["field"] == "@space" and item["current"]["state"] == "missing"
+                 and item["proposed"]["state"] == "value"}
+    chosen = set(selection)
+    for key in selection:
+        item = candidates[key]
+        required = additions.get(item["spaceId"])
+        if required is not None and required not in chosen:
+            raise ValueError("Select the new Space along with its values.")
+    return {"selection": selection, "message": message, "draftId": str(uuid.uuid4()),
+            "createId": str(uuid.uuid4()), "resolveId": str(uuid.uuid4()), "commitId": str(uuid.uuid4())}
+
+
+def CommitReview(client, review, batch):
+    """Stage only selected changes and reuse request IDs when a response is uncertain."""
+    draft = {"projectId": review["projectId"], "draftId": batch["draftId"]}
+    changes, resolutions = [], []
+    for candidateId in batch["selection"]:
+        item = review["candidates"][candidateId]
+        key = {field: item[field] for field in ("modelId", "spaceId", "field")}
+        changes.append(dict(key, staged=True, proposed=item["proposed"]))
+        if item["classification"] in ("conflict", "unbased"):
+            resolutions.append(dict(key, choice="draft", expectedCurrent=item["current"]))
+    created = client.create_draft(dict(draft, requestId=batch["createId"],
+                                       collectionId=review["collectionId"], changes=changes))
+    revision = created["revision"]
+    if resolutions:
+        resolved = client.resolve_draft(dict(draft, requestId=batch["resolveId"],
+                                             expectedDraftRevision=revision, resolutions=resolutions,
+                                             expectedHeadCommitId=review["headCommitId"]))
+        revision = resolved["revision"]
+    return client.commit_draft(dict(draft, requestId=batch["commitId"],
+                                    expectedDraftRevision=revision, message=batch["message"]))
 
 
 class CloudModelStore(RevitTableStore):

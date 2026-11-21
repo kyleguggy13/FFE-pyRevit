@@ -1,4 +1,4 @@
-# HVAC Data — v0.10.0
+# HVAC Data — v0.12.0
 
 Open **FFE-pyRevit → MEPTools → HVAC Data** in a Revit 2025 or 2026 project. Reload pyRevit after installing or renaming the command so its ribbon label updates.
 
@@ -31,19 +31,27 @@ Saved-table controls occupy the left side of the header; Column groups, Paramete
 - Model edits, undo, and redo mark the table **Out of date**. They do not automatically replace its rows. Deleted or replaced Spaces are checked again before navigation.
 - Each document has its own independent window, which can go behind Revit and appears in the taskbar/Alt+Tab. Reopening the command focuses that model's existing window. Activate the corresponding model before using its Refresh, Select, or Show actions. Closing the document closes its table.
 
-The warning panel reports unreadable and skipped rows. Space values remain read-only. Saved-table actions write model metadata; browsing, filtering, grouping, refreshing, and navigation do not modify the model. There is no linked-model collection. Table browsing works offline; only explicit Publish actions contact Supabase. The first publication also writes a stable cloud model link to Revit metadata.
+The warning panel reports unreadable and skipped rows. Space values remain read-only. Saved-table actions write model metadata; browsing, filtering, grouping, refreshing, and navigation do not modify the model. There is no linked-model collection. Table browsing works offline. Publish is the entry point for repository access.
+
+## Autodesk Forma project connection
+
+When HVAC Data opens for a Forma/Autodesk Docs cloud model, it reads the active model's Data Management project ID and checks the shared repository in the background. An existing Forma project connects automatically. If it is missing, a **Start project** prompt displays the detected project name and ID. **Yes** creates the shared project; **No** continues local browsing without creating anything or publishing Space values. Coworkers and other models in the same Forma project reuse that project by ID, including if names are duplicated or renamed.
+
+The name comes from the model's named Autodesk cloud path. If Revit does not supply a readable name, the tool asks for the name shown in Forma after you choose Yes. It never substitutes the separate Revit Project Information name. Cloud-path labels can be cached; matching always uses the Forma ID. Non-cloud files keep the existing manual Publish destination workflow.
+
+If this model was already published to a repository created manually, the prompt offers to associate that existing project with Forma, preserving its name, model data, and history. Conflicting existing links stop with a warning instead of moving the model. An unavailable lookup never triggers project creation. Close and reopen HVAC Data to retry after a connection failure.
+
+Apply FFE-Mechanical's **20261120000400_forma_projects.sql** migration once after the repository migration. This fourth migration only adds Forma associations and does not reset any data. Reload pyRevit/restart Revit after updating the command. Opening the tool and creating the shared project do not write Revit metadata; the first explicit Publish collection still saves the model connection as described below. Previously unlinked cloud copies derive the same model UUID from their actual project/model IDs.
 
 ## Publish to FFE Mechanical
 
-Click **Publish…**, choose the shared project, then click **Publish**. This uploads all host-model Spaces across phases and levels, including unplaced and zero-area Spaces, with the parameter values currently loaded in the table. Filters and row selections do not restrict the upload. Current values are collected in the Revit API context when you confirm; if any Spaces are skipped, publication stops before replacing cloud data. Row-level warnings remain in the exported snapshot. An explicitly published empty model replaces the cloud dataset with zero Spaces.
+1. Click **Publish…**, choose a project, and click **Collect changes**. Revit reads the latest data for all host-model Spaces across phases and levels, including unplaced and zero-area Spaces. The collection includes the starter fields, Phase, and supported parameters loaded in the table. Table filters and row selections do not limit collection. Submitting a collection records observations in the repository for comparison.
+2. Compare the **Repository** and **Revit** values. Use the checkboxes to stage individual changes. **Select local changes** selects ordinary additions and edits. Mark Space removals, conflicts, and changes without a sync baseline individually. Selecting a value on a new Space also stages the Space identity. Unavailable values do not create clears. A scan that skips any Spaces cannot propose Space removals.
+3. Enter a commit message and click **Commit selected**. The commit records the selected changes in project history. If Revit changes during review or the repository rejects a stale selection, reload projects and collect again. If a response is uncertain, **Retry commit** resends the same requests while the dialog is open.
 
-The destination is the same Supabase project used by FFE-Mechanical. No individual sign-in is required. `lib/ffe_supabase.py` packages its IronPython-compatible RPC client; SQL stays in `FFE-Mechanical/supabase/migrations`. The installed backend must include both `20261120000100_shared_hvac.sql` and `20261120000200_shared_access.sql`. Connection defaults are the shared project URL and publishable key already configured in that repository. There is no runtime dependency on the sibling checkout.
+The first collection stores a UUID on Project Information under Extensible Storage schema `a9b98292-45e8-4539-a20c-abd263581dfb` (`FFEHVACCloudModelV1`). **Save/Sync the Revit model** to persist and share the link. First-time linking requires an editable model and Project Information checkout. A previously linked model reuses its UUID, including after a rename or when registering again after the backend reset. Repository writes use a persistent ID stored in the local pyRevit configuration and the Revit user name for attribution.
 
-The first publication assigns a UUID and stores it on Project Information under Extensible Storage schema `a9b98292-45e8-4539-a20c-abd263581dfb` (`FFEHVACCloudModelV1`). This is separate from the per-launch document bridge key and from saved-table storage. **Save/Sync the Revit model after the first publication** to persist/share that link. First-time linking needs an editable model and Project Information checkout; later publications reuse the link without a metadata transaction. An existing cloud model stays in its registered project. Renaming a Revit model does not create another cloud model.
-
-Publication replaces one complete Space snapshot, preserving string IDs, raw numeric values, formatted units, parameter identities, and warnings. It does not publish the current table layout or change existing cloud layouts. Revit-local saved-table catalogs are stripped from the payload. HTTPS calls run on a worker thread with bounded timeouts; Revit reads and identity transactions stay in the ExternalEvent context. The dialog captures the cloud revision the user reviewed. If another client updates it before publication, the upload fails without retrying or overwriting that revision. Use **Reload projects**, review the destination, then publish again. Failures preserve the working table; no automatic background upload occurs.
-
-This makes data available through the shared database contract. Loading it into the web application's table still depends on that application's cloud UI wiring.
+The backend requires FFE-Mechanical's repository migrations and the additional Forma project migration above. The **third** migration resets the application's old cloud snapshots and layouts; do not rerun it when adding Forma support. FFE-Mechanical owns the SQL under `supabase/migrations`. The command bundles its IronPython-compatible v2 client, collection adapter, and Forma discovery helper and uses the shared publishable key without individual sign-in. HTTPS runs on a worker thread. Revit reads and metadata transactions run in the ExternalEvent context.
 
 ## Shared saved tables
 

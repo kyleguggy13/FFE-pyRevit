@@ -1,4 +1,4 @@
 title: HVAC Data
-tooltip: Browse, group, and save Space tables. Publish current Space data to FFE Mechanical through Supabase.
+tooltip: Browse, group, and save Space tables. Review and commit Space changes to FFE Mechanical.
 author: Kyle Guggenheim
 min_revit_version: 2025

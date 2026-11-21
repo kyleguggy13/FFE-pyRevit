@@ -1,26 +1,37 @@
 # -*- coding: utf-8 -*-
-"""Purpose: call FFE Mechanical's shared RPCs from IronPython 2.7 or CPython.
-Behaviors: bounded HTTPS requests, structured errors, revision-checked publishing.
-Revit API: 2025/2026 compatible; this transport never accesses Revit objects.
-Design: packaged from FFE-Mechanical/integrations/pyrevit/ffe_supabase.py so the
-command can be installed independently. Keep RPC signatures aligned with that client.
+"""FFE shared RPC client for IronPython 2.7 / CPython, with no Revit dependency.
 
 SQL is owned by FFE-Mechanical/supabase/migrations. Uses the shared publishable
-key without individual sign-in. modified_by is optional, client-reported attribution.
+key without individual sign-in. Actor metadata is client-reported attribution.
 Perform network requests away from the Revit UI/ExternalEvent thread.
 """
 import json
 import sys
+import uuid
 
 PROJECT_URL = "https://ncxylphudovrmvdgqsol.supabase.co"
 PUBLISHABLE_KEY = "sb_publishable_VFbJW7ZQQh0Ro254lfXXvw_xesXNxTK"
 
 
+OPERATIONS = ('create_project', 'register_model', 'list_projects', 'list_models', 'get_catalog', 'submit_collection', 'compare_collection',
+              'find_forma_project', 'ensure_forma_project',
+              'create_draft', 'update_draft', 'get_draft', 'list_drafts', 'discard_draft', 'resolve_draft', 'commit_draft',
+              'get_state', 'get_history', 'get_commit', 'compare_commits', 'prepare_pull', 'acknowledge_pull', 'get_pull',
+              'get_sync', 'save_layout', 'rename_layout', 'delete_layout', 'list_layouts', 'get_layout', 'layout_history')
+WRITES = frozenset(('create_project', 'ensure_forma_project', 'register_model', 'submit_collection', 'create_draft', 'update_draft', 'resolve_draft',
+                   'discard_draft', 'commit_draft', 'prepare_pull', 'acknowledge_pull', 'save_layout', 'rename_layout', 'delete_layout'))
+try:
+    STRING_TYPES = (basestring,)
+except NameError:
+    STRING_TYPES = (str,)
+
+
 class RpcError(Exception):
-    def __init__(self, message, code=None, status=None):
+    def __init__(self, message, code=None, status=None, details=None):
         Exception.__init__(self, message)
         self.code = code
         self.status = status
+        self.details = details
 
 
 def _request(url, headers, payload):
@@ -77,7 +88,8 @@ def _request(url, headers, payload):
 
 
 class Client(object):
-    def __init__(self, url=PROJECT_URL, publishable_key=PUBLISHABLE_KEY, modified_by="", transport=None):
+    def __init__(self, url=PROJECT_URL, publishable_key=PUBLISHABLE_KEY,
+                 client_id=None, actor_name="", user_id="", source="revit", transport=None):
         try:
             from urllib.parse import urlparse
         except ImportError:
@@ -88,21 +100,20 @@ class Client(object):
             raise ValueError("Use the HTTPS Supabase project URL.")
         if not publishable_key.startswith("sb_publishable_"):
             raise ValueError("Use a Supabase publishable key.")
-        try:
-            string_types = (basestring,)
-        except NameError:
-            string_types = (str,)
-        if not isinstance(modified_by, string_types) or len(modified_by) > 200:
-            raise ValueError("Uploader identity must be at most 200 characters.")
+        if (not isinstance(actor_name, STRING_TYPES) or len(actor_name) > 200
+                or not isinstance(user_id, STRING_TYPES) or len(user_id) > 200 or source not in ("web", "revit")):
+            raise ValueError("Invalid client attribution.")
+        if client_id is not None:
+            client_id = str(uuid.UUID(client_id))
         self.url = url.rstrip("/")
         self.key = publishable_key
-        self.modified_by = modified_by
+        self.actor = {"clientId": client_id, "name": actor_name, "userId": user_id, "source": source}
         self.transport = transport or _request
 
     def rpc(self, name, args=None):
         import re
-        if not re.match(r"^ffe_[a-z_]+\Z", name):
-            raise ValueError("Invalid FFE RPC name.")
+        if not re.match(r"^ffe_v2_[a-z_]+\Z", name):
+            raise ValueError("Use a version 2 repository RPC.")
         status, raw = self.transport(self.url + "/rest/v1/rpc/" + name,
                                      {"apikey": self.key},
                                      json.dumps(args or {}, allow_nan=False))
@@ -112,36 +123,39 @@ class Client(object):
             raise RpcError("Supabase returned an unreadable response.", "INVALID_RESPONSE", status)
         if not 200 <= status < 300:
             error = result if isinstance(result, dict) else {}
-            raise RpcError(error.get("message", "The shared data request failed."), error.get("code"), status)
+            raise RpcError(error.get("message", "The shared data request failed."), error.get("code"), status, error.get("details"))
         return result
 
-    def list_projects(self):
-        return self.rpc("ffe_list_projects")
+    def call(self, action, data=None):
+        if action not in OPERATIONS or (data is not None and not isinstance(data, dict)):
+            raise ValueError("Invalid repository request.")
+        request = dict(data or {})
+        request["schemaVersion"] = 2
+        if action in WRITES:
+            if not self.actor["clientId"] or not self.actor["name"].strip():
+                raise ValueError("Writes require a persistent client_id and actor_name.")
+            request["actor"] = dict(self.actor)
+            request["requestId"] = str(uuid.UUID(request["requestId"])) if request.get("requestId") else str(uuid.uuid4())
+        try:
+            return self.rpc("ffe_v2_" + action, {"p_request": request})
+        except Exception as error:
+            error.request_id = request.get("requestId")
+            raise
 
-    def create_project(self, project_id, name):
-        return self.rpc("ffe_create_project", {"p_project_id": project_id, "p_name": name})
+    def publish_snapshot(self, *args, **kwargs):
+        raise ValueError("Snapshot overwrites were retired. Submit a collection, stage a draft, and commit it.")
 
-    def list_models(self, project_id):
-        return self.rpc("ffe_list_models", {"p_project_id": project_id})
+    def get_snapshot(self, *args, **kwargs):
+        raise ValueError("Use get_state for versioned repository values.")
 
-    def create_model(self, project_id, model_id, name):
-        return self.rpc("ffe_create_model", {"p_project_id": project_id, "p_model_id": model_id, "p_name": name, "p_modified_by": self.modified_by})
 
-    def get_snapshot(self, model_id):
-        return self.rpc("ffe_get_snapshot", {"p_model_id": model_id})
+def _operation(action):
+    def invoke(self, request=None):
+        return self.call(action, request)
+    invoke.__name__ = action
+    invoke.__doc__ = "Call ffe_v2_" + action + " with a version 2 request dictionary."
+    return invoke
 
-    def publish_snapshot(self, model_id, expected_revision, snapshot):
-        return self.rpc("ffe_publish_snapshot", {"p_model_id": model_id, "p_expected_revision": expected_revision, "p_snapshot": snapshot, "p_modified_by": self.modified_by})
 
-    def list_layouts(self, model_id):
-        return self.rpc("ffe_list_layouts", {"p_model_id": model_id})
-
-    def get_layout(self, model_id, layout_id):
-        return self.rpc("ffe_get_layout", {"p_model_id": model_id, "p_layout_id": layout_id})
-
-    def save_layout(self, model_id, layout_id, name, layout, expected_revision=None, version=4):
-        return self.rpc("ffe_save_layout", {"p_model_id": model_id, "p_layout_id": layout_id,
-                        "p_expected_revision": expected_revision, "p_name": name, "p_layout": layout, "p_version": version, "p_modified_by": self.modified_by})
-
-    def delete_layout(self, model_id, layout_id, expected_revision):
-        return self.rpc("ffe_delete_layout", {"p_model_id": model_id, "p_layout_id": layout_id, "p_expected_revision": expected_revision})
+for _action in OPERATIONS:
+    setattr(Client, _action, _operation(_action))

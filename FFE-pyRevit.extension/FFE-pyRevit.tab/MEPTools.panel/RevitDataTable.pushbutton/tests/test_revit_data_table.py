@@ -133,6 +133,23 @@ class SpaceSnapshotTests(unittest.TestCase):
         self.assertTrue(all(call[0] == 'project-units' for call in self.formatCalls))
         json.dumps(snapshot, allow_nan=False)
 
+    def test_repository_capabilities_keep_references_portable_and_track_clear_support(self):
+        reference = Parameter(-30, 'Reference', 'ElementId', 20, text='Level 1')
+        reference.IsReadOnly = True
+        self.elements[20].UniqueId = 'level-unique'
+        notes = Parameter(31, 'Notes', 'String', None, isShared=True)
+        notes.IsReadOnly = False
+        notes.GUID = '00000000-0000-4000-8000-000000000001'
+        self.elements[31] = NS(ShouldHideWhenNoValue=lambda: True)
+        self.space.Parameters = [reference, notes]
+        capabilities = {}
+        core.BuildSnapshot(self.document, 'document-key', self.db, ['-30', '31'], capabilities)
+        cells = capabilities[self.space.UniqueId]
+        self.assertEqual({'writable': False, 'hasValue': True, 'referenceUniqueId': 'level-unique'},
+                         cells['builtin:-30'])
+        self.assertEqual({'writable': True, 'hasValue': False, 'canUnset': True},
+                         cells['shared:' + notes.GUID])
+
     def test_no_view_phase_uses_last_project_phase(self):
         self.document.ActiveView = NS(get_Parameter=lambda key: None)
         self.assertEqual('11', self.snapshot()['defaultPhaseId'])
@@ -390,7 +407,7 @@ class RequestTests(unittest.TestCase):
     def test_publish_requests_are_correlated_document_bound_and_require_valid_project(self):
         import uuid
         project = str(uuid.uuid4())
-        message = {'action': 'publishSnapshot', 'requestId': 'publish-1',
+        message = {'action': 'publishReview', 'requestId': 'publish-1',
                    'documentKey': 'doc', 'projectId': project}
         self.assertEqual(project, core.ValidateRequest(message, 'doc', {})['projectId'])
         self.assertEqual('publishCatalog', core.ValidateRequest(dict(message, action='publishCatalog'), 'doc', {})['action'])
@@ -398,6 +415,19 @@ class RequestTests(unittest.TestCase):
                         {'projectId': None}, {'projectId': 'not-a-uuid'}, {'projectId': []}):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 core.ValidateRequest(dict(message, **changes), 'doc', {})
+
+    def test_commit_accepts_only_review_selection_and_message(self):
+        import uuid
+        request = {'action': 'publishCommit', 'requestId': 'publish-2', 'documentKey': 'doc',
+                   'reviewId': str(uuid.uuid4()), 'selection': ['3', '1', '3'], 'message': ' Revise airflow '}
+        result = core.ValidateRequest(dict(request, changes=[{}]), 'doc', {})
+        self.assertEqual(['1', '3'], result['selection'])
+        self.assertEqual('Revise airflow', result['message'])
+        self.assertNotIn('changes', result)
+        for changes in ({'reviewId': 'other'}, {'selection': []}, {'selection': [1]},
+                        {'selection': ['1.1']}, {'message': ' '}, {'message': 'x' * 5001}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                core.ValidateRequest(dict(request, **changes), 'doc', {})
 
     def test_saved_table_requests_are_document_bound_and_validated_before_queueing(self):
         message = {'action': 'saveTable', 'requestId': 'table-1', 'tableId': '', 'revision': '',
@@ -440,6 +470,7 @@ def host_classes():
     classes = [node for node in tree.body if isinstance(node, ast.ClassDef)]
     api = {'Window': object, 'IExternalEventHandler': object, 'collections': collections,
            'json': json, 'ValidateRequest': core.ValidateRequest, 'Logger': mock.Mock(),
+           'PublishActions': core.PublishActions,
            'Visibility': NS(Collapsed=0, Visible=1), 'DB': object(), '_DATA_TABLE_WINDOWS': []}
     api.update({name: getattr(saved, name) for name in ('CaptureLayout', 'ResolveLayout', 'TableMetadata', 'ValidateLayout')})
     exec(compile(ast.Module(body=classes, type_ignores=[]), str(COMMAND), 'exec'), api)
@@ -455,6 +486,7 @@ class HostSafetyTests(unittest.TestCase):
         self.window.Snapshot = {'rows': [{'id': '1'}]}
         self.window.IndexUri = 'file:///index.html'
         self.window.DocumentActive = True
+        self.window.DocumentRevision = 0
         self.window.IsClosed = False
         self.window.Handler = self.handler
         self.window.ExternalEvent = NS(Raise=lambda: 'Accepted')
@@ -464,36 +496,47 @@ class HostSafetyTests(unittest.TestCase):
     def send(self, message, source='file:///index.html'):
         self.window.OnWebMessage(None, NS(Source=source, WebMessageAsJson=json.dumps(message)))
 
-    def test_publish_collects_fresh_values_in_api_context_before_deferred_network_work(self):
+    def test_publish_review_collects_fresh_values_in_api_context_before_deferred_network_work(self):
         import test_cloud_publish as fixtures
-        self.api.update(CloudClient=mock.Mock(), PrepareSnapshot=fixtures.cloud.PrepareSnapshot,
-                        PublishSnapshot=fixtures.cloud.PublishSnapshot)
-        client = self.api['CloudClient'].return_value
-        client.create_model.return_value = {'revision': fixtures.REVISION}
-        client.publish_snapshot.return_value = {'revision': fixtures.REVISION}
+        self.api.update(CreateCloudClient=mock.Mock(), PrepareCollection=fixtures.cloud.PrepareCollection,
+                        ReviewCollection=fixtures.cloud.ReviewCollection)
+        client = self.api['CreateCloudClient'].return_value
+        client.compare_collection.return_value = {'items': [fixtures.candidate('base:number')], 'nextCursor': None}
         self.window.Document = NS(IsValidObject=True, Equals=lambda document: True)
         self.window.Application = NS(Application=NS(Username='Autodesk user'))
         self.window.CloudBusy = False
         self.window.PublishPlan = {'modelId': fixtures.MODEL, 'model': None,
-                                   'projects': [{'id': fixtures.PROJECT, 'name': 'Mechanical'}]}
+                                   'projects': [{'id': fixtures.PROJECT, 'name': 'Mechanical', 'headCommitId': None}]}
         self.window.CloudStore = NS(Ensure=mock.Mock())
         self.window.StartCloudWork = mock.Mock()
         self.window.SendSnapshot = mock.Mock()
         self.window.SendContext = mock.Mock()
         self.api['BuildSnapshot'] = mock.Mock(return_value=fixtures.snapshot())
         self.window.Snapshot['selectedParameterIds'] = ['1']
-        self.send({'action': 'publishSnapshot', 'documentKey': 'doc', 'requestId': 'publish-1',
+        self.send({'action': 'publishReview', 'documentKey': 'doc', 'requestId': 'publish-1',
                    'projectId': fixtures.PROJECT})
         self.api['BuildSnapshot'].assert_not_called()
         self.handler.Execute(NS(ActiveUIDocument=NS(Document=self.window.Document)))
         self.assertEqual(['1'], self.api['BuildSnapshot'].call_args.args[3])
         self.window.CloudStore.Ensure.assert_called_once_with(fixtures.MODEL)
-        client.publish_snapshot.assert_not_called()
-        self.assertIsNone(self.window.PublishPlan)
+        client.submit_collection.assert_not_called()
+        self.assertIsNone(self.window.PublishReview)
         self.assertFalse(self.window.WritingTables)
         work = self.window.StartCloudWork.call_args.args[1]
-        self.assertEqual(1, work()['rowCount'])
+        self.assertEqual(1, len(work()['candidates']))
+        client.submit_collection.assert_called_once()
         self.assertEqual('temporary-bridge', self.window.Snapshot['documentKey'])
+
+    def test_publish_commit_rejects_a_review_after_a_model_edit(self):
+        import test_cloud_publish as fixtures
+        self.window.CloudBusy = False
+        self.window.PublishReview = {'collectionId': fixtures.HEAD, 'documentRevision': 0}
+        self.window.PublishBatch = None
+        self.window.DocumentRevision = 1
+        self.window.StartCloudWork = mock.Mock()
+        with self.assertRaisesRegex(ValueError, 'Revit model changed'):
+            self.window.HandlePublishRequest({'action': 'publishCommit', 'reviewId': fixtures.HEAD})
+        self.window.StartCloudWork.assert_not_called()
 
     def test_cloud_worker_returns_on_dispatcher_and_ignores_closed_windows(self):
         # Run the worker body deterministically; its completion must still be marshalled.
@@ -519,7 +562,7 @@ class HostSafetyTests(unittest.TestCase):
 
     def test_publish_failure_is_correlated_and_never_uses_saved_table_results(self):
         self.window.Send = mock.Mock()
-        self.window.SendTableFailure({'action': 'publishSnapshot', 'requestId': 'publish-1'}, ValueError('Reload projects'))
+        self.window.SendTableFailure({'action': 'publishReview', 'requestId': 'publish-1'}, ValueError('Reload projects'))
         response = self.window.Send.call_args.args[0]
         self.assertEqual(('publishResult', 'publish-1', False),
                          (response['type'], response['requestId'], response['success']))

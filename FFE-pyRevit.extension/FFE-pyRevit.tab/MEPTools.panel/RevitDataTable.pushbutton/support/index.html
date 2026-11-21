@@ -72,13 +72,34 @@
     <form id="publish-form">
       <h2 id="publish-title">Publish to FFE Mechanical</h2>
       <p id="publish-scope"></p>
-      <label>Project <select id="publish-project" required></select></label>
+      <label>Project <select id="publish-project"></select></label>
       <p id="publish-destination"></p>
       <p id="publish-error" role="alert"></p>
+      <section id="publish-review" aria-label="Space changes" hidden>
+        <p id="publish-summary" aria-live="polite"></p>
+        <div class="publish-review-actions">
+          <button id="publish-select-local" type="button">Select local changes</button>
+          <button id="publish-clear" type="button">Clear selection</button>
+        </div>
+        <p id="publish-units">Numeric measurements may be shown in Revit internal units.</p>
+        <div class="publish-changes">
+          <table>
+            <thead><tr><th scope="col">Stage</th><th scope="col">Space</th><th scope="col">Field</th><th scope="col">Repository</th><th scope="col">Revit</th></tr></thead>
+            <tbody id="publish-changes"></tbody>
+          </table>
+        </div>
+        <div class="publish-review-actions">
+          <button id="publish-previous" type="button">Previous</button>
+          <span id="publish-page"></span>
+          <button id="publish-next" type="button">Next</button>
+        </div>
+        <label for="publish-message">Commit message</label>
+        <input id="publish-message" type="text" maxlength="5000">
+      </section>
       <div class="dialog-actions">
         <button id="publish-reload" type="button">Reload projects</button>
-        <button id="publish-cancel" type="button">Cancel</button>
-        <button id="publish-confirm" type="submit" class="primary" disabled>Publish</button>
+        <button id="publish-cancel" type="button">Close</button>
+        <button id="publish-confirm" type="submit" class="primary" disabled>Collect changes</button>
       </div>
     </form>
   </dialog>

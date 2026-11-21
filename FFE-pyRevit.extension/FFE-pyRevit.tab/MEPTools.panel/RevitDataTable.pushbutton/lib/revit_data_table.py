@@ -7,11 +7,14 @@ No transactions, model writes, UI objects, or dispatcher calls belong here.
 """
 import datetime
 import math
+import uuid
 
 try:
     StringTypes = (basestring,)
 except NameError:
     StringTypes = (str,)
+
+PublishActions = ("publishCatalog", "publishReview", "publishCommit")
 
 
 def IdText(elementId):
@@ -140,9 +143,16 @@ def BuildParameterDescriptor(parameter, db, document=None):
                 break
         except (AttributeError, TypeError, ValueError):
             continue
+    unitTypeId = ""
+    if storageType == "Double":
+        try:
+            unitTypeId = parameter.GetUnitTypeId().TypeId
+        except Exception:
+            pass
     return {"id": parameterId, "key": "p" + parameterId,
             "name": parameter.Definition.Name, "dataType": dataType,
             "storageType": storageType, "dataTypeId": typeId, "isBoolean": isBoolean,
+            "unitTypeId": unitTypeId,
             "baseField": baseField, "parameterType": GetParameterType(parameter, document, db),
             "identity": GetParameterIdentity(parameter, document)}
 
@@ -178,7 +188,33 @@ def ReadParameterValue(parameter, descriptor, document, elementNames):
     return None, u"\u2014"
 
 
-def CollectSpaceParameters(space, document, db, catalog, selectedIds, elementNames, warnings):
+def ReadCapability(parameter, descriptor, document, references, value):
+    """Record observed read/write capabilities and only portable element references."""
+    result = {"writable": False}
+    try:
+        result["hasValue"] = bool(parameter.HasValue)
+        result["writable"] = not parameter.IsReadOnly
+        if descriptor["storageType"] == "ElementId" and value is not None and int(value) > 0:
+            if value not in references:
+                element = document.GetElement(parameter.AsElementId())
+                references[value] = element.UniqueId if element else None
+            if references[value]:
+                result["referenceUniqueId"] = references[value]
+    except Exception:
+        # Preserve the observation; unresolved references stay unavailable.
+        pass
+    if result["writable"] and descriptor["identity"] and descriptor["identity"].startswith("shared:"):
+        try:
+            definition = document.GetElement(parameter.Id)
+            result["canUnset"] = bool(definition and definition.ShouldHideWhenNoValue())
+        except Exception:
+            # Only shared parameters with this setting support ClearValue.
+            pass
+    return result
+
+
+def CollectSpaceParameters(space, document, db, catalog, selectedIds, elementNames, warnings,
+                           capabilities=None, references=None):
     """Union all instance definitions, reading values only for requested columns."""
     values, texts = {}, {}
     try:
@@ -200,12 +236,23 @@ def CollectSpaceParameters(space, document, db, catalog, selectedIds, elementNam
                     warnings.append("{0} unavailable: {1}".format(descriptor["name"], error))
                 values[descriptor["key"]] = value
                 texts[descriptor["key"]] = text
+            if capabilities is not None:
+                identity = descriptor["identity"]
+                if descriptor["baseField"]:
+                    identity = "base:" + descriptor["baseField"]
+                if identity and (descriptor["baseField"] or parameterId in selectedIds):
+                    capability = ReadCapability(parameter, descriptor, document, references,
+                                                values.get(descriptor["key"]))
+                    if descriptor["baseField"] in ("level", "phase", "areaValue", "heightValue"):
+                        # Missing measurements or references are unavailable regardless of alias state.
+                        capability.pop("hasValue", None)
+                    capabilities[identity] = capability
         except Exception as error:
             warnings.append("Parameter definition unavailable: {0}".format(error))
     return values, texts
 
 
-def BuildSnapshot(document, documentKey, db, selectedParameterIds=None):
+def BuildSnapshot(document, documentKey, db, selectedParameterIds=None, capabilities=None):
     """Collect all host Spaces once; filtering operates on this immutable snapshot."""
     phases = [{"id": IdText(phase.Id), "name": phase.Name, "uniqueId": getattr(phase, "UniqueId", None)}
               for phase in document.Phases]
@@ -224,6 +271,7 @@ def BuildSnapshot(document, documentKey, db, selectedParameterIds=None):
     selectedIds = set(selectedParameterIds or [])
     catalog = {}
     elementNames = {}
+    references = {}
     levels = {}
     rows = []
     issues = []
@@ -259,11 +307,13 @@ def BuildSnapshot(document, documentKey, db, selectedParameterIds=None):
                 warnings.append("Zero area; the Space may be unenclosed or redundant.")
             if phaseId not in phaseNames:
                 warnings.append("Space phase is unavailable; view it under All phases.")
+            uniqueId = space.UniqueId
+            spaceCapabilities = None if capabilities is None else capabilities.setdefault(uniqueId, {})
             parameterValues, parameterTexts = CollectSpaceParameters(
-                space, document, db, catalog, selectedIds, elementNames, warnings)
+                space, document, db, catalog, selectedIds, elementNames, warnings, spaceCapabilities, references)
             rows.append({
                 "id": elementId,
-                "uniqueId": space.UniqueId,
+                "uniqueId": uniqueId,
                 "levelId": levelId,
                 "level": level["name"],
                 "levelElevation": level["elevation"],
@@ -314,24 +364,34 @@ def ValidateRequest(message, documentKey, snapshot):
     if action == "ready":
         return {"action": "ready"}
     tableActions = ("loadTable", "saveTable", "renameTable", "deleteTable")
-    publishActions = ("publishCatalog", "publishSnapshot")
-    if action not in ("refresh", "select", "show", "closeWindow") + tableActions + publishActions:
+    if action not in ("refresh", "select", "show", "closeWindow") + tableActions + PublishActions:
         raise ValueError("Unknown table action.")
     if message.get("documentKey") != documentKey:
         raise ValueError("This request belongs to another document. Reopen the table.")
     if action == "closeWindow":
         return {"action": action}
-    if action in publishActions:
+    if action in PublishActions:
         requestId = message.get("requestId")
         if not isinstance(requestId, StringTypes) or not requestId or len(requestId) > 100:
             raise ValueError("Invalid publish request.")
-        projectId = message.get("projectId", "")
-        if action == "publishSnapshot":
-            import uuid
+        request = {"action": action, "requestId": requestId}
+        if action == "publishReview":
+            projectId = message.get("projectId")
             if not isinstance(projectId, StringTypes) or len(projectId) != 36:
-                raise ValueError("Choose a cloud project before publishing.")
-            projectId = str(uuid.UUID(projectId))
-        return {"action": action, "requestId": requestId, "projectId": projectId}
+                raise ValueError("Choose a cloud project before collecting changes.")
+            request["projectId"] = str(uuid.UUID(projectId))
+        elif action == "publishCommit":
+            reviewId, selection, text = (message.get(key) for key in ("reviewId", "selection", "message"))
+            if not isinstance(reviewId, StringTypes) or len(reviewId) != 36:
+                raise ValueError("Collect Space changes before committing.")
+            if (not isinstance(selection, list) or not selection or
+                    any(not isinstance(key, StringTypes) or not key.isdigit() or len(key) > 12 for key in selection)):
+                raise ValueError("Choose changes from the current review.")
+            if not isinstance(text, StringTypes) or not text.strip() or len(text) > 5000:
+                raise ValueError("Enter a commit message of 1 to 5000 characters.")
+            request.update(reviewId=str(uuid.UUID(reviewId)),
+                           selection=sorted(set(selection), key=int), message=text.strip())
+        return request
     if action in tableActions:
         tableId = message.get("tableId", "")
         revision = message.get("revision", "")

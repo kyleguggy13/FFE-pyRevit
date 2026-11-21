@@ -264,7 +264,7 @@ async function main() {
     }
     await deliver({ type: 'snapshot', snapshot });
     await waitFor('document.getElementById("counts").textContent.startsWith("3 of 4")');
-    // The host owns RPC calls and complete snapshots; the browser only chooses a project.
+    // Only the host supplies collected Space values. The browser chooses the destination and proposal IDs.
     const publishProject = '00000000-0000-4000-8000-000000000002';
     const publishCatalog = { modelId:'00000000-0000-4000-8000-000000000001', model:null,
       projects:[{id:publishProject,name:'Mechanical <project>'}] };
@@ -277,28 +277,63 @@ async function main() {
     await deliver({type:'publishResult',action:'publishCatalog',requestId:publishRequest.requestId,success:true,data:publishCatalog});
     await waitFor('!document.getElementById("publish-confirm").disabled');
     assert.equal(await evaluate('document.getElementById("publish-project").selectedOptions[0].textContent'), 'Mechanical <project>');
-    assert.equal(await evaluate('document.getElementById("publish-scope").textContent.includes("filters and row selections do not limit")'), true);
+    assert.equal(await evaluate('document.getElementById("publish-scope").textContent.includes("across all phases and levels")'), true);
     await evaluate('document.getElementById("publish-confirm").click()');
-    await waitFor('window.__requests.at(-1).action === "publishSnapshot"');
+    await waitFor('window.__requests.at(-1).action === "publishReview"');
     publishRequest = await evaluate('window.__requests.at(-1)');
     assert.equal(publishRequest.projectId, publishProject);
     assert.equal(publishRequest.snapshot, undefined, 'browser does not supply upload rows');
-    await deliver({type:'publishResult',action:'publishSnapshot',requestId:publishRequest.requestId,success:false,message:'The cloud model changed.'});
-    await waitFor('document.getElementById("publish-error").textContent.includes("cloud model changed")');
-    assert.equal(await evaluate('document.getElementById("publish-confirm").disabled'), true, 'a conflict requires an explicit reload');
+    await deliver({type:'publishResult',action:'publishReview',requestId:publishRequest.requestId,success:false,message:'Could not load comparison.'});
+    await waitFor('document.getElementById("publish-error").textContent.includes("Could not load comparison")');
+    assert.equal(await evaluate('document.getElementById("publish-confirm").disabled'), true, 'a failed comparison requires an explicit reload');
     await evaluate('document.getElementById("publish-reload").click()');
     await waitFor('window.__requests.at(-1).action === "publishCatalog"');
     publishRequest = await evaluate('window.__requests.at(-1)');
-    const existingPublishCatalog = {...publishCatalog,model:{id:publishCatalog.modelId,projectId:publishProject,name:'Mechanical',revision:'reviewed-revision'}};
+    const existingPublishCatalog = {...publishCatalog,model:{id:publishCatalog.modelId,projectId:publishProject,name:'Mechanical'}};
     await deliver({type:'publishResult',action:'publishCatalog',requestId:publishRequest.requestId,success:true,data:existingPublishCatalog});
     await waitFor('!document.getElementById("publish-confirm").disabled');
     assert.equal(await evaluate('document.getElementById("publish-project").disabled'), true, 'an existing model stays in its registered project');
     await evaluate('document.getElementById("publish-confirm").click()');
-    await waitFor('window.__requests.at(-1).action === "publishSnapshot"');
+    await waitFor('window.__requests.at(-1).action === "publishReview"');
     publishRequest = await evaluate('window.__requests.at(-1)');
-    await deliver({type:'publishResult',action:'publishSnapshot',requestId:publishRequest.requestId,success:true,data:{rowCount:4,parameterCount:0}});
+    const missing = { state: 'missing' };
+    const value = value => ({ state: 'value', value });
+    const review = {collectionId:'00000000-0000-4000-8000-000000000009',incomingCount:1,skippedCount:0,warningCount:0,
+      candidates: {
+        0: {spaceId:'new',spaceLabel:'002 Office <img>',field:'@space',classification:'local_change',
+          current:missing,proposed:value({elementId:'9007199254740993'}),metadata:{}},
+        1: {spaceId:'new',spaceLabel:'002 Office <img>',field:'base:number',classification:'local_change',
+          current:missing,proposed:value('002'),metadata:{definition:{name:'Space number'}}},
+        2: {spaceId:'old',spaceLabel:'0001',field:'@space',classification:'local_change',
+          current:value({elementId:'3'}),proposed:missing,metadata:{}},
+        3: {spaceId:'racing',spaceLabel:'003 Lobby',field:'base:name',classification:'unbased',
+          current:value('Old lobby'),proposed:value('Lobby'),metadata:{definition:{name:'Name'}}},
+      }};
+    await deliver({type:'publishResult',action:'publishReview',requestId:publishRequest.requestId,success:true,data:review});
+    await waitFor('!document.getElementById("publish-review").hidden');
+    assert.equal(await evaluate('document.getElementById("publish-confirm").disabled'), true, 'nothing stages by default');
+    assert.equal(await evaluate('document.querySelectorAll("#publish-changes img").length'), 0, 'proposal text stays literal');
+    await evaluate('document.getElementById("publish-select-local").click()');
+    assert.deepEqual(await evaluate('[...document.querySelectorAll("#publish-changes input:checked")].map(x=>x.value)'), ['0','1']);
+    await evaluate('document.getElementById("publish-clear").click(); document.querySelector(\'#publish-changes input[value="1"]\').click()');
+    assert.deepEqual(await evaluate('[...document.querySelectorAll("#publish-changes input:checked")].map(x=>x.value)'), ['0','1']);
+    await evaluate('document.getElementById("publish-message").value = "Register office"; document.getElementById("publish-message").dispatchEvent(new Event("input")); document.getElementById("publish-confirm").click()');
+    await waitFor('window.__requests.at(-1).action === "publishCommit"');
+    const attempted = await evaluate('window.__requests.at(-1)');
+    assert.deepEqual(attempted.selection.slice().sort(), ['0','1']);
+    assert.equal(attempted.reviewId, review.collectionId);
+    assert.equal(attempted.message, 'Register office');
+    assert.equal(attempted.changes, undefined);
+    await deliver({type:'publishResult',action:'publishCommit',requestId:attempted.requestId,success:false,retry:true,message:'Connection closed.'});
+    await waitFor('document.getElementById("publish-confirm").textContent === "Retry commit"');
+    assert.equal(await evaluate('document.getElementById("publish-message").disabled'), true, 'retry retains the original commit');
+    await evaluate('document.getElementById("publish-confirm").click()');
+    await waitFor('window.__requests.at(-1).requestId !== ' + JSON.stringify(attempted.requestId));
+    publishRequest = await evaluate('window.__requests.at(-1)');
+    assert.deepEqual(publishRequest.selection, attempted.selection);
+    await deliver({type:'publishResult',action:'publishCommit',requestId:publishRequest.requestId,success:true,data:{changeCount:2}});
     await waitFor('!document.getElementById("publish-dialog").open');
-    assert.equal(await evaluate('document.getElementById("status").textContent.includes("Published 4 Space(s)")'), true);
+    assert.equal(await evaluate('document.getElementById("status").textContent.includes("Committed 2 change(s)")'), true);
     assert.equal(await evaluate('document.getElementById("table-dirty").textContent'), '', 'publishing leaves saved-layout dirty state unchanged');
     assert.deepEqual(await evaluate(`${grid}.getRows("active").map(row => row.getData().id)`),
       ['3', '9007199254740994', '9007199254740993'], 'level elevation then natural number ordering');
@@ -878,7 +913,7 @@ async function main() {
     assert.equal(await evaluate('document.getElementById("select-revit").disabled'), true);
     assert.equal(await evaluate('document.getElementById("show-revit").disabled'), true);
     assert.deepEqual(errors, [], 'no uncaught browser exceptions');
-    console.log(`Browser checks passed: publish destination/conflict/retry, header colors, saved layouts, multi-sort priorities, whole-band dragging, row grouping, picker/filtering, and 6,000 grouped rows (${largeTableMs}ms).`);
+    console.log(`Browser checks passed: repository review/staging/retry, header colors, saved layouts, multi-sort priorities, whole-band dragging, row grouping, picker/filtering, and 6,000 grouped rows (${largeTableMs}ms).`);
     console.log(`Screenshot: ${screenshotPath}`);
     console.log(`Grouping hierarchy: ${path.join(profile, 'grouping-hierarchy.png')}`);
     console.log(`Column header groups: ${path.join(profile, 'column-header-groups.png')}`);

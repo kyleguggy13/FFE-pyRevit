@@ -617,7 +617,7 @@
       });
       cloudPublish = new window.CloudPublishControls({ bridge, status,
         getSnapshot: () => state.snapshot, isLoading: () => state.loading,
-        isActive: () => state.active, isBusy: () => state.busy,
+        isActive: () => state.active, isBusy: () => state.busy || state.repositoryBusy,
         setBusy: value => { state.busy = value; updateControls(); },
       });
       byId("refresh").addEventListener("click", () => request("refresh"));
@@ -682,6 +682,7 @@
           else if (message.type === "context") {
             state.active = message.active;
             state.outdated = message.outdated;
+            state.repositoryBusy = Boolean(message.repositoryBusy);
             updateControls();
           } else if (message.type === "result") {
             state.busy = false;
