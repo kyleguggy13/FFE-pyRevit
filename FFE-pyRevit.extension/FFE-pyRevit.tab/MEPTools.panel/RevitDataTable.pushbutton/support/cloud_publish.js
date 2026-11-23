@@ -190,7 +190,8 @@
         const error = message.message || "Publishing failed.";
         if (message.retry) {
           this.retry = true;
-          byId("publish-error").textContent = error + " Retry commit to check the same request.";
+          byId("publish-error").textContent = error + " " +
+            (message.retryHint || "Retry commit to check the same request.");
         } else {
           this.catalog = null;
           this.resetReview();

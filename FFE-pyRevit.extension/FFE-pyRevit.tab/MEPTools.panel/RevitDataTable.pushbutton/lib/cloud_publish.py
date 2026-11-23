@@ -129,16 +129,25 @@ def CommitReview(client, review, batch):
         changes.append(dict(key, staged=True, proposed=item["proposed"]))
         if item["classification"] in ("conflict", "unbased"):
             resolutions.append(dict(key, choice="draft", expectedCurrent=item["current"]))
-    created = client.create_draft(dict(draft, requestId=batch["createId"],
-                                       collectionId=review["collectionId"], changes=changes))
-    revision = created["revision"]
-    if resolutions:
-        resolved = client.resolve_draft(dict(draft, requestId=batch["resolveId"],
-                                             expectedDraftRevision=revision, resolutions=resolutions,
-                                             expectedHeadCommitId=review["headCommitId"]))
-        revision = resolved["revision"]
-    return client.commit_draft(dict(draft, requestId=batch["commitId"],
-                                    expectedDraftRevision=revision, message=batch["message"]))
+    operation = "preparing selected changes"
+    try:
+        created = client.create_draft(dict(draft, requestId=batch["createId"],
+                                           collectionId=review["collectionId"], changes=changes))
+        revision = created["revision"]
+        if resolutions:
+            operation = "resolving reviewed conflicts"
+            resolved = client.resolve_draft(dict(draft, requestId=batch["resolveId"],
+                                                 expectedDraftRevision=revision, resolutions=resolutions,
+                                                 expectedHeadCommitId=review["headCommitId"]))
+            revision = resolved["revision"]
+        operation = "committing selected changes"
+        return client.commit_draft(dict(draft, requestId=batch["commitId"],
+                                        expectedDraftRevision=revision, message=batch["message"]))
+    except Exception as error:
+        # One Publish click performs several RPCs. Identify the failing step without
+        # changing its error code or request ID, which are needed for safe retries.
+        error.publish_operation = operation
+        raise
 
 
 class CloudModelStore(RevitTableStore):

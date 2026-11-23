@@ -490,9 +490,15 @@ class DataTableWindow(Window):
                 message = str(error)
                 status = getattr(error, "status", None)
                 code = getattr(error, "code", None)
+                databaseTimeout = code == "57014" and "statement timeout" in message.lower()
                 retry = request["action"] in ("publishCommit", "formaCreate") and (
-                    code == "NETWORK_ERROR" or (status is not None and (status >= 500 or 200 <= status < 300))
+                    code == "NETWORK_ERROR" or databaseTimeout
+                    or (status is not None and (status >= 500 or 200 <= status < 300))
                     or (status is None and getattr(error, "request_id", None) is not None))
+                if databaseTimeout and request["action"] == "publishCommit":
+                    operation = getattr(error, "publish_operation", "publishing selected changes")
+                    message = "The repository database timed out while {0}. No changes from this attempt were committed.".format(operation)
+                    response["retryHint"] = "Apply the repository publish-performance migration before retrying this commit."
                 response.update(success=False, message=message, retry=retry, code=code)
 
             def complete():

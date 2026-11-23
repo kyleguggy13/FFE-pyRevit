@@ -567,6 +567,27 @@ class HostSafetyTests(unittest.TestCase):
         self.assertEqual(('publishResult', 'publish-1', False),
                          (response['type'], response['requestId'], response['success']))
 
+    def test_database_timeout_keeps_review_and_batch_and_explains_the_failing_step(self):
+        import test_cloud_publish as fixtures
+        for status in (400, 500):
+            with self.subTest(status=status):
+                self.api.update(Action=lambda callback: callback,
+                                threading=NS(Thread=lambda target: NS(start=target)))
+                self.window.Dispatcher = NS(BeginInvoke=lambda callback: callback())
+                self.window.Send = mock.Mock()
+                review, batch = {'collectionId': 'collection'}, {'commitId': 'original-request'}
+                self.window.PublishReview, self.window.PublishBatch = review, batch
+                error = fixtures.rpc.RpcError('canceling statement due to statement timeout', '57014', status)
+                error.publish_operation = 'preparing selected changes'
+                self.window.StartCloudWork({'action': 'publishCommit', 'requestId': 'publish-2'},
+                                           mock.Mock(side_effect=error))
+                response = self.window.Send.call_args.args[0]
+                self.assertTrue(response['retry'])
+                self.assertIn('preparing selected changes', response['message'])
+                self.assertIn('migration', response['retryHint'])
+                self.assertIs(review, self.window.PublishReview)
+                self.assertIs(batch, self.window.PublishBatch)
+
     def test_queue_retains_distinct_requests_without_overwriting(self):
         self.send({'action': 'refresh', 'documentKey': 'doc'})
         self.send({'action': 'select', 'documentKey': 'doc', 'elementIds': ['1']})

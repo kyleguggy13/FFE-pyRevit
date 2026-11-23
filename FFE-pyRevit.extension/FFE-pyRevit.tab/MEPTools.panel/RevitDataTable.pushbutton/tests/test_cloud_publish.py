@@ -164,6 +164,26 @@ class PublishTests(unittest.TestCase):
                                        'requestId': HEAD, 'actor': {'clientId': MODEL, 'source': 'revit',
                                                                    'name': 'Autodesk user', 'userId': ''}}}, payload)
 
+    def test_database_timeout_identifies_each_publish_step_and_retains_retry_ids(self):
+        for step, operation in (('create_draft', 'preparing selected changes'),
+                                ('resolve_draft', 'resolving reviewed conflicts'),
+                                ('commit_draft', 'committing selected changes')):
+            with self.subTest(step=step):
+                self.setUp()
+                self.client.compare_collection.return_value['items'] = [candidate('base:number', 'unbased')]
+                review = self.review()
+                batch = cloud.CreateBatch(review, ['0'], 'Publish')
+                error = rpc.RpcError('canceling statement due to statement timeout', '57014', 500)
+                getattr(self.client, step).side_effect = [error, getattr(self.client, step).return_value]
+                with self.assertRaises(rpc.RpcError) as raised:
+                    cloud.CommitReview(self.client, review, batch)
+                self.assertIs(error, raised.exception)
+                self.assertEqual(operation, error.publish_operation)
+                self.assertEqual('57014', error.code)
+                self.assertTrue(cloud.CommitReview(self.client, review, batch)['ok'])
+                calls = getattr(self.client, step).call_args_list
+                self.assertEqual(calls[0], calls[1])
+
 
 class IdentityTests(unittest.TestCase):
     def setUp(self):

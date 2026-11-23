@@ -331,6 +331,16 @@ async function main() {
     await waitFor('window.__requests.at(-1).requestId !== ' + JSON.stringify(attempted.requestId));
     publishRequest = await evaluate('window.__requests.at(-1)');
     assert.deepEqual(publishRequest.selection, attempted.selection);
+    await deliver({type:'publishResult',action:'publishCommit',requestId:publishRequest.requestId,success:false,retry:true,
+      code:'57014',message:'The repository database timed out while preparing selected changes.',
+      retryHint:'Apply the repository publish-performance migration before retrying this commit.'});
+    await waitFor('document.getElementById("publish-error").textContent.includes("publish-performance migration")');
+    assert.equal(await evaluate('document.getElementById("publish-error").textContent.includes("check the same request")'), false);
+    assert.equal(await evaluate('document.getElementById("publish-message").disabled'), true);
+    await evaluate('document.getElementById("publish-confirm").click()');
+    await waitFor('window.__requests.at(-1).requestId !== ' + JSON.stringify(publishRequest.requestId));
+    publishRequest = await evaluate('window.__requests.at(-1)');
+    assert.deepEqual(publishRequest.selection, attempted.selection);
     await deliver({type:'publishResult',action:'publishCommit',requestId:publishRequest.requestId,success:true,data:{changeCount:2}});
     await waitFor('!document.getElementById("publish-dialog").open');
     assert.equal(await evaluate('document.getElementById("status").textContent.includes("Committed 2 change(s)")'), true);
