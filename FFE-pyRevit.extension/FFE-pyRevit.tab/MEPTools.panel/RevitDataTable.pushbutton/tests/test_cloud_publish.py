@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Purpose: verify repository publishing without network access or Revit.
-Behaviors: typed observations, explicitly staged commits, and persistent model identity.
-Revit API: 2025/2026 boundaries use the saved-table storage fixtures.
-Design: real helpers and RPC payloads run against injected storage/transports.
+"""Purpose: verify Loadwise v3 sync, field ownership and project storage offline.
+Behaviors: no preview writes, exact IDs, repeatable sync and transaction rollback.
+Revit API: 2025/2026 storage uses the saved-table fixtures.
+Design: real command helpers run with injected transports and storage boundaries.
 """
 import importlib.util
 import json
@@ -15,174 +15,107 @@ from unittest import mock
 import test_saved_tables as fixtures
 
 LIBRARY = pathlib.Path(__file__).resolve().parents[1] / 'lib'
+sys.path.insert(0, str(LIBRARY))
 sys.modules.setdefault('saved_tables', fixtures.saved)
 
 
 def load(name):
-    """Import a pure command module without loading the native Revit host."""
     spec = importlib.util.spec_from_file_location(name, LIBRARY / (name + '.py'))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-sys.modules.setdefault('repository_collection', load('repository_collection'))
 cloud = load('cloud_publish')
 rpc = load('ffe_supabase')
-MODEL = '00000000-0000-4000-8000-000000000001'
 PROJECT = '00000000-0000-4000-8000-000000000002'
-REVISION = '00000000-0000-4000-8000-000000000003'
 HEAD = '00000000-0000-4000-8000-000000000004'
 SPACE = 'space-unique'
 
 
 def snapshot():
-    """Include IDs larger than JavaScript's safe integer range and leading zeros."""
     return {'documentKey': 'temporary-bridge', 'documentTitle': 'Mechanical',
             'rows': [{'id': '9007199254740993', 'uniqueId': SPACE, 'number': '002', 'name': 'Office',
-                      'parameterValues': {'p1': 12.5}, 'parameterTexts': {'p1': '12.5 L/s'}}],
-            'parameters': [{'id': '1', 'baseField': '', 'identity': 'builtin:-200', 'name': 'Airflow', 'key': 'p1',
-                            'storageType': 'Double', 'dataTypeId': 'autodesk.spec.aec:airFlow-2.0.0',
-                            'unitTypeId': 'autodesk.unit.unit:litersPerSecond-1.0.1'}],
+                      'level': 'Level 2', 'areaValue': 120.000004, 'heightValue': 9.0,
+                      'parameterValues': {'p1': 12.5}, 'lpd': 99, 'occupants': 100}],
             'selectedParameterIds': ['1'], 'skippedCount': 0, 'issues': [], 'savedTables': ['local']}
 
 
-def candidate(field, classification='local_change', current=None, value='002'):
-    """Create the comparison item returned for a single Space field."""
-    return {'modelId': MODEL, 'spaceId': SPACE, 'field': field, 'classification': classification,
-            'current': current or {'state': 'missing'}, 'proposed': {'state': 'value', 'value': value}, 'metadata': {}}
-
-
 class PublishTests(unittest.TestCase):
-    def setUp(self):
-        self.client = mock.Mock()
-        self.project = {'id': PROJECT, 'name': 'FFE Mechanical', 'headCommitId': HEAD}
-        self.client.list_projects.return_value = {
-            'items': [{'projectId': PROJECT, 'name': 'FFE Mechanical', 'headCommitId': HEAD}], 'nextCursor': None}
-        self.client.list_models.return_value = {'items': [{'modelId': MODEL, 'name': 'Mechanical'}], 'nextCursor': None}
-        self.client.compare_collection.return_value = {
-            'items': [candidate('@space', value={'elementId': '9007199254740993', 'context': {}}),
-                      candidate('base:number'), candidate('base:name', 'incoming')], 'nextCursor': None}
-        self.client.create_draft.return_value = {'revision': REVISION}
-        self.resolved = str(uuid.uuid4())
-        self.client.resolve_draft.return_value = {'revision': self.resolved}
-        self.client.commit_draft.return_value = {'ok': True, 'changeCount': 2}
+    def test_catalog_uses_v3_without_registry_or_pagination_and_honors_binding(self):
+        client = mock.Mock()
+        client.list_projects.return_value = {'ok': True, 'items': [{'projectId': PROJECT, 'name': 'Mechanical'}]}
+        self.assertEqual({'projects': [{'id': PROJECT, 'name': 'Mechanical'}], 'projectId': PROJECT},
+                         cloud.LoadCatalog(client, PROJECT, PROJECT))
+        client.list_projects.assert_called_once_with()
+        self.assertEqual([mock.call.list_projects()], client.mock_calls)
+        with self.assertRaises(ValueError): cloud.LoadCatalog(client, PROJECT, HEAD)
+        with self.assertRaises(ValueError): cloud.LoadCatalog(client, HEAD)
 
-    def review(self, linked=True):
-        plan = cloud.LoadCatalog(self.client, MODEL, linked)
-        return cloud.ReviewCollection(self.client, plan, self.project,
-                                      cloud.PrepareCollection(snapshot(), {}), 'Mechanical', {SPACE: '002 Office'})
+    def test_cloud_catalog_rechecks_forma_and_never_offers_a_foreign_manual_project(self):
+        client = mock.Mock()
+        client.list_projects.return_value = {'items': [{'projectId': PROJECT, 'name': 'Mechanical'}]}
+        context = {'available': True, 'formaProjectId': HEAD}
+        client.find_forma_project.return_value = {'project': {'projectId': PROJECT}}
+        self.assertEqual(PROJECT, cloud.LoadCatalog(client, formaContext=context)['projectId'])
+        client.find_forma_project.assert_called_with({'formaProjectId': HEAD})
+        with self.assertRaises(ValueError): cloud.LoadCatalog(client, HEAD, formaContext=context)
+        with self.assertRaises(ValueError): cloud.LoadCatalog(client, preferredProjectId=HEAD, formaContext=context)
+        client.find_forma_project.return_value = {'project': None}
+        with self.assertRaisesRegex(ValueError, 'Start this Autodesk Forma project'):
+            cloud.LoadCatalog(client, formaContext=context)
+        with self.assertRaises(ValueError): cloud.LoadCatalog(client, formaContext={'available': False})
+        client.find_forma_project.side_effect = OSError('Offline')
+        with self.assertRaises(OSError): cloud.LoadCatalog(client, formaContext=context)
+        client.ensure_forma_project.assert_not_called()
 
-    def test_catalog_pages_projects_and_finds_saved_model_without_writes(self):
-        cursor = {'offset': 1}
-        lastPage = self.client.list_projects.return_value
-        self.client.list_projects.side_effect = [{'items': [], 'nextCursor': cursor}, lastPage]
-        plan = cloud.LoadCatalog(self.client, MODEL, True)
-        self.assertEqual({'id': MODEL, 'projectId': PROJECT, 'name': 'Mechanical'}, plan['model'])
-        self.assertEqual([mock.call({'limit': 200}), mock.call({'limit': 200, 'cursor': cursor})],
-                         self.client.list_projects.call_args_list)
-        self.client.register_model.assert_not_called()
-        self.client.submit_collection.assert_not_called()
+    def test_preview_has_only_owned_fields_and_preserves_zero_missing_ids_and_warnings(self):
+        data = snapshot()
+        data['rows'].append({'uniqueId': 'unplaced', 'areaValue': 0, 'heightValue': None})
+        data.update(skippedCount=1, issues=['Skipped unreadable Space'])
+        review = cloud.PrepareSync(data, PROJECT)
+        self.assertEqual(1, review['skippedCount'])
+        self.assertEqual(['Skipped unreadable Space'], review['warnings'])
+        self.assertEqual({'uniqueId': SPACE, 'elementId': '9007199254740993', 'number': '002',
+                          'name': 'Office', 'level': 'Level 2', 'area': 120.0, 'ceilingHeight': 9.0},
+                         review['request']['spaces'][0])
+        self.assertEqual({'uniqueId': 'unplaced', 'number': '', 'name': '', 'level': '', 'area': 0.0},
+                         review['request']['spaces'][1])
+        self.assertEqual(PROJECT, review['request']['projectId'])
+        uuid.UUID(review['reviewId'])
+        self.assertEqual(12.5, data['rows'][0]['parameterValues']['p1'])
 
-    def test_collection_keeps_typed_values_and_suppresses_removals_when_scan_skips_spaces(self):
-        capabilities = {SPACE: {'builtin:-200': {'writable': True}}}
-        payload = cloud.PrepareCollection(dict(snapshot(), skippedCount=1), capabilities)
-        self.assertEqual({'spaces': 'full', 'successful': False}, payload['coverage'])
-        space = payload['spaces'][0]
-        self.assertEqual('9007199254740993', space['elementId'])
-        self.assertEqual(SPACE, space['uniqueId'])
-        cells = {cell['parameter']: cell for cell in space['cells']}
-        self.assertEqual('002', cells['base:number']['state']['value'])
-        self.assertEqual(12.5, cells['builtin:-200']['state']['value'])
-        self.assertEqual('12.5 L/s', cells['builtin:-200']['displayText'])
-        self.assertTrue(cells['builtin:-200']['writable'])
-        self.assertEqual('unavailable', cells['base:areaValue']['availability'])
-        self.assertNotIn('savedTables', payload)
+    def test_invalid_geometry_and_duplicate_ids_fail_before_network(self):
+        for change in ({'areaValue': float('inf')}, {'heightValue': float('nan')}, {'heightValue': 201},
+                       {'areaValue': 1000001}, {'id': 9007199254740993}, {'uniqueId': ''}):
+            data = snapshot()
+            data['rows'][0].update(change)
+            with self.subTest(change=change), self.assertRaises(ValueError): cloud.PrepareSync(data, PROJECT)
+        data = snapshot(); data['rows'] *= 2
+        with self.assertRaises(ValueError): cloud.PrepareSync(data, PROJECT)
+        data['rows'] = [dict(snapshot()['rows'][0], uniqueId=str(i)) for i in range(5001)]
+        with self.assertRaisesRegex(ValueError, '5000'): cloud.PrepareSync(data, PROJECT)
 
-    def test_first_review_registers_and_submits_at_pinned_head_without_committing(self):
-        review = self.review(linked=False)
-        self.client.register_model.assert_called_once_with({'projectId': PROJECT, 'modelId': MODEL, 'name': 'Mechanical'})
-        submitted = self.client.submit_collection.call_args.args[0]
-        self.assertEqual(HEAD, submitted['baseCommitId'])
-        self.assertEqual(review['collectionId'], submitted['collectionId'])
-        self.assertEqual(HEAD, self.client.compare_collection.call_args.args[0]['commitId'])
-        self.assertEqual(1, review['incomingCount'])
-        self.assertEqual('002 Office', review['candidates']['1']['spaceLabel'])
-        self.client.create_draft.assert_not_called()
-
-    def test_review_validates_selection_and_only_stages_chosen_cells(self):
-        review = self.review()
-        for selection in (['1'], ['0', 'not-reviewed']):
-            with self.assertRaises(ValueError):
-                cloud.CreateBatch(review, selection, 'Publish')
-        batch = cloud.CreateBatch(review, ['0'], 'Create Space')
-        result = cloud.CommitReview(self.client, review, batch)
-        self.assertTrue(result['ok'])
-        self.client.register_model.assert_not_called()
-        staged = self.client.create_draft.call_args.args[0]['changes']
-        self.assertEqual(['@space'], [change['field'] for change in staged])
-        self.assertTrue(staged[0]['staged'])
-        self.client.resolve_draft.assert_not_called()
-        self.assertEqual('Create Space', self.client.commit_draft.call_args.args[0]['message'])
-
-    def test_explicitly_selected_unbased_value_resolves_against_reviewed_head(self):
-        old = {'state': 'value', 'value': '001'}
-        self.client.compare_collection.return_value['items'] = [candidate('base:number', 'unbased', old)]
-        review = self.review()
-        batch = cloud.CreateBatch(review, ['0'], 'Revise Space number')
-        cloud.CommitReview(self.client, review, batch)
-        resolved = self.client.resolve_draft.call_args.args[0]
-        self.assertEqual(HEAD, resolved['expectedHeadCommitId'])
-        self.assertEqual(old, resolved['resolutions'][0]['expectedCurrent'])
-        self.assertEqual('draft', resolved['resolutions'][0]['choice'])
-        self.assertEqual(self.resolved, self.client.commit_draft.call_args.args[0]['expectedDraftRevision'])
-
-    def test_retry_reuses_mutation_ids_and_does_not_retry_a_conflict_automatically(self):
-        review = self.review()
-        batch = cloud.CreateBatch(review, ['0', '1'], 'Publish')
-        self.client.commit_draft.side_effect = [OSError('Connection closed'), {'ok': False, 'code': 'CONFLICT'}]
-        with self.assertRaises(OSError):
-            cloud.CommitReview(self.client, review, batch)
-        self.assertEqual(1, self.client.commit_draft.call_count)
-        self.assertFalse(cloud.CommitReview(self.client, review, batch)['ok'])
-        self.assertEqual(self.client.create_draft.call_args_list[0], self.client.create_draft.call_args_list[1])
-        self.assertEqual(self.client.commit_draft.call_args_list[0], self.client.commit_draft.call_args_list[1])
-
-    def test_rpc_uses_publishable_key_and_versioned_envelope(self):
+    def test_sync_and_retry_use_the_same_v3_payload_and_return_missing_rooms(self):
         calls = []
-
+        result = {'ok': True, 'created': 1, 'updated': 2, 'unchanged': 3, 'linked': 1, 'notInRevit': [HEAD]}
         def transport(url, headers, payload):
             calls.append((url, headers, json.loads(payload)))
-            return 200, '{"ok":true}'
-
-        client = rpc.Client(client_id=MODEL, actor_name='Autodesk user', transport=transport)
-        client.commit_draft({'projectId': PROJECT, 'draftId': REVISION, 'requestId': HEAD})
+            if len(calls) == 1: raise OSError('Connection closed')
+            return 200, json.dumps(result)
+        client = rpc.Client(actor_name='Autodesk user', transport=transport)
+        review = cloud.PrepareSync(snapshot(), PROJECT)
+        self.assertEqual([], calls)
+        with self.assertRaises(OSError): cloud.SyncReview(client, review)
+        self.assertEqual(result, cloud.SyncReview(client, review))
+        self.assertEqual(calls[0], calls[1])
         url, headers, payload = calls[0]
-        self.assertTrue(url.endswith('/rest/v1/rpc/ffe_v2_commit_draft'))
+        self.assertTrue(url.endswith('/rest/v1/rpc/ffe_v3_sync_revit_spaces'))
         self.assertEqual({'apikey': rpc.PUBLISHABLE_KEY}, headers)
-        self.assertEqual({'p_request': {'schemaVersion': 2, 'projectId': PROJECT, 'draftId': REVISION,
-                                       'requestId': HEAD, 'actor': {'clientId': MODEL, 'source': 'revit',
-                                                                   'name': 'Autodesk user', 'userId': ''}}}, payload)
-
-    def test_database_timeout_identifies_each_publish_step_and_retains_retry_ids(self):
-        for step, operation in (('create_draft', 'preparing selected changes'),
-                                ('resolve_draft', 'resolving reviewed conflicts'),
-                                ('commit_draft', 'committing selected changes')):
-            with self.subTest(step=step):
-                self.setUp()
-                self.client.compare_collection.return_value['items'] = [candidate('base:number', 'unbased')]
-                review = self.review()
-                batch = cloud.CreateBatch(review, ['0'], 'Publish')
-                error = rpc.RpcError('canceling statement due to statement timeout', '57014', 500)
-                getattr(self.client, step).side_effect = [error, getattr(self.client, step).return_value]
-                with self.assertRaises(rpc.RpcError) as raised:
-                    cloud.CommitReview(self.client, review, batch)
-                self.assertIs(error, raised.exception)
-                self.assertEqual(operation, error.publish_operation)
-                self.assertEqual('57014', error.code)
-                self.assertTrue(cloud.CommitReview(self.client, review, batch)['ok'])
-                calls = getattr(self.client, step).call_args_list
-                self.assertEqual(calls[0], calls[1])
+        self.assertEqual(3, payload['p_request']['schemaVersion'])
+        self.assertEqual({'name': 'Autodesk user'}, payload['p_request']['actor'])
+        self.assertEqual({'projectId', 'spaces', 'schemaVersion', 'actor'}, set(payload['p_request']))
+        with self.assertRaises(ValueError): client.call('commit_draft')
 
 
 class IdentityTests(unittest.TestCase):
@@ -191,44 +124,44 @@ class IdentityTests(unittest.TestCase):
         info = fixtures.DataStorage(42)
         self.host.elements.append(info)
         self.host.document.ProjectInformation = info
-        self.store = cloud.CloudModelStore(self.host.document, self.host.db, self.host.sdk)
+        self.store = cloud.CloudProjectStore(self.host.document, self.host.db, self.host.sdk)
 
     def test_read_creates_nothing_and_ensure_writes_only_once(self):
         self.assertIsNone(self.store.Read())
         self.assertEqual({}, self.host.schemas)
         self.assertEqual([], self.host.transactions)
-        self.assertTrue(self.store.Ensure(MODEL))
-        self.assertEqual(MODEL, self.store.Read())
-        self.assertFalse(self.store.Ensure(MODEL))
+        self.assertTrue(self.store.Ensure(PROJECT))
+        self.assertEqual(PROJECT, self.store.Read())
+        self.assertFalse(self.store.Ensure(PROJECT))
         self.assertEqual(1, len(self.host.transactions))
         self.assertTrue(self.host.transactions[0].disposed)
 
     def test_readonly_unlinked_model_and_other_owner_cannot_create_identity(self):
         self.host.document.IsReadOnly = True
         with self.assertRaises(ValueError):
-            self.store.Ensure(MODEL)
+            self.store.Ensure(PROJECT)
         self.host.document.IsReadOnly = False
         self.host.document.IsWorkshared = True
         self.host.allowCheckout = False
         with self.assertRaises(ValueError):
-            self.store.Ensure(MODEL)
+            self.store.Ensure(PROJECT)
         self.assertEqual([], self.host.transactions)
 
     def test_commit_failure_rolls_back_identity_and_disposes_transaction(self):
         self.host.commitFails = True
         with self.assertRaises(ValueError):
-            self.store.Ensure(MODEL)
+            self.store.Ensure(PROJECT)
         self.assertIsNone(self.store.Read())
         self.assertTrue(self.host.transactions[0].rolledBack)
         self.assertTrue(self.host.transactions[0].disposed)
 
     def test_linked_readonly_model_reuses_identity_but_never_rebinds(self):
-        self.store.Ensure(MODEL)
+        self.store.Ensure(PROJECT)
         self.host.document.IsReadOnly = True
-        self.assertFalse(self.store.Ensure(MODEL))
+        self.assertFalse(self.store.Ensure(PROJECT))
         with self.assertRaises(ValueError):
             self.store.Ensure(str(uuid.uuid4()))
-        self.assertEqual(MODEL, self.store.Read())
+        self.assertEqual(PROJECT, self.store.Read())
 
 
 if __name__ == '__main__':

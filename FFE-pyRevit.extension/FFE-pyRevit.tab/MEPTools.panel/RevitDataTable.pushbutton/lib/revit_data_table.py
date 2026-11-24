@@ -381,16 +381,10 @@ def ValidateRequest(message, documentKey, snapshot):
                 raise ValueError("Choose a cloud project before collecting changes.")
             request["projectId"] = str(uuid.UUID(projectId))
         elif action == "publishCommit":
-            reviewId, selection, text = (message.get(key) for key in ("reviewId", "selection", "message"))
+            reviewId = message.get("reviewId")
             if not isinstance(reviewId, StringTypes) or len(reviewId) != 36:
-                raise ValueError("Collect Space changes before committing.")
-            if (not isinstance(selection, list) or not selection or
-                    any(not isinstance(key, StringTypes) or not key.isdigit() or len(key) > 12 for key in selection)):
-                raise ValueError("Choose changes from the current review.")
-            if not isinstance(text, StringTypes) or not text.strip() or len(text) > 5000:
-                raise ValueError("Enter a commit message of 1 to 5000 characters.")
-            request.update(reviewId=str(uuid.UUID(reviewId)),
-                           selection=sorted(set(selection), key=int), message=text.strip())
+                raise ValueError("Collect Spaces before syncing.")
+            request["reviewId"] = str(uuid.UUID(reviewId))
         return request
     if action in tableActions:
         tableId = message.get("tableId", "")

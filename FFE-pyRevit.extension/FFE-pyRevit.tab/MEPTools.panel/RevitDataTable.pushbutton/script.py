@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """Purpose: browse host-model Spaces in a modeless WebView2 data grid.
-Behaviors: shared saved views, filtering, navigation, and reviewed repository commits.
+Behaviors: shared saved views, filtering, navigation, and explicit Loadwise Space sync.
 Revit API: 2025/2026, persistent IronPython engine, queued ExternalEvent requests.
 Design: browser callbacks use snapshots only; all document reads and navigation
 run in API callbacks. Saved-table operations transact metadata; Space values stay read-only.
 """
 __title__ = "HVAC Data"
-__version__ = "0.12.0"
+__version__ = "0.13.0"
 __min_revit_ver__ = 2025
 __persistentengine__ = True
 
@@ -43,8 +43,8 @@ from ffe_webview2 import load_webview2_types, format_webview2_error
 from revit_data_table import BuildSnapshot, ValidateRequest, NavigateSpaces, PublishActions
 from saved_tables import RevitTableStore, CaptureLayout, ResolveLayout, TableMetadata, ValidateLayout
 from ffe_supabase import Client as CloudClient
-from cloud_publish import CloudModelStore, LoadCatalog, PrepareCollection, ReviewCollection, CreateBatch, CommitReview
-from forma_project import ReadFormaContext, ModelIdForDocument, CheckFormaProject, CreateFormaProject
+from cloud_publish import CloudProjectStore, LoadCatalog, PrepareSync, SyncReview
+from forma_project import ReadFormaContext, CheckFormaProject, CreateFormaProject
 
 try:
     _DATA_TABLE_WINDOWS
@@ -56,19 +56,9 @@ SupportDirectory = os.path.join(ScriptDirectory, "support")
 
 
 def CreateCloudClient(application):
-    """Give repository writes a persistent pyRevit installation identity and attribution."""
-    config = script.get_config("HVACDataRepository")
-    clientId = config.get_option("client_id", None)
-    if not clientId:
-        clientId = str(uuid.uuid4())
-        config.client_id = clientId
-        script.save_config()
+    """Label Loadwise updates with the Revit user name; no client identity is required."""
     name = u"{0}".format(application.Username or os.environ.get("USERNAME") or "Revit").strip() or "Revit"
-    try:
-        userId = str(application.LoginUserId or "")[:200]
-    except Exception:
-        userId = ""
-    return CloudClient(client_id=clientId, actor_name=name[:200], user_id=userId)
+    return CloudClient(actor_name=name[:200])
 
 
 class DataTableEventHandler(IExternalEventHandler):
@@ -123,7 +113,7 @@ class DataTableWindow(Window):
 
     def __init__(self, uiApplication, document, snapshot, handler, externalEvent,
                  webViewType, creationType, tableStore=None, formaContext=None,
-                 startupClient=None, linkedModelId=None):
+                 startupClient=None, linkedProjectId=None):
         Window.__init__(self)
         self.Document = document
         self.DocumentKey = snapshot["documentKey"]
@@ -142,17 +132,16 @@ class DataTableWindow(Window):
         self.WritingTables = False
         self.CloudBusy = False
         self.FormaContext = formaContext
-        self.FormaRepositoryProject = None
+        self.FormaProject = None
         self.StartupClient = startupClient
-        self.StartupLinkedModelId = linkedModelId
+        self.StartupLinkedProjectId = linkedProjectId
         self.StartupAttempted = False
         self.PendingFormaResponse = None
         self.PublishPlan = None
         self.PublishReview = None
-        self.PublishBatch = None
         self.PublishClient = None
         self.DocumentRevision = 0
-        self.CloudStore = CloudModelStore(document, DB)
+        self.CloudStore = CloudProjectStore(document, DB)
         self.IndexUri = Uri(os.path.abspath(os.path.join(SupportDirectory, "index.html"))).AbsoluteUri
         self.Title = "HVAC Data - " + snapshot["documentTitle"]
         self.Width = 1160
@@ -337,7 +326,7 @@ class DataTableWindow(Window):
         if client is None:
             self.SendResult("warning", "Could not initialize the project connection. Local Space browsing is available.")
             return
-        linkedId = self.StartupLinkedModelId
+        linkedId = self.StartupLinkedProjectId
         request = {"action": "formaLookup", "requestId": str(uuid.uuid4())}
         self.SendResult("info", "Checking the Autodesk Forma project connection...")
         self.StartCloudWork(request, lambda: CheckFormaProject(client, context, linkedId), self.OnFormaLookup)
@@ -353,12 +342,12 @@ class DataTableWindow(Window):
         if not response["success"]:
             message = response["message"]
             if response.get("code") == "PGRST202":
-                message = "Apply FFE Mechanical's Forma project setup migration (20261120000400), then close and reopen HVAC Data."
+                message = "The Loadwise API v3 is unavailable. Check FFE-Mechanical's database setup, then reopen HVAC Data."
             self.SendResult("warning", "Could not check the Forma project. {0}".format(message))
             return
         plan = response["data"]
         if plan["project"]:
-            self.FormaRepositoryProject = plan["project"]
+            self.FormaProject = plan["project"]
             self.SendResult("success", u"Connected to project: {0}".format(plan["project"]["name"]))
             return
         context = plan["forma"]
@@ -368,7 +357,7 @@ class DataTableWindow(Window):
             question = u'Connect the existing shared project "{0}" to this Autodesk Forma project?'.format(plan["existingProject"]["name"])
         else:
             question = u'Start a shared project for "{0}"?'.format(name or "this Autodesk Forma project")
-        text = question + u"\n\nAutodesk Forma project: {0}\nProject ID: {1}\n\nSpace values will be published only after you review and commit them.".format(
+        text = question + u"\n\nAutodesk Forma project: {0}\nProject ID: {1}\n\nSpace values will be sent only after you collect and confirm Sync Spaces.".format(
             name or "Name unavailable from Revit", context["formaProjectId"])
         if MessageBox.Show(self, text, title, MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes:
             self.SendResult("info", "Project setup skipped. Local Space browsing is available.")
@@ -384,12 +373,12 @@ class DataTableWindow(Window):
         request = {"action": "formaCreate", "requestId": requestId}
 
         def create():
-            return CreateFormaProject(client, plan, name, requestId)
+            return CreateFormaProject(client, plan, name)
 
         def completed(result):
             if result["success"]:
-                self.FormaRepositoryProject = result["data"]["project"]
-                self.SendResult("success", u"Project ready: {0}. Use Publish to review Space changes.".format(self.FormaRepositoryProject["name"]))
+                self.FormaProject = result["data"]["project"]
+                self.SendResult("success", u"Project ready: {0}. Use Sync Spaces to collect and confirm Space updates.".format(self.FormaProject["name"]))
             elif result.get("retry"):
                 retry = MessageBox.Show(self, "The project request could not be confirmed. Retry the same request?\n\n" + result["message"],
                                         "Project connection", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No)
@@ -403,73 +392,53 @@ class DataTableWindow(Window):
         self.StartCloudWork(request, create, completed)
 
     def HandlePublishRequest(self, request):
-        """Collect/recheck model data in Revit's API context before starting network work."""
+        """Collect/recheck data in Revit's API context before starting plain-data HTTP."""
         if self.CloudBusy:
-            raise ValueError("A publish request is already running. Wait for it to finish.")
+            raise ValueError("A sync request is already running. Wait for it to finish.")
         action = request["action"]
         if action == "publishCatalog":
             self.PublishPlan = None
             self.PublishReview = None
-            self.PublishBatch = None
             self.PublishClient = None
             linkedId = self.CloudStore.Read()
+            preferred = (getattr(self, "FormaProject", None) or {}).get("projectId")
+            client = CreateCloudClient(self.Application.Application)
             context = getattr(self, "FormaContext", None)
-            modelId = ModelIdForDocument(linkedId, context)
-            preferred = (getattr(self, "FormaRepositoryProject", None) or {}).get("projectId")
-            client = CloudClient()
-            self.StartCloudWork(request, lambda: LoadCatalog(client, modelId, linkedId is not None, preferred, context))
+            self.StartCloudWork(request, lambda: LoadCatalog(client, linkedId, preferred, context))
             return
         if action == "publishCommit":
             review = self.PublishReview
-            if review is None or review["collectionId"] != request["reviewId"]:
-                raise ValueError("Collect Space changes before committing.")
-            batch = self.PublishBatch
-            if batch is None:
-                if review["documentRevision"] != self.DocumentRevision:
-                    raise ValueError("The Revit model changed. Collect Space changes again.")
-                batch = CreateBatch(review, request["selection"], request["message"])
-            elif batch["selection"] != request["selection"] or batch["message"] != request["message"]:
-                raise ValueError("Retry the same commit or start a new review.")
+            if review is None or review["reviewId"] != request["reviewId"]:
+                raise ValueError("Collect Spaces before syncing.")
+            if review["documentRevision"] != self.DocumentRevision:
+                raise ValueError("The Revit model changed. Collect Spaces again.")
+            self.WritingTables = True
+            try:
+                self.CloudStore.Ensure(review["request"]["projectId"])
+            finally:
+                self.WritingTables = False
             client = self.PublishClient
-            self.PublishBatch = batch
-            self.StartCloudWork(request, lambda: CommitReview(client, review, batch))
+            self.StartCloudWork(request, lambda: SyncReview(client, review))
             return
         plan = self.PublishPlan
-        project = next((item for item in plan["projects"] if item["id"] == request["projectId"]), None) if plan else None
-        if project is None:
-            raise ValueError("Reload projects before collecting Space changes.")
-        if plan["model"] is not None and plan["model"]["projectId"] != request["projectId"]:
-            raise ValueError("This model is already linked to another project. Reload projects.")
-        if plan.get("projectId") and plan["projectId"] != request["projectId"]:
-            raise ValueError("Use this model's Autodesk Forma project.")
+        projectId = request["projectId"]
+        if plan is None or not any(item["id"] == projectId for item in plan["projects"]):
+            raise ValueError("Reload projects before collecting Spaces.")
+        if plan.get("projectId") and plan["projectId"] != projectId:
+            raise ValueError("Use this model's connected Loadwise project.")
         self.PublishReview = None
-        self.PublishBatch = None
-        capabilities = {}
         snapshot = BuildSnapshot(self.Document, self.DocumentKey, DB,
-                                 self.Snapshot.get("selectedParameterIds", []), capabilities)
-        collection = PrepareCollection(snapshot, capabilities)
-        client = CreateCloudClient(self.Application.Application)
-        self.PublishClient = client
-        self.WritingTables = True
-        try:
-            self.CloudStore.Ensure(plan["modelId"])
-        finally:
-            self.WritingTables = False
+                                 self.Snapshot.get("selectedParameterIds", []))
+        review = PrepareSync(snapshot, projectId)
+        review["documentRevision"] = self.DocumentRevision
+        self.PublishReview = review
+        self.PublishClient = CreateCloudClient(self.Application.Application)
         self.SetSnapshot(snapshot)
         self.Outdated = False
         self.SendSnapshot()
         self.SendContext()
-        labels = {row["uniqueId"]: u" ".join(part for part in (row["number"], row["name"]) if part)
-                  or row["uniqueId"] for row in snapshot["rows"]}
-        name = snapshot["documentTitle"].strip()[:200] or "Revit model"
-        revision = self.DocumentRevision
-
-        def review():
-            result = ReviewCollection(client, plan, project, collection, name, labels)
-            result["documentRevision"] = revision
-            return result
-
-        self.StartCloudWork(request, review)
+        self.Send({"type": "publishResult", "action": action, "requestId": request["requestId"],
+                   "success": True, "data": review})
 
     def StartCloudWork(self, request, work, onComplete=None):
         """Run JSON-only HTTPS calls off-thread and deliver results on the WPF dispatcher."""
@@ -481,25 +450,15 @@ class DataTableWindow(Window):
             response = {"type": "publishResult", "action": request["action"], "requestId": request["requestId"]}
             try:
                 result = work()
-                if request["action"] == "publishCommit" and not result["ok"]:
-                    response.update(success=False,
-                                    message="The repository changed during review. No changes from this commit were published.")
-                else:
-                    response.update(success=True, data=result)
+                response.update(success=True, data=result)
             except Exception as error:
-                message = str(error)
                 status = getattr(error, "status", None)
                 code = getattr(error, "code", None)
-                databaseTimeout = code == "57014" and "statement timeout" in message.lower()
                 retry = request["action"] in ("publishCommit", "formaCreate") and (
-                    code == "NETWORK_ERROR" or databaseTimeout
-                    or (status is not None and (status >= 500 or 200 <= status < 300))
-                    or (status is None and getattr(error, "request_id", None) is not None))
-                if databaseTimeout and request["action"] == "publishCommit":
-                    operation = getattr(error, "publish_operation", "publishing selected changes")
-                    message = "The repository database timed out while {0}. No changes from this attempt were committed.".format(operation)
-                    response["retryHint"] = "Apply the repository publish-performance migration before retrying this commit."
-                response.update(success=False, message=message, retry=retry, code=code)
+                    code in ("NETWORK_ERROR", "INVALID_RESPONSE", "57014")
+                    or (status is not None and status >= 500)
+                    or (status is None and isinstance(error, (IOError, OSError))))
+                response.update(success=False, message=str(error), retry=retry, code=code)
 
             def complete():
                 if self.IsClosed:
@@ -511,11 +470,8 @@ class DataTableWindow(Window):
                     return
                 if request["action"] == "publishCatalog" and response["success"]:
                     self.PublishPlan = response["data"]
-                elif request["action"] == "publishReview" and response["success"]:
-                    self.PublishReview = response["data"]
                 elif request["action"] == "publishCommit" and not response.get("retry"):
                     self.PublishReview = None
-                    self.PublishBatch = None
                     self.PublishClient = None
                 self.Send(response)
 
@@ -660,11 +616,11 @@ def Main():
     try:
         snapshot = BuildSnapshot(document, str(uuid.uuid4()), DB)
         formaContext = ReadFormaContext(document, DB)
-        startupClient, linkedModelId = None, None
+        startupClient, linkedProjectId = None, None
         if formaContext and formaContext.get("available"):
             try:
                 startupClient = CreateCloudClient(uiApplication.Application)
-                linkedModelId = CloudModelStore(document, DB).Read()
+                linkedProjectId = CloudProjectStore(document, DB).Read()
             except Exception as error:
                 Logger.warning("Could not initialize Forma project connection: {0}".format(error))
                 formaContext = {"available": False, "reason": "Could not read the saved project connection. Local Space browsing is available. " + str(error)}
@@ -673,7 +629,7 @@ def Main():
         externalEvent = ExternalEvent.Create(handler)
         window = DataTableWindow(uiApplication, document, snapshot, handler, externalEvent,
                                  webViewType, creationType, RevitTableStore(document, DB),
-                                 formaContext, startupClient, linkedModelId)
+                                 formaContext, startupClient, linkedProjectId)
         window.Subscribe()
         _DATA_TABLE_WINDOWS.append(window)
         window.Show()

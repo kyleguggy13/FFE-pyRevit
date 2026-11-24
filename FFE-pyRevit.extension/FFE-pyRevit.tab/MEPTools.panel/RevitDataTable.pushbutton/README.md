@@ -1,4 +1,4 @@
-# HVAC Data — v0.12.0
+# HVAC Data — v0.13.0
 
 Open **FFE-pyRevit → MEPTools → HVAC Data** in a Revit 2025 or 2026 project. Reload pyRevit after installing or renaming the command so its ribbon label updates.
 
@@ -10,7 +10,7 @@ Space phases are read from `ROOM_PHASE_ID`, falling back to `ROOM_PHASE`, using 
 
 Right-click a column header or a column group's band and choose **Change color…**. Pick a fill and click **Apply**; **Cancel** or Escape discards the draft. A group color fills its band, member headers, and data cells. Individual column colors override their group's fill; **Reset color** removes that override, or removes the band fill when used on the group. Text switches between black and white for contrast, and selected rows retain their selection highlight. Colors survive Refresh, header moves, and group edits, and are included in Save/Save As. Color changes mark the layout as unsaved and do not write to Revit until Save.
 
-Saved-table controls occupy the left side of the header; Column groups, Parameters, Publish, and Refresh stay on the right. All header buttons share a 30px height, 12px text, and matching padding. The saved-table controls wrap on smaller windows.
+Saved-table controls occupy the left side of the header; Column groups, Parameters, Sync Spaces, and Refresh stay on the right. All header buttons share a 30px height, 12px text, and matching padding. The saved-table controls wrap on smaller windows.
 
 - Click **Parameters…** to open a searchable window listing a checkbox, parameter name, Revit data type, and parameter type for every parameter found across the host model's Spaces. Parameter type distinguishes **Built-In**, **Shared Parameter**, and **Project Parameter**, with **Global Parameter** when encountered and **Other** when the origin cannot be identified. The catalog includes unset parameters. Definitions with the same name remain separate and show their parameter IDs.
 - Toggle **Show checked only** to filter the list to the current draft selections, including locked starter columns. It combines with search by name, data type, parameter type, or ID. Unchecking an editable item removes it from the filtered list immediately. Toggling the filter does not change selections, and the toggle stays set while this window is open and reopened.
@@ -31,29 +31,26 @@ Saved-table controls occupy the left side of the header; Column groups, Paramete
 - Model edits, undo, and redo mark the table **Out of date**. They do not automatically replace its rows. Deleted or replaced Spaces are checked again before navigation.
 - Each document has its own independent window, which can go behind Revit and appears in the taskbar/Alt+Tab. Reopening the command focuses that model's existing window. Activate the corresponding model before using its Refresh, Select, or Show actions. Closing the document closes its table.
 
-The warning panel reports unreadable and skipped rows. Space values remain read-only. Saved-table actions write model metadata; browsing, filtering, grouping, refreshing, and navigation do not modify the model. There is no linked-model collection. Table browsing works offline. Publish is the entry point for repository access.
+The warning panel reports unreadable and skipped rows. Space values remain read-only. Saved-table actions write model metadata; browsing, filtering, grouping, refreshing, and navigation do not modify the model. There is no linked-model collection. Table browsing works offline. Sync Spaces is the entry point for Loadwise access.
 
 ## Autodesk Forma project connection
 
-When HVAC Data opens for a Forma/Autodesk Docs cloud model, it reads the active model's Data Management project ID and checks the shared repository in the background. An existing Forma project connects automatically. If it is missing, a **Start project** prompt displays the detected project name and ID. **Yes** creates the shared project; **No** continues local browsing without creating anything or publishing Space values. Coworkers and other models in the same Forma project reuse that project by ID, including if names are duplicated or renamed.
+When HVAC Data opens for a Forma/Autodesk Docs cloud model, it reads the model's Data Management project ID and looks up its Loadwise project in the background. An existing project connects automatically. A missing project offers **Start project**; **Yes** creates the shared project, and **No** continues local browsing. Project setup does not send Spaces. Coworkers and other models in the same Forma project reuse the same Loadwise project by Forma ID.
 
-The name comes from the model's named Autodesk cloud path. If Revit does not supply a readable name, the tool asks for the name shown in Forma after you choose Yes. It never substitutes the separate Revit Project Information name. Cloud-path labels can be cached; matching always uses the Forma ID. Non-cloud files keep the existing manual Publish destination workflow.
+The name comes from the named Autodesk cloud path. If Revit supplies no readable name, the tool asks for the name shown in Forma after you choose Yes. It never substitutes Revit Project Information's name. Matching uses the Forma ID. A lookup failure never triggers project creation. Close and reopen HVAC Data to retry lookup. Non-cloud files choose a Loadwise project in **Sync Spaces**.
 
-If this model was already published to a repository created manually, the prompt offers to associate that existing project with Forma, preserving its name, model data, and history. Conflicting existing links stop with a warning instead of moving the model. An unavailable lookup never triggers project creation. Close and reopen HVAC Data to retry after a connection failure.
+A model already connected to a Loadwise project can associate that project with Forma. Conflicting connections stop with a warning. The retired v2 model UUID is not a project binding; it is ignored after the Loadwise database reset.
 
-Apply FFE-Mechanical's **20261120000400_forma_projects.sql** migration once after the repository migration. This fourth migration only adds Forma associations and does not reset any data. Reload pyRevit/restart Revit after updating the command. Opening the tool and creating the shared project do not write Revit metadata; the first explicit Publish collection still saves the model connection as described below. Previously unlinked cloud copies derive the same model UUID from their actual project/model IDs.
+## Sync Spaces to Loadwise (FFE Mechanical)
 
-## Publish to FFE Mechanical
+1. Click **Sync Spaces…**, choose a project, and click **Collect Spaces**. Revit reads all host-model Spaces across phases and levels, including unplaced and zero-area Spaces. Filters, selected rows and extra parameter columns do not limit this collection. This step creates a local preview and does not write model metadata or cloud data.
+2. Review number, name, level, area (ft²), height (ft), and collection warnings. Height is `Space.UnboundedHeight`. Unavailable area/height are omitted: existing Loadwise dimensions are retained, and new rooms use Loadwise defaults. Zero remains zero. Invalid IDs, duplicate UniqueIds, out-of-range values, or more than 5,000 Spaces stop sync with an error.
+3. Click **Sync Spaces** to confirm. Revit owns number, name, level, area, height, and element ID; these values overwrite the corresponding Loadwise fields. Load inputs, space types, air systems and HAP data remain managed in Loadwise. A single unlinked room with the same non-empty number links automatically; otherwise the Space UniqueId identifies the room. Absent rooms are reported and never deleted.
+4. The result reports created, updated, unchanged, linked, absent and skipped counts. `notInRevit` means absent from this model's collection; rooms from other models in the same project can appear in that count. If Revit changes during preview, collect again. **Retry sync** resends the same frozen values after an uncertain response. Repeating sync is safe; counts can differ if the first request already succeeded.
 
-1. Click **Publish…**, choose a project, and click **Collect changes**. Revit reads the latest data for all host-model Spaces across phases and levels, including unplaced and zero-area Spaces. The collection includes the starter fields, Phase, and supported parameters loaded in the table. Table filters and row selections do not limit collection. Submitting a collection records observations in the repository for comparison.
-2. Compare the **Repository** and **Revit** values. Use the checkboxes to stage individual changes. **Select local changes** selects ordinary additions and edits. Mark Space removals, conflicts, and changes without a sync baseline individually. Selecting a value on a new Space also stages the Space identity. Unavailable values do not create clears. A scan that skips any Spaces cannot propose Space removals.
-3. Enter a commit message and click **Commit selected**. The commit records the selected changes in project history. If Revit changes during review or the repository rejects a stale selection, reload projects and collect again. If a response is uncertain, **Retry commit** resends the same requests while the dialog is open.
+The first confirmed sync stores the **Loadwise project ID** on Project Information using schema `711c7777-907c-4c60-9ea7-35e7567465de` (`FFEHVACLoadwiseProjectV1`). **Save/Sync Revit** to persist and share this connection. First-time binding needs an editable model and Project Information checkout; a bound read-only model can reuse its connection. Binding is saved before HTTP and remains if the network request fails. Space parameters are never modified.
 
-The first collection stores a UUID on Project Information under Extensible Storage schema `a9b98292-45e8-4539-a20c-abd263581dfb` (`FFEHVACCloudModelV1`). **Save/Sync the Revit model** to persist and share the link. First-time linking requires an editable model and Project Information checkout. A previously linked model reuses its UUID, including after a rename or when registering again after the backend reset. Repository writes use a persistent ID stored in the local pyRevit configuration and the Revit user name for attribution.
-
-If Commit selected or Retry commit reports `canceling statement due to statement timeout`, apply FFE-Mechanical's non-destructive **20261123000500_publish_performance.sql** migration to the hosted database. It indexes immutable collection values instead of expanding the whole collection for each selected value. Existing projects, collections, drafts, commits, layouts, and retry receipts are preserved. Updating pyRevit alone cannot resolve this database bottleneck. After the migration, click **Retry commit** in the still-open dialog to reuse the original requests; if it was closed, reopen Publish and collect again. Timeout messages now identify the failing publish step and retain the selection and request IDs.
-
-The backend requires FFE-Mechanical's repository migrations and the additional Forma project migration above. The **third** migration resets the application's old cloud snapshots and layouts; do not rerun it when adding Forma support. FFE-Mechanical owns the SQL under `supabase/migrations`. The command bundles its IronPython-compatible v2 client, collection adapter, and Forma discovery helper and uses the shared publishable key without individual sign-in. HTTPS runs on a worker thread. Revit reads and metadata transactions run in the ExternalEvent context.
+FFE-Mechanical owns the schema and API under `supabase/migrations` and `supabase/API.md`. This command requires **API v3**, introduced by `20261124000600_loadwise.sql`. That migration resets the application's old cloud data; updating pyRevit does not run migrations. Use the database setup procedure in FFE-Mechanical. The command bundles its IronPython-compatible v3 client, Space adapter and Forma helper, using the shared publishable key without individual sign-in and the Revit user name for attribution. HTTPS runs on a worker thread; document collection and metadata transactions run in the ExternalEvent context.
 
 ## Shared saved tables
 
@@ -82,7 +79,7 @@ From the `RevitDataTable.pushbutton` directory, with CPython 3 and Node 22+:
 
 ```powershell
 python -m unittest discover -s tests -p 'test_*.py' -v
-node --test tests/revit_data_table.test.cjs
+node --test tests/*.test.cjs
 node tests/revit_data_table_browser.cjs
 ```
 

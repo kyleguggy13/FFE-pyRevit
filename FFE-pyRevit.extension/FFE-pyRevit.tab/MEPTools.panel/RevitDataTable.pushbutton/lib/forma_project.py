@@ -3,7 +3,7 @@
 
 ReadFormaContext is called only in a valid Revit API context. Everything returned
 is plain JSON; CheckFormaProject/CreateFormaProject can then run off-thread.
-No credentials are obtained from Revit, and no Space data or model metadata is written.
+No credentials are obtained from Revit, and no Space data is written here.
 """
 import re
 import uuid
@@ -80,50 +80,28 @@ def ReadFormaContext(document, db=None):
             'formaHubId': hub_id, 'cloudModelGuid': model_id, 'nameSource': 'cloudPath' if name else None}
 
 
-def ModelIdForDocument(linked_id, context):
-    """Keep existing bindings; unlinked cloud copies use the same model UUID."""
-    if linked_id:
-        return str(uuid.UUID(linked_id))
-    if context and context.get('available') and context.get('cloudModelGuid'):
-        return str(uuid.uuid5(uuid.NAMESPACE_URL, 'ffe-mechanical:forma:{0}:{1}'.format(
-            context['formaProjectId'], context['cloudModelGuid'])))
-    return str(uuid.uuid4())
+def CheckFormaProject(client, context, linked_project_id=None):
+    """Lookup only. A failed lookup must never be treated as a missing project.
 
-
-def _pages(operation, request):
-    page = operation(request)
-    while True:
-        for item in page['items']:
-            yield item
-        if page['nextCursor'] is None:
-            break
-        page = operation(dict(request, cursor=page['nextCursor']))
-
-
-def CheckFormaProject(client, context, linked_model_id=None):
-    """Lookup only. A failed lookup must never be treated as a missing project."""
+    linked_project_id is a Loadwise project the document was previously bound to.
+    """
     found = client.find_forma_project({'formaProjectId': context['formaProjectId']})['project']
     linked_project = None
-    if linked_model_id:
-        for project in _pages(client.list_projects, {'limit': 200}):
-            models = _pages(client.list_models, {'projectId': project['projectId'], 'limit': 200})
-            if any(model['modelId'] == linked_model_id for model in models):
-                linked_project = project
-                break
+    if linked_project_id:
+        linked_project = client.get_project({'projectId': str(uuid.UUID(linked_project_id))})['project']
     if found and linked_project and found['projectId'] != linked_project['projectId']:
-        raise ValueError('This Revit model is linked to a different repository than its Autodesk Forma project. '
-                         'No project or model link was changed. Review the existing connection before publishing.')
-    return {'project': found, 'existingProject': linked_project, 'forma': dict(context)}
+        raise ValueError('This Revit model is linked to a different Loadwise project than its Autodesk Forma project. '
+                         'No project link was changed. Review the existing connection before syncing.')
+    return {'project': found, 'existingProject': None if found else linked_project, 'forma': dict(context)}
 
 
-def CreateFormaProject(client, plan, name, request_id):
+def CreateFormaProject(client, plan, name):
     """Call only after an explicit Create/Connect choice; the server prevents duplicates."""
     name = name.strip()
     if not name or len(name) > 200:
         raise ValueError('Enter a project name of 1 to 200 characters.')
     context = plan['forma']
-    request = {'formaProjectId': context['formaProjectId'], 'formaHubId': context.get('formaHubId', ''),
-               'name': name, 'requestId': request_id}
+    request = {'formaProjectId': context['formaProjectId'], 'formaHubId': context.get('formaHubId', ''), 'name': name}
     if plan.get('existingProject'):
         request['projectId'] = plan['existingProject']['projectId']
     return client.ensure_forma_project(request)

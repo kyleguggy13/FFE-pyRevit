@@ -416,18 +416,15 @@ class RequestTests(unittest.TestCase):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 core.ValidateRequest(dict(message, **changes), 'doc', {})
 
-    def test_commit_accepts_only_review_selection_and_message(self):
+    def test_sync_uses_only_the_review_identity_and_rejects_browser_rows(self):
         import uuid
         request = {'action': 'publishCommit', 'requestId': 'publish-2', 'documentKey': 'doc',
-                   'reviewId': str(uuid.uuid4()), 'selection': ['3', '1', '3'], 'message': ' Revise airflow '}
-        result = core.ValidateRequest(dict(request, changes=[{}]), 'doc', {})
-        self.assertEqual(['1', '3'], result['selection'])
-        self.assertEqual('Revise airflow', result['message'])
-        self.assertNotIn('changes', result)
-        for changes in ({'reviewId': 'other'}, {'selection': []}, {'selection': [1]},
-                        {'selection': ['1.1']}, {'message': ' '}, {'message': 'x' * 5001}):
-            with self.subTest(changes=changes), self.assertRaises(ValueError):
-                core.ValidateRequest(dict(request, **changes), 'doc', {})
+                   'reviewId': str(uuid.uuid4()), 'spaces': [{'lpd': 99}], 'projectId': str(uuid.uuid4())}
+        result = core.ValidateRequest(request, 'doc', {})
+        self.assertEqual({'action': 'publishCommit', 'requestId': 'publish-2', 'reviewId': request['reviewId']}, result)
+        for reviewId in ('other', None, [], ''):
+            with self.subTest(reviewId=reviewId), self.assertRaises(ValueError):
+                core.ValidateRequest(dict(request, reviewId=reviewId), 'doc', {})
 
     def test_saved_table_requests_are_document_bound_and_validated_before_queueing(self):
         message = {'action': 'saveTable', 'requestId': 'table-1', 'tableId': '', 'revision': '',
@@ -496,19 +493,17 @@ class HostSafetyTests(unittest.TestCase):
     def send(self, message, source='file:///index.html'):
         self.window.OnWebMessage(None, NS(Source=source, WebMessageAsJson=json.dumps(message)))
 
-    def test_publish_review_collects_fresh_values_in_api_context_before_deferred_network_work(self):
+    def test_preview_collects_fresh_values_in_api_context_without_cloud_or_storage_writes(self):
         import test_cloud_publish as fixtures
-        self.api.update(CreateCloudClient=mock.Mock(), PrepareCollection=fixtures.cloud.PrepareCollection,
-                        ReviewCollection=fixtures.cloud.ReviewCollection)
+        self.api.update(CreateCloudClient=mock.Mock(), PrepareSync=fixtures.cloud.PrepareSync)
         client = self.api['CreateCloudClient'].return_value
-        client.compare_collection.return_value = {'items': [fixtures.candidate('base:number')], 'nextCursor': None}
         self.window.Document = NS(IsValidObject=True, Equals=lambda document: True)
         self.window.Application = NS(Application=NS(Username='Autodesk user'))
         self.window.CloudBusy = False
-        self.window.PublishPlan = {'modelId': fixtures.MODEL, 'model': None,
-                                   'projects': [{'id': fixtures.PROJECT, 'name': 'Mechanical', 'headCommitId': None}]}
+        self.window.PublishPlan = {'projects': [{'id': fixtures.PROJECT, 'name': 'Mechanical'}]}
         self.window.CloudStore = NS(Ensure=mock.Mock())
         self.window.StartCloudWork = mock.Mock()
+        self.window.Send = mock.Mock()
         self.window.SendSnapshot = mock.Mock()
         self.window.SendContext = mock.Mock()
         self.api['BuildSnapshot'] = mock.Mock(return_value=fixtures.snapshot())
@@ -518,25 +513,35 @@ class HostSafetyTests(unittest.TestCase):
         self.api['BuildSnapshot'].assert_not_called()
         self.handler.Execute(NS(ActiveUIDocument=NS(Document=self.window.Document)))
         self.assertEqual(['1'], self.api['BuildSnapshot'].call_args.args[3])
-        self.window.CloudStore.Ensure.assert_called_once_with(fixtures.MODEL)
-        client.submit_collection.assert_not_called()
-        self.assertIsNone(self.window.PublishReview)
-        self.assertFalse(self.window.WritingTables)
-        work = self.window.StartCloudWork.call_args.args[1]
-        self.assertEqual(1, len(work()['candidates']))
-        client.submit_collection.assert_called_once()
-        self.assertEqual('temporary-bridge', self.window.Snapshot['documentKey'])
-
-    def test_publish_commit_rejects_a_review_after_a_model_edit(self):
-        import test_cloud_publish as fixtures
-        self.window.CloudBusy = False
-        self.window.PublishReview = {'collectionId': fixtures.HEAD, 'documentRevision': 0}
-        self.window.PublishBatch = None
-        self.window.DocumentRevision = 1
-        self.window.StartCloudWork = mock.Mock()
-        with self.assertRaisesRegex(ValueError, 'Revit model changed'):
-            self.window.HandlePublishRequest({'action': 'publishCommit', 'reviewId': fixtures.HEAD})
+        self.window.CloudStore.Ensure.assert_not_called()
         self.window.StartCloudWork.assert_not_called()
+        self.assertEqual([], client.mock_calls)
+        self.assertEqual(fixtures.PROJECT, self.window.PublishReview['request']['projectId'])
+        self.assertEqual('publishResult', self.window.Send.call_args.args[0]['type'])
+
+    def test_sync_rejects_stale_reviews_and_binds_project_before_deferred_http(self):
+        import test_cloud_publish as fixtures
+        self.api['SyncReview'] = fixtures.cloud.SyncReview
+        self.window.CloudBusy = False
+        review = fixtures.cloud.PrepareSync(fixtures.snapshot(), fixtures.PROJECT)
+        review['documentRevision'] = 0
+        self.window.PublishReview = review
+        self.window.PublishClient = mock.Mock()
+        self.window.CloudStore = NS(Ensure=mock.Mock())
+        self.window.StartCloudWork = mock.Mock()
+        request = {'action': 'publishCommit', 'reviewId': review['reviewId']}
+        self.window.DocumentRevision = 1
+        with self.assertRaisesRegex(ValueError, 'Revit model changed'):
+            self.window.HandlePublishRequest(request)
+        self.window.StartCloudWork.assert_not_called()
+        self.window.CloudStore.Ensure.assert_not_called()
+        self.window.DocumentRevision = 0
+        self.window.HandlePublishRequest(request)
+        self.window.CloudStore.Ensure.assert_called_once_with(fixtures.PROJECT)
+        self.assertFalse(self.window.WritingTables)
+        self.window.PublishClient.sync_revit_spaces.assert_not_called()
+        self.window.StartCloudWork.call_args.args[1]()
+        self.window.PublishClient.sync_revit_spaces.assert_called_once_with(review['request'])
 
     def test_cloud_worker_returns_on_dispatcher_and_ignores_closed_windows(self):
         # Run the worker body deterministically; its completion must still be marshalled.
@@ -567,26 +572,22 @@ class HostSafetyTests(unittest.TestCase):
         self.assertEqual(('publishResult', 'publish-1', False),
                          (response['type'], response['requestId'], response['success']))
 
-    def test_database_timeout_keeps_review_and_batch_and_explains_the_failing_step(self):
+    def test_uncertain_sync_keeps_review_for_retry_without_claiming_it_was_not_written(self):
         import test_cloud_publish as fixtures
-        for status in (400, 500):
-            with self.subTest(status=status):
-                self.api.update(Action=lambda callback: callback,
-                                threading=NS(Thread=lambda target: NS(start=target)))
-                self.window.Dispatcher = NS(BeginInvoke=lambda callback: callback())
-                self.window.Send = mock.Mock()
-                review, batch = {'collectionId': 'collection'}, {'commitId': 'original-request'}
-                self.window.PublishReview, self.window.PublishBatch = review, batch
-                error = fixtures.rpc.RpcError('canceling statement due to statement timeout', '57014', status)
-                error.publish_operation = 'preparing selected changes'
-                self.window.StartCloudWork({'action': 'publishCommit', 'requestId': 'publish-2'},
-                                           mock.Mock(side_effect=error))
-                response = self.window.Send.call_args.args[0]
-                self.assertTrue(response['retry'])
-                self.assertIn('preparing selected changes', response['message'])
-                self.assertIn('migration', response['retryHint'])
-                self.assertIs(review, self.window.PublishReview)
-                self.assertIs(batch, self.window.PublishBatch)
+        for error in (fixtures.rpc.RpcError('statement timeout', '57014', 500), OSError('Network lost'),
+                      fixtures.rpc.RpcError('Unreadable response', 'INVALID_RESPONSE', 200)):
+            self.api.update(Action=lambda callback: callback,
+                            threading=NS(Thread=lambda target: NS(start=target)))
+            self.window.Dispatcher = NS(BeginInvoke=lambda callback: callback())
+            self.window.Send = mock.Mock()
+            review = {'reviewId': 'review'}
+            self.window.PublishReview = review
+            self.window.StartCloudWork({'action': 'publishCommit', 'requestId': 'publish-2'},
+                                       mock.Mock(side_effect=error))
+            response = self.window.Send.call_args.args[0]
+            self.assertTrue(response['retry'])
+            self.assertIs(review, self.window.PublishReview)
+            self.assertNotIn('No changes', response['message'])
 
     def test_queue_retains_distinct_requests_without_overwriting(self):
         self.send({'action': 'refresh', 'documentKey': 'doc'})

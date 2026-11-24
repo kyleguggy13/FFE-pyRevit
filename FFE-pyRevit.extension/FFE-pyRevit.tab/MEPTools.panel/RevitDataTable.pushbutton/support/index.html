@@ -30,7 +30,7 @@
     <div class="header-actions">
       <button id="column-groups" disabled>Column groups…</button>
       <button id="parameters" disabled>Parameters…</button>
-      <button id="publish" disabled title="Publish this model's Space data to FFE Mechanical">Publish…</button>
+      <button id="publish" disabled title="Sync this model's Spaces to Loadwise">Sync Spaces…</button>
       <button id="refresh" class="primary" disabled>Refresh</button>
     </div>
   </header>
@@ -70,21 +70,17 @@
   <div class="hint">Click rows to select · Shift+click selects a range · ↑/↓ moves focus · Space toggles selection · Ctrl+click a header adds a sort · Height is unbounded height</div>
   <dialog id="publish-dialog" aria-labelledby="publish-title" aria-describedby="publish-scope">
     <form id="publish-form">
-      <h2 id="publish-title">Publish to FFE Mechanical</h2>
+      <h2 id="publish-title">Sync Spaces to Loadwise</h2>
       <p id="publish-scope"></p>
       <label>Project <select id="publish-project"></select></label>
       <p id="publish-destination"></p>
       <p id="publish-error" role="alert"></p>
       <section id="publish-review" aria-label="Space changes" hidden>
         <p id="publish-summary" aria-live="polite"></p>
-        <div class="publish-review-actions">
-          <button id="publish-select-local" type="button">Select local changes</button>
-          <button id="publish-clear" type="button">Clear selection</button>
-        </div>
-        <p id="publish-units">Numeric measurements may be shown in Revit internal units.</p>
+        <p id="publish-units">Area is in ft²; height is in ft. Unavailable dimensions keep existing values; new rooms use 0 ft² and 9 ft. Load inputs stay in Loadwise.</p>
         <div class="publish-changes">
           <table>
-            <thead><tr><th scope="col">Stage</th><th scope="col">Space</th><th scope="col">Field</th><th scope="col">Repository</th><th scope="col">Revit</th></tr></thead>
+            <thead><tr><th scope="col">Number</th><th scope="col">Name</th><th scope="col">Level</th><th scope="col">Area (ft²)</th><th scope="col">Height (ft)</th></tr></thead>
             <tbody id="publish-changes"></tbody>
           </table>
         </div>
@@ -93,13 +89,12 @@
           <span id="publish-page"></span>
           <button id="publish-next" type="button">Next</button>
         </div>
-        <label for="publish-message">Commit message</label>
-        <input id="publish-message" type="text" maxlength="5000">
+        <p id="publish-warnings"></p>
       </section>
       <div class="dialog-actions">
         <button id="publish-reload" type="button">Reload projects</button>
         <button id="publish-cancel" type="button">Close</button>
-        <button id="publish-confirm" type="submit" class="primary" disabled>Collect changes</button>
+        <button id="publish-confirm" type="submit" class="primary" disabled>Collect Spaces</button>
       </div>
     </form>
   </dialog>

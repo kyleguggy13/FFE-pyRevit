@@ -29,9 +29,9 @@ def host():
     window.IsClosed = False
     window.DocumentActive = True
     window.PendingFormaResponse = None
-    window.FormaRepositoryProject = None
+    window.FormaProject = None
     window.StartupClient = Mock()
-    window.StartupLinkedModelId = None
+    window.StartupLinkedProjectId = None
     window.FormaContext = {'available': True, 'formaProjectId': str(uuid.uuid4()),
                            'formaProjectName': '12345 - Building', 'formaHubId': 'b.hub', 'cloudModelGuid': str(uuid.uuid4())}
     window.SendResult = Mock()
@@ -64,15 +64,15 @@ class StartupTests(unittest.TestCase):
         result = work()
         payload = window.StartupClient.ensure_forma_project.call_args.args[0]
         self.assertEqual(payload['formaProjectId'], window.FormaContext['formaProjectId'])
-        self.assertEqual(payload['requestId'], request['requestId'])
+        self.assertNotIn('requestId', payload)
         self.assertEqual(payload['name'], window.FormaContext['formaProjectName'])
         complete({'success': True, 'data': result})
-        self.assertEqual(window.FormaRepositoryProject, project)
+        self.assertEqual(window.FormaProject, project)
 
     def test_existing_project_connects_without_prompt_or_creation(self):
         window, api = host(); project = {'projectId': str(uuid.uuid4()), 'name': 'Shared'}
         window.OnFormaLookup(self.response(window, project))
-        self.assertEqual(window.FormaRepositoryProject, project)
+        self.assertEqual(window.FormaProject, project)
         api['MessageBox'].Show.assert_not_called()
         window.StartCloudWork.assert_not_called()
 
@@ -119,20 +119,18 @@ class StartupTests(unittest.TestCase):
         retry = window.StartCloudWork.call_args.args
         self.assertIs(retry[0], original[0]); self.assertIs(retry[1], original[1])
 
-    def test_publish_uses_forma_destination_and_same_identity_for_unlinked_cloud_copies(self):
+    def test_sync_catalog_uses_forma_destination_and_project_binding(self):
         window, api = host()
-        api['ModelIdForDocument'] = forma_project.ModelIdForDocument
         api['LoadCatalog'] = Mock(return_value={})
-        api['CloudClient'] = Mock()
+        api['CreateCloudClient'] = Mock()
+        window.Application = NS(Application=object())
         window.CloudBusy = False
-        window.CloudStore = NS(Read=lambda: None)
         project_id = str(uuid.uuid4())
-        window.FormaRepositoryProject = {'projectId': project_id, 'name': 'Building'}
+        window.CloudStore = NS(Read=lambda: project_id)
+        window.FormaProject = {'projectId': project_id, 'name': 'Building'}
         window.HandlePublishRequest({'action': 'publishCatalog', 'requestId': 'catalog-1'})
         window.StartCloudWork.call_args.args[1]()
-        args = api['LoadCatalog'].call_args.args
-        self.assertEqual(args[1], forma_project.ModelIdForDocument(None, window.FormaContext))
-        self.assertEqual(args[3], project_id)
+        self.assertEqual(api['LoadCatalog'].call_args.args[1:], (project_id, project_id, window.FormaContext))
 
 
 if __name__ == '__main__':

@@ -1,25 +1,21 @@
 # -*- coding: utf-8 -*-
-"""FFE shared RPC client for IronPython 2.7 / CPython, with no Revit dependency.
+"""Loadwise (FFE Mechanical) RPC client for IronPython 2.7 / CPython, with no Revit dependency.
 
-SQL is owned by FFE-Mechanical/supabase/migrations. Uses the shared publishable
-key without individual sign-in. Actor metadata is client-reported attribution.
-Perform network requests away from the Revit UI/ExternalEvent thread.
+SQL is owned by FFE-Mechanical/supabase/migrations (API v3). Uses the shared
+publishable key without individual sign-in. The actor name is client-reported
+attribution. Perform network requests away from the Revit UI/ExternalEvent thread.
 """
 import json
 import sys
-import uuid
 
 PROJECT_URL = "https://ncxylphudovrmvdgqsol.supabase.co"
 PUBLISHABLE_KEY = "sb_publishable_VFbJW7ZQQh0Ro254lfXXvw_xesXNxTK"
 
 
-OPERATIONS = ('create_project', 'register_model', 'list_projects', 'list_models', 'get_catalog', 'submit_collection', 'compare_collection',
-              'find_forma_project', 'ensure_forma_project',
-              'create_draft', 'update_draft', 'get_draft', 'list_drafts', 'discard_draft', 'resolve_draft', 'commit_draft',
-              'get_state', 'get_history', 'get_commit', 'compare_commits', 'prepare_pull', 'acknowledge_pull', 'get_pull',
-              'get_sync', 'save_layout', 'rename_layout', 'delete_layout', 'list_layouts', 'get_layout', 'layout_history')
-WRITES = frozenset(('create_project', 'ensure_forma_project', 'register_model', 'submit_collection', 'create_draft', 'update_draft', 'resolve_draft',
-                   'discard_draft', 'commit_draft', 'prepare_pull', 'acknowledge_pull', 'save_layout', 'rename_layout', 'delete_layout'))
+OPERATIONS = ('list_projects', 'get_project', 'create_project', 'update_project', 'save_air_system',
+              'delete_air_system', 'find_forma_project', 'ensure_forma_project', 'list_space_types', 'list_rooms',
+              'save_room', 'delete_room', 'sync_revit_spaces', 'import_hap', 'list_hap_imports', 'get_hap_import',
+              'delete_hap_import')
 try:
     STRING_TYPES = (basestring,)
 except NameError:
@@ -88,8 +84,7 @@ def _request(url, headers, payload):
 
 
 class Client(object):
-    def __init__(self, url=PROJECT_URL, publishable_key=PUBLISHABLE_KEY,
-                 client_id=None, actor_name="", user_id="", source="revit", transport=None):
+    def __init__(self, url=PROJECT_URL, publishable_key=PUBLISHABLE_KEY, actor_name="", transport=None):
         try:
             from urllib.parse import urlparse
         except ImportError:
@@ -100,20 +95,17 @@ class Client(object):
             raise ValueError("Use the HTTPS Supabase project URL.")
         if not publishable_key.startswith("sb_publishable_"):
             raise ValueError("Use a Supabase publishable key.")
-        if (not isinstance(actor_name, STRING_TYPES) or len(actor_name) > 200
-                or not isinstance(user_id, STRING_TYPES) or len(user_id) > 200 or source not in ("web", "revit")):
-            raise ValueError("Invalid client attribution.")
-        if client_id is not None:
-            client_id = str(uuid.UUID(client_id))
+        if not isinstance(actor_name, STRING_TYPES) or len(actor_name.strip()) > 200:
+            raise ValueError("Author names are limited to 200 characters.")
         self.url = url.rstrip("/")
         self.key = publishable_key
-        self.actor = {"clientId": client_id, "name": actor_name, "userId": user_id, "source": source}
+        self.actor_name = actor_name.strip()
         self.transport = transport or _request
 
     def rpc(self, name, args=None):
         import re
-        if not re.match(r"^ffe_v2_[a-z_]+\Z", name):
-            raise ValueError("Use a version 2 repository RPC.")
+        if not re.match(r"^ffe_v3_[a-z_]+\Z", name):
+            raise ValueError("Use a version 3 Loadwise RPC.")
         status, raw = self.transport(self.url + "/rest/v1/rpc/" + name,
                                      {"apikey": self.key},
                                      json.dumps(args or {}, allow_nan=False))
@@ -124,36 +116,25 @@ class Client(object):
         if not 200 <= status < 300:
             error = result if isinstance(result, dict) else {}
             raise RpcError(error.get("message", "The shared data request failed."), error.get("code"), status, error.get("details"))
+        if not isinstance(result, dict) or result.get("ok") is not True:
+            raise RpcError("Supabase returned an unexpected response.", "INVALID_RESPONSE", status)
         return result
 
     def call(self, action, data=None):
         if action not in OPERATIONS or (data is not None and not isinstance(data, dict)):
-            raise ValueError("Invalid repository request.")
+            raise ValueError("Invalid Loadwise request.")
         request = dict(data or {})
-        request["schemaVersion"] = 2
-        if action in WRITES:
-            if not self.actor["clientId"] or not self.actor["name"].strip():
-                raise ValueError("Writes require a persistent client_id and actor_name.")
-            request["actor"] = dict(self.actor)
-            request["requestId"] = str(uuid.UUID(request["requestId"])) if request.get("requestId") else str(uuid.uuid4())
-        try:
-            return self.rpc("ffe_v2_" + action, {"p_request": request})
-        except Exception as error:
-            error.request_id = request.get("requestId")
-            raise
-
-    def publish_snapshot(self, *args, **kwargs):
-        raise ValueError("Snapshot overwrites were retired. Submit a collection, stage a draft, and commit it.")
-
-    def get_snapshot(self, *args, **kwargs):
-        raise ValueError("Use get_state for versioned repository values.")
+        request["schemaVersion"] = 3
+        if self.actor_name:
+            request["actor"] = {"name": self.actor_name}
+        return self.rpc("ffe_v3_" + action, {"p_request": request})
 
 
 def _operation(action):
     def invoke(self, request=None):
         return self.call(action, request)
     invoke.__name__ = action
-    invoke.__doc__ = "Call ffe_v2_" + action + " with a version 2 request dictionary."
+    invoke.__doc__ = "Call ffe_v3_" + action + " with a version 3 request dictionary."
     return invoke
 
 

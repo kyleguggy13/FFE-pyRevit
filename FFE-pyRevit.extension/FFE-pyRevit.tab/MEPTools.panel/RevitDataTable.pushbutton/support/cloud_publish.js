@@ -1,27 +1,14 @@
-/* Repository publishing uses the host bridge and the packaged page's offline policy. */
+/* Loadwise v3 sync uses the host bridge; preview stays local until confirmed. */
 (function () {
   "use strict";
   const byId = id => document.getElementById(id);
   const pageSize = 50;
   const actionStatus = {
-    publishCatalog: "Loading cloud projects…",
-    publishReview: "Collecting and comparing Space values…",
-    publishCommit: "Committing selected Space changes…",
+    publishCatalog: "Loading Loadwise projects…",
+    publishReview: "Collecting current Spaces…",
+    publishCommit: "Syncing Spaces to Loadwise…",
   };
 
-  function stateText(state, displayText) {
-    if (state.state === "missing") return "Missing";
-    if (state.state === "unset") return "Unset";
-    const value = state.value;
-    if (value && typeof value === "object") {
-      return value.uniqueId || value.sentinel || (value.elementId ? "Space #" + value.elementId : JSON.stringify(value));
-    }
-    if (value === "") return "(empty text)";
-    const raw = String(value);
-    return displayText && displayText !== raw ? displayText + " (" + raw + ")" : raw;
-  }
-
-  /** Review repository differences and stage only the changes chosen in this dialog. */
   class CloudPublishControls {
     constructor(options) {
       this.options = options;
@@ -34,128 +21,66 @@
       byId("publish-cancel").addEventListener("click", () => byId("publish-dialog").close());
       byId("publish-dialog").addEventListener("cancel", event => { if (this.pending) event.preventDefault(); });
       byId("publish-project").addEventListener("change", () => this.update());
-      byId("publish-message").addEventListener("input", () => this.update());
       byId("publish-previous").addEventListener("click", () => { this.page--; this.renderPage(); });
       byId("publish-next").addEventListener("click", () => { this.page++; this.renderPage(); });
-      byId("publish-select-local").addEventListener("click", () => {
-        for (const [key, item] of this.candidates) {
-          if (item.classification === "local_change" && !(item.field === "@space" && item.proposed.state === "missing")) {
-            this.select(key, true);
-          }
-        }
-        this.update();
-      });
-      byId("publish-clear").addEventListener("click", () => { this.selection.clear(); this.update(); });
       byId("publish-form").addEventListener("submit", event => {
         event.preventDefault();
         if (byId("publish-confirm").disabled) return;
-        if (this.review) {
-          this.send("publishCommit", { reviewId: this.review.collectionId, selection: [...this.selection],
-            message: byId("publish-message").value.trim() });
-        } else {
-          this.send("publishReview", { projectId: byId("publish-project").value });
-        }
+        this.send(this.review ? "publishCommit" : "publishReview", this.review
+          ? { reviewId: this.review.reviewId } : { projectId: byId("publish-project").value });
       });
     }
 
     ready() {
       return Boolean(this.options.bridge && this.options.getSnapshot()) && this.options.isActive() &&
-        !this.options.isLoading() && !this.options.isBusy();
+        !this.options.isLoading() && !this.options.isBusy() && !this.pending;
     }
 
     resetReview() {
       this.review = null;
       this.retry = false;
-      this.candidates = [];
-      this.selection = new Set();
-      this.additions = new Map();
       this.page = 0;
       byId("publish-review").hidden = true;
-      byId("publish-message").value = "";
       byId("publish-changes").replaceChildren();
+      byId("publish-warnings").textContent = "";
     }
 
     update() {
       const ready = this.ready();
-      const canEdit = ready && !this.retry;
       byId("publish").disabled = !ready;
       byId("publish-cancel").disabled = Boolean(this.pending);
       byId("publish-reload").disabled = !ready;
-      byId("publish-project").disabled = !ready || Boolean(this.catalog?.model || this.catalog?.projectId || this.review);
-      byId("publish-message").disabled = !canEdit;
-      byId("publish-select-local").disabled = !canEdit || !this.candidates.length;
-      byId("publish-clear").disabled = !canEdit || !this.selection.size;
-      byId("publish-previous").disabled = Boolean(this.pending) || this.page === 0;
-      byId("publish-next").disabled = Boolean(this.pending) || (this.page + 1) * pageSize >= this.candidates.length;
-      byId("publish-confirm").textContent = this.retry ? "Retry commit" : this.review ? "Commit selected" : "Collect changes";
-      byId("publish-confirm").disabled = !ready || (this.review
-        ? !this.selection.size || !byId("publish-message").value.trim()
-        : !this.catalog || !byId("publish-project").value);
-      if (this.review) {
-        const { incomingCount, skippedCount, warningCount } = this.review;
-        let summary = this.candidates.length + " proposal(s). " + this.selection.size + " selected.";
-        if (incomingCount) summary += " " + incomingCount + " incoming value(s) retained.";
-        if (skippedCount) summary += " " + skippedCount + " Space(s) unavailable. Deletions are excluded.";
-        if (warningCount) summary += " " + warningCount + " collection warning(s).";
-        byId("publish-summary").textContent = summary;
-        byId("publish-changes").querySelectorAll("input").forEach(input => {
-          input.checked = this.selection.has(input.value);
-          input.disabled = !canEdit;
-        });
-      }
-    }
-
-    select(key, checked) {
-      const item = this.review.candidates[key];
-      if (checked) {
-        this.selection.add(key);
-        if (this.additions.has(item.spaceId)) this.selection.add(this.additions.get(item.spaceId));
-      } else {
-        this.selection.delete(key);
-        if (this.additions.get(item.spaceId) === key) {
-          for (const selected of this.selection) {
-            if (this.review.candidates[selected].spaceId === item.spaceId) this.selection.delete(selected);
-          }
-        }
-      }
+      byId("publish-project").disabled = !ready || Boolean(this.catalog?.projectId || this.review);
+      byId("publish-previous").disabled = !ready || this.page === 0;
+      byId("publish-next").disabled = !ready || !this.review ||
+        (this.page + 1) * pageSize >= this.review.request.spaces.length;
+      byId("publish-confirm").textContent = this.retry ? "Retry sync" : this.review ? "Sync Spaces" : "Collect Spaces";
+      byId("publish-confirm").disabled = !ready || !this.catalog || !byId("publish-project").value;
     }
 
     renderPage() {
-      const rows = this.candidates.slice(this.page * pageSize, (this.page + 1) * pageSize).map(([key, item]) => {
+      const spaces = this.review.request.spaces;
+      const rows = spaces.slice(this.page * pageSize, (this.page + 1) * pageSize).map(space => {
         const row = document.createElement("tr");
-        const checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.value = key;
-        const field = item.field === "@space" ? (item.proposed.state === "missing" ? "Remove Space"
-          : item.current.state === "missing" ? "Add Space" : "Space identity")
-          : item.metadata.definition?.name || item.field;
-        checkbox.setAttribute("aria-label", "Stage " + field + " for " + item.spaceLabel + " (" + item.field + ")");
-        checkbox.addEventListener("change", () => { this.select(key, checkbox.checked); this.update(); });
-        row.insertCell().append(checkbox);
-        row.insertCell().textContent = item.spaceLabel;
-        const fieldCell = row.insertCell();
-        fieldCell.textContent = field;
-        if (item.classification !== "local_change") {
-          const note = document.createElement("small");
-          note.textContent = item.classification === "conflict" ? "Conflict · select to keep Revit value" :
-            "No sync baseline · select to keep Revit value";
-          fieldCell.append(note);
+        for (const key of ["number", "name", "level", "area", "ceilingHeight"]) {
+          row.insertCell().textContent = space[key] ?? "Unavailable";
         }
-        row.insertCell().textContent = stateText(item.current);
-        row.insertCell().textContent = stateText(item.proposed, item.metadata.displayText);
         return row;
       });
       byId("publish-changes").replaceChildren(...rows);
-      byId("publish-page").textContent = this.candidates.length
-        ? "Page " + (this.page + 1) + " of " + Math.ceil(this.candidates.length / pageSize) : "";
+      byId("publish-page").textContent = spaces.length
+        ? "Page " + (this.page + 1) + " of " + Math.ceil(spaces.length / pageSize) : "";
+      byId("publish-summary").textContent = spaces.length + " Space(s) ready to sync. " +
+        this.review.skippedCount + " Space(s) skipped. Missing rooms are reported and retained.";
+      byId("publish-warnings").textContent = this.review.warnings.join("\n");
       this.update();
     }
 
     open() {
       if (!this.ready()) return;
-      const snapshot = this.options.getSnapshot();
-      byId("publish-scope").textContent = "Collect current host-model Spaces across all phases and levels, including " +
-        (snapshot.selectedParameterIds?.length || 0) + " loaded parameter column(s). Select changes before committing.";
+      byId("publish-scope").textContent = "Collect all host-model Spaces across every phase and level. " +
+        "Sync updates room number, name, level, area and height, including unplaced and zero-area Spaces. " +
+        "Table filters and selections do not limit sync. Review the collected values before confirming.";
       byId("publish-dialog").showModal();
       this.reload();
     }
@@ -175,6 +100,7 @@
       byId("publish-error").textContent = "";
       this.options.setBusy(true);
       this.options.status(actionStatus[action]);
+      this.update();
       try {
         this.options.bridge.postMessage({ ...payload, ...this.pending, documentKey: this.options.getSnapshot().documentKey });
       } catch (error) {
@@ -187,17 +113,12 @@
       const action = this.pending.action;
       this.pending = null;
       if (!message.success) {
-        const error = message.message || "Publishing failed.";
-        if (message.retry) {
-          this.retry = true;
-          byId("publish-error").textContent = error + " " +
-            (message.retryHint || "Retry commit to check the same request.");
-        } else {
-          this.catalog = null;
-          this.resetReview();
-          byId("publish-error").textContent = error + " Reload projects to start a new review.";
-          byId("publish-destination").textContent = "";
-        }
+        const error = message.message || "Space sync failed.";
+        this.retry = Boolean(message.retry);
+        if (!this.retry) { this.catalog = null; this.resetReview(); }
+        byId("publish-error").textContent = error + (this.retry
+          ? " The result is unconfirmed. Retry sync to resend the same collected values."
+          : " Reload projects and collect Spaces again.");
         this.options.status(error, "error");
       } else if (action === "publishCatalog") {
         this.catalog = message.data;
@@ -208,31 +129,29 @@
           return option;
         });
         byId("publish-project").replaceChildren(...choices);
-        if (this.catalog.model) byId("publish-project").value = this.catalog.model.projectId;
-        else if (this.catalog.projectId) byId("publish-project").value = this.catalog.projectId;
-        byId("publish-destination").textContent = this.catalog.model
-          ? "Linked model: " + this.catalog.model.name
-          : "Collect changes to register this model in the selected project. Save/Sync Revit to persist the link.";
-        if (!choices.length) byId("publish-error").textContent = "No cloud projects are available. Set up a project in FFE Mechanical, then reload.";
-        this.options.status(choices.length ? "Choose a destination and collect changes." : "No cloud projects are available.");
+        if (this.catalog.projectId) byId("publish-project").value = this.catalog.projectId;
+        byId("publish-destination").textContent = this.catalog.projectId
+          ? "Connected to this model's Loadwise project."
+          : "Choose a project. The first sync saves this model's project connection; Save/Sync Revit to share it.";
+        if (!choices.length) byId("publish-error").textContent = "No projects are available. Create one in Loadwise, then reload.";
+        this.options.status(choices.length ? "Choose a project and collect Spaces." : "No Loadwise projects are available.");
       } else if (action === "publishReview") {
         this.review = message.data;
-        this.candidates = Object.entries(this.review.candidates);
-        for (const [key, item] of this.candidates) {
-          if (item.field === "@space" && item.current.state === "missing" && item.proposed.state === "value") {
-            this.additions.set(item.spaceId, key);
-          }
-        }
         byId("publish-review").hidden = false;
-        byId("publish-destination").textContent = "Collection submitted. Review Space changes before committing.";
+        byId("publish-destination").textContent = "Collected locally. Confirm Sync Spaces to send these values to Loadwise.";
         this.renderPage();
-        this.options.status(this.candidates.length ? "Review and stage Space changes." : "No Space changes to commit.");
+        this.options.status("Review the collected Spaces, then confirm sync.");
       } else {
+        const result = message.data;
+        const missing = result.notInRevit.length;
+        const report = "Synced to Loadwise: " + result.created + " created, " + result.updated + " updated, " +
+          result.unchanged + " unchanged, " + result.linked + " linked by number. " + missing +
+          " room(s) absent from this collection and retained. " + this.review.skippedCount + " Space(s) skipped.";
         byId("publish-dialog").close();
+        const kind = missing || this.review.skippedCount ? "warning" : "success";
         this.catalog = null;
         this.resetReview();
-        this.options.status(message.data.noop ? "The repository already contains those values." :
-          "Committed " + message.data.changeCount + " change(s) to FFE Mechanical.", "success");
+        this.options.status(report, kind);
       }
       this.options.setBusy(false);
       this.update();
