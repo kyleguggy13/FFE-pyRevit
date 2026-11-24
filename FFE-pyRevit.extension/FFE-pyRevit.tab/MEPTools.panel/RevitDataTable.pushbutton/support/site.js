@@ -11,6 +11,7 @@
   let columnGrouping = null;
   let headerColors = null;
   let cloudPublish = null;
+  let spaceGroups = null;
 
   function status(message, kind = "info") {
     byId("status").textContent = message;
@@ -48,6 +49,7 @@
     if (columnGrouping) columnGrouping.update();
     if (headerColors) headerColors.update();
     if (cloudPublish) cloudPublish.update();
+    if (spaceGroups) spaceGroups.update();
     if (state.table) updateSortPriorities();
   }
 
@@ -615,6 +617,15 @@
           filters: { ...state.filters },
         }),
       });
+      spaceGroups = new window.SpaceGroupControls({ bridge, status,
+        getSnapshot: () => state.snapshot, isLoading: () => state.loading,
+        isActive: () => state.active, isBusy: () => state.busy || state.repositoryBusy,
+        getSelectedUniqueIds: () => {
+          const ids = new Set(selectedIds());
+          return (state.snapshot?.rows || []).filter(row => ids.has(row.id)).map(row => row.uniqueId);
+        },
+        setBusy: value => { state.busy = value; updateControls(); },
+      });
       cloudPublish = new window.CloudPublishControls({ bridge, status,
         getSnapshot: () => state.snapshot, isLoading: () => state.loading,
         isActive: () => state.active, isBusy: () => state.busy || state.repositoryBusy,
@@ -678,6 +689,7 @@
           if (message.type === "snapshot") await loadSnapshot(message.snapshot);
           else if (message.type === "tableResult") await savedTables.handleResult(message);
           else if (message.type === "publishResult") cloudPublish.handleResult(message);
+          else if (message.type === "groupResult") spaceGroups.handleResult(message);
           else if (message.type === "closeRequest") savedTables.close();
           else if (message.type === "context") {
             state.active = message.active;

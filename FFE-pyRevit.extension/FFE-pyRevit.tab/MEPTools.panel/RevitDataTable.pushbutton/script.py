@@ -6,7 +6,7 @@ Design: browser callbacks use snapshots only; all document reads and navigation
 run in API callbacks. Saved-table operations transact metadata; Space values stay read-only.
 """
 __title__ = "HVAC Data"
-__version__ = "0.13.0"
+__version__ = "0.15.0"
 __min_revit_ver__ = 2025
 __persistentengine__ = True
 
@@ -43,8 +43,10 @@ from ffe_webview2 import load_webview2_types, format_webview2_error
 from revit_data_table import BuildSnapshot, ValidateRequest, NavigateSpaces, PublishActions
 from saved_tables import RevitTableStore, CaptureLayout, ResolveLayout, TableMetadata, ValidateLayout
 from ffe_supabase import Client as CloudClient
-from cloud_publish import CloudProjectStore, LoadCatalog, PrepareSync, SyncReview
+from cloud_publish import CloudProjectStore, LoadCatalog, PrepareSync, SelectSyncRows, SyncReview
 from forma_project import ReadFormaContext, CheckFormaProject, CreateFormaProject
+from space_groups import RevitSpaceGroupStore, GroupActions
+from revit_parameters import CollectSyncParameters
 
 try:
     _DATA_TABLE_WINDOWS
@@ -94,6 +96,8 @@ class DataTableEventHandler(IExternalEventHandler):
                         len(snapshot["rows"]), snapshot["skippedCount"]))
                 elif request["action"] in PublishActions:
                     window.HandlePublishRequest(request)
+                elif request["action"] in GroupActions:
+                    window.HandleGroupRequest(request)
                 elif request.get("requestId"):
                     window.HandleTableRequest(request)
                 else:
@@ -118,6 +122,7 @@ class DataTableWindow(Window):
         self.Document = document
         self.DocumentKey = snapshot["documentKey"]
         self.TableStore = tableStore
+        self.GroupStore = RevitSpaceGroupStore(document, DB)
         self.SetSnapshot(snapshot)
         self.Handler = handler
         self.ExternalEvent = externalEvent
@@ -277,6 +282,18 @@ class DataTableWindow(Window):
                 snapshot["savedTables"] = []
                 snapshot["tableIssues"] = ["Could not read saved tables: {0}".format(error)]
                 snapshot["canSaveTables"] = False
+        groupStore = getattr(self, "GroupStore", None)
+        if groupStore is not None:
+            try:
+                records, issues = groupStore.List()
+                snapshot["spaceGroups"] = sorted([record for element, record in records],
+                                                  key=lambda item: (item["name"].lower(), item["id"]))
+                snapshot["groupIssues"] = issues
+                snapshot["canEditSpaceGroups"] = not self.Document.IsReadOnly
+            except Exception as error:
+                snapshot["spaceGroups"] = []
+                snapshot["groupIssues"] = ["Could not read Space groups: {0}".format(error)]
+                snapshot["canEditSpaceGroups"] = False
         self.Snapshot = snapshot
 
     def HandleTableRequest(self, request):
@@ -307,10 +324,30 @@ class DataTableWindow(Window):
                    "catalog": {key: self.Snapshot.get(key) for key in ("savedTables", "tableIssues", "canSaveTables")},
                    "layout": ValidateLayout(request["layout"]) if action == "saveTable" else None})
 
+    def HandleGroupRequest(self, request):
+        """Write named membership metadata only in the external-event API context."""
+        if self.CloudBusy:
+            raise ValueError("Wait for the current sync before editing Space groups.")
+        self.WritingTables = True
+        try:
+            record = self.GroupStore.Write(request["action"], request["groupId"], request["revision"],
+                                           request.get("name"), request.get("members"))
+        finally:
+            self.WritingTables = False
+        # A membership change invalidates any frozen sync scope, even though no
+        # Space values changed and the metadata transaction was suppressed above.
+        self.DocumentRevision += 1
+        self.PublishReview = None
+        self.SetSnapshot(self.Snapshot)
+        self.Send({"type": "groupResult", "requestId": request["requestId"], "action": request["action"],
+                   "success": True, "group": record,
+                   "catalog": {key: self.Snapshot.get(key) for key in ("spaceGroups", "groupIssues", "canEditSpaceGroups")}})
+
     def SendTableFailure(self, request, error):
         """Retain the browser's working view when saving/loading cannot complete."""
         publish = request.get("action") in PublishActions
-        self.Send({"type": "publishResult" if publish else "tableResult", "action": request.get("action"),
+        kind = "groupResult" if request.get("action") in GroupActions else "tableResult"
+        self.Send({"type": "publishResult" if publish else kind, "action": request.get("action"),
                    "requestId": request.get("requestId"), "success": False, "message": str(error)})
 
     def BeginProjectLookup(self):
@@ -400,6 +437,8 @@ class DataTableWindow(Window):
             self.PublishPlan = None
             self.PublishReview = None
             self.PublishClient = None
+            self.SetSnapshot(self.Snapshot)
+            self.SendSnapshot()
             linkedId = self.CloudStore.Read()
             preferred = (getattr(self, "FormaProject", None) or {}).get("projectId")
             client = CreateCloudClient(self.Application.Application)
@@ -429,16 +468,19 @@ class DataTableWindow(Window):
         self.PublishReview = None
         snapshot = BuildSnapshot(self.Document, self.DocumentKey, DB,
                                  self.Snapshot.get("selectedParameterIds", []))
-        review = PrepareSync(snapshot, projectId)
+        self.SetSnapshot(snapshot)
+        syncRows, scope, warnings = SelectSyncRows(snapshot, request.get("groupIds"))
+        parameterData = CollectSyncParameters(self.Document, syncRows, DB, snapshot["rows"])
+        review = PrepareSync(snapshot, projectId, request.get("groupIds"), parameterData)
         review["documentRevision"] = self.DocumentRevision
         self.PublishReview = review
         self.PublishClient = CreateCloudClient(self.Application.Application)
-        self.SetSnapshot(snapshot)
         self.Outdated = False
         self.SendSnapshot()
         self.SendContext()
         self.Send({"type": "publishResult", "action": action, "requestId": request["requestId"],
-                   "success": True, "data": review})
+                   "success": True, "data": {key: value for key, value in review.items()
+                                              if key not in ("chunks", "nextChunk", "totals")}})
 
     def StartCloudWork(self, request, work, onComplete=None):
         """Run JSON-only HTTPS calls off-thread and deliver results on the WPF dispatcher."""
@@ -458,7 +500,10 @@ class DataTableWindow(Window):
                     code in ("NETWORK_ERROR", "INVALID_RESPONSE", "57014")
                     or (status is not None and status >= 500)
                     or (status is None and isinstance(error, (IOError, OSError))))
-                response.update(success=False, message=str(error), retry=retry, code=code)
+                message = str(error)
+                if code == "PGRST202" and request["action"] == "publishCommit":
+                    message = "Full-parameter sync requires FFE-Mechanical's coordination database migration (20261125000700). " + message
+                response.update(success=False, message=message, retry=retry, code=code)
 
             def complete():
                 if self.IsClosed:

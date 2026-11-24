@@ -37,7 +37,7 @@ def snapshot():
     return {'documentKey': 'temporary-bridge', 'documentTitle': 'Mechanical',
             'rows': [{'id': '9007199254740993', 'uniqueId': SPACE, 'number': '002', 'name': 'Office',
                       'level': 'Level 2', 'areaValue': 120.000004, 'heightValue': 9.0,
-                      'parameterValues': {'p1': 12.5}, 'lpd': 99, 'occupants': 100}],
+                      'parameters': {'Hidden': {'v': 12.5, 's': '12.5 CFM'}, 'Unset': {'v': None}}, 'parameterValues': {'p1': 12.5}, 'lpd': 99, 'occupants': 100}],
             'selectedParameterIds': ['1'], 'skippedCount': 0, 'issues': [], 'savedTables': ['local']}
 
 
@@ -69,7 +69,7 @@ class PublishTests(unittest.TestCase):
         with self.assertRaises(OSError): cloud.LoadCatalog(client, formaContext=context)
         client.ensure_forma_project.assert_not_called()
 
-    def test_preview_has_only_owned_fields_and_preserves_zero_missing_ids_and_warnings(self):
+    def test_preview_keeps_all_parameters_and_preserves_ids_and_warnings(self):
         data = snapshot()
         data['rows'].append({'uniqueId': 'unplaced', 'areaValue': 0, 'heightValue': None})
         data.update(skippedCount=1, issues=['Skipped unreadable Space'])
@@ -77,45 +77,84 @@ class PublishTests(unittest.TestCase):
         self.assertEqual(1, review['skippedCount'])
         self.assertEqual(['Skipped unreadable Space'], review['warnings'])
         self.assertEqual({'uniqueId': SPACE, 'elementId': '9007199254740993', 'number': '002',
-                          'name': 'Office', 'level': 'Level 2', 'area': 120.0, 'ceilingHeight': 9.0},
+                          'name': 'Office', 'level': 'Level 2', 'parameters': data['rows'][0]['parameters']},
                          review['request']['spaces'][0])
-        self.assertEqual({'uniqueId': 'unplaced', 'number': '', 'name': '', 'level': '', 'area': 0.0},
+        self.assertEqual({'uniqueId': 'unplaced', 'number': '', 'name': '', 'level': '', 'parameters': {}},
                          review['request']['spaces'][1])
         self.assertEqual(PROJECT, review['request']['projectId'])
         uuid.UUID(review['reviewId'])
         self.assertEqual(12.5, data['rows'][0]['parameterValues']['p1'])
 
-    def test_invalid_geometry_and_duplicate_ids_fail_before_network(self):
-        for change in ({'areaValue': float('inf')}, {'heightValue': float('nan')}, {'heightValue': 201},
-                       {'areaValue': 1000001}, {'id': 9007199254740993}, {'uniqueId': ''}):
-            data = snapshot()
-            data['rows'][0].update(change)
+    def test_group_selection_filters_on_host_and_deduplicates_overlapping_members(self):
+        data = snapshot()
+        data['rows'] += [dict(data['rows'][0], uniqueId='other', areaValue=float('inf')),
+                         dict(data['rows'][0], uniqueId='second', number='003')]
+        data['spaceGroups'] = [
+            {'id': PROJECT, 'name': 'West', 'members': [SPACE, 'gone']},
+            {'id': HEAD, 'name': 'Offices', 'members': [SPACE, 'second']}]
+        review = cloud.PrepareSync(data, PROJECT, [PROJECT, HEAD, PROJECT])
+        self.assertEqual([SPACE, 'second'], [space['uniqueId'] for space in review['request']['spaces']])
+        self.assertEqual({'projectId', 'spaces'}, set(review['request']))
+        self.assertFalse(review['scope']['allSpaces'])
+        self.assertEqual(1, review['scope']['excludedCount'])
+        self.assertEqual(1, review['scope']['unavailableCount'])
+        self.assertEqual(2, len(review['scope']['groups']))
+        self.assertIn('1 group member', review['warnings'][0])
+        # Membership is frozen along with the payload, including across retries.
+        data['spaceGroups'][0]['members'] = ['other']
+        client = mock.Mock()
+        client.push_revit_spaces.return_value = {'created': 2, 'updated': 0, 'unchanged': 0, 'newlyMissing': []}
+        cloud.SyncReview(client, review)
+        cloud.SyncReview(client, review)
+        self.assertEqual(1, client.push_revit_spaces.call_count)
+        self.assertEqual([SPACE, 'second'], [space['uniqueId'] for space in client.push_revit_spaces.call_args.args[0]['spaces']])
+
+    def test_empty_unknown_ambiguous_and_unavailable_group_scopes_never_sync_all(self):
+        data = snapshot()
+        data['spaceGroups'] = [{'id': HEAD, 'name': 'Deleted Spaces', 'members': ['gone']}]
+        for ids in ([], [PROJECT], [HEAD]):
+            with self.subTest(ids=ids), self.assertRaises(ValueError): cloud.PrepareSync(data, PROJECT, ids)
+        data['spaceGroups'] *= 2
+        with self.assertRaises(ValueError): cloud.PrepareSync(data, PROJECT, [HEAD])
+        self.assertTrue(cloud.PrepareSync(snapshot(), PROJECT)['scope']['allSpaces'])
+
+    def test_invalid_parameter_values_and_duplicate_ids_fail_before_network(self):
+        for change in ({'parameters': {'Bad': {'v': float('inf')}}}, {'parameters': {'Bad': {'v': []}}},
+                       {'id': 9007199254740993}, {'uniqueId': ''}):
+            data = snapshot(); data['rows'][0].update(change)
             with self.subTest(change=change), self.assertRaises(ValueError): cloud.PrepareSync(data, PROJECT)
         data = snapshot(); data['rows'] *= 2
         with self.assertRaises(ValueError): cloud.PrepareSync(data, PROJECT)
-        data['rows'] = [dict(snapshot()['rows'][0], uniqueId=str(i)) for i in range(5001)]
-        with self.assertRaisesRegex(ValueError, '5000'): cloud.PrepareSync(data, PROJECT)
 
-    def test_sync_and_retry_use_the_same_v3_payload_and_return_missing_rooms(self):
+    def test_chunk_retry_resumes_the_frozen_batch_and_partial_scope_never_finalizes(self):
+        data = snapshot()
+        data['rows'] = [dict(data['rows'][0], uniqueId=str(i)) for i in range(401)]
+        review = cloud.PrepareSync(data, PROJECT)
+        self.assertEqual([200, 200, 1], [len(chunk['spaces']) for chunk in review['chunks']])
+        self.assertEqual([False, False, True], [chunk['final'] for chunk in review['chunks']])
         calls = []
-        result = {'ok': True, 'created': 1, 'updated': 2, 'unchanged': 3, 'linked': 1, 'notInRevit': [HEAD]}
         def transport(url, headers, payload):
-            calls.append((url, headers, json.loads(payload)))
-            if len(calls) == 1: raise OSError('Connection closed')
-            return 200, json.dumps(result)
+            request = json.loads(payload)['p_request']
+            calls.append((url, headers, request))
+            if len(calls) == 2: raise OSError('Connection closed')
+            return 200, json.dumps({'ok': True, 'created': len(request['spaces']), 'updated': 0,
+                                    'unchanged': 0, 'newlyMissing': [HEAD] if request['final'] else []})
         client = rpc.Client(actor_name='Autodesk user', transport=transport)
-        review = cloud.PrepareSync(snapshot(), PROJECT)
-        self.assertEqual([], calls)
-        with self.assertRaises(OSError): cloud.SyncReview(client, review)
-        self.assertEqual(result, cloud.SyncReview(client, review))
-        self.assertEqual(calls[0], calls[1])
-        url, headers, payload = calls[0]
-        self.assertTrue(url.endswith('/rest/v1/rpc/ffe_v3_sync_revit_spaces'))
-        self.assertEqual({'apikey': rpc.PUBLISHABLE_KEY}, headers)
-        self.assertEqual(3, payload['p_request']['schemaVersion'])
-        self.assertEqual({'name': 'Autodesk user'}, payload['p_request']['actor'])
-        self.assertEqual({'projectId', 'spaces', 'schemaVersion', 'actor'}, set(payload['p_request']))
-        with self.assertRaises(ValueError): client.call('commit_draft')
+        with self.assertRaises(rpc.RpcError) as raised: cloud.SyncReview(client, review)
+        self.assertEqual("NETWORK_ERROR", raised.exception.code)
+        result = cloud.SyncReview(client, review)
+        self.assertEqual(calls[1], calls[2])
+        self.assertEqual(401, result['created'])
+        self.assertEqual(802, result['parameterCount'])
+        self.assertEqual([HEAD], result['newlyMissing'])
+        self.assertTrue(calls[0][0].endswith('/rest/v1/rpc/ffe_v3_push_revit_spaces'))
+        self.assertEqual({'apikey': rpc.PUBLISHABLE_KEY}, calls[0][1])
+        self.assertEqual({'name': 'Autodesk user'}, calls[0][2]['actor'])
+        data['spaceGroups'] = [{'id': HEAD, 'name': 'Subset', 'members': ['0']}]
+        self.assertFalse(cloud.PrepareSync(data, PROJECT, [HEAD])['chunks'][0]['final'])
+        data['skippedCount'] = 1
+        self.assertFalse(cloud.PrepareSync(data, PROJECT)['chunks'][-1]['final'])
+
 
 
 class IdentityTests(unittest.TestCase):

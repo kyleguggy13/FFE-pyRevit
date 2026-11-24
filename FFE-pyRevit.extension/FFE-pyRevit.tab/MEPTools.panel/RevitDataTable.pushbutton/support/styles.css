@@ -37,6 +37,31 @@ main { min-height: 0; flex: 1; display: flex; flex-direction: column; padding: 1
 .publish-changes th { position: sticky; top: 0; background: #eef3f7; text-align: left; }
 .publish-changes td, .publish-changes th { padding: 6px 8px; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; vertical-align: top; }
 #publish-warnings { white-space: pre-line; color: #765411; }
+#publish-group-scope { border: 1px solid var(--border); border-radius: 5px; margin: 12px 0; }
+#publish-group-scope p { margin: 8px 0; }
+.space-check { display: flex; flex-direction: row; align-items: flex-start; gap: 8px; min-width: 0; padding: 6px 2px; font-size: 13px; font-weight: 400; color: var(--ink); overflow-wrap: anywhere; }
+.space-check input { flex: 0 0 16px; width: 16px; min-height: 16px; height: 16px; padding: 0; margin: 1px 0 0; }
+.space-check-list { max-height: 180px; overflow: auto; }
+#space-group-dialog { width: min(680px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; padding: 22px; border: 1px solid var(--border); border-radius: 8px; color: var(--ink); }
+#space-group-dialog::backdrop { background: #182b3866; }
+#space-group-dialog h2 { margin: 0 0 12px; }
+#space-group-dialog p { font-size: 13px; line-height: 1.5; }
+#space-group-dialog label:not(.space-check) { margin: 10px 0; }
+#space-group-choice { max-width: none; }
+#space-group-members { border: 1px solid var(--border); padding: 4px 8px; max-height: min(32vh, 300px); }
+.space-group-tools, #space-group-dialog .dialog-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.space-group-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+#space-group-error { color: #b22d30; white-space: pre-line; }
+#space-group-error:empty { display: none; }
+#publish-dialog .dialog-actions, #space-group-dialog .dialog-actions { position: sticky; bottom: -22px; z-index: 2; padding: 12px 0; background: white; border-top: 1px solid var(--border); }
+@media (max-height: 600px) {
+  #space-group-dialog { padding: 14px; }
+  #space-group-help { display: none; }
+  #space-group-dialog h2 { font-size: 19px; margin-bottom: 4px; }
+  #space-group-dialog label:not(.space-check), #space-group-dialog p { margin: 4px 0; }
+  #space-group-members { max-height: 100px; }
+  #space-group-dialog .dialog-actions { margin-top: 8px; padding: 8px 0; bottom: -14px; }
+}
 @media (max-height: 600px) { .hint { display: none; } main { gap: 8px; } }
 @media (max-width: 850px) { .saved-tables select { width: 150px; } }
 .toolbar { display: flex; align-items: flex-end; gap: 12px; }

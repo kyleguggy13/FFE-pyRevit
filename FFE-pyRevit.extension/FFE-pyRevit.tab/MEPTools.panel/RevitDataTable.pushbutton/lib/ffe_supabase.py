@@ -15,7 +15,8 @@ PUBLISHABLE_KEY = "sb_publishable_VFbJW7ZQQh0Ro254lfXXvw_xesXNxTK"
 OPERATIONS = ('list_projects', 'get_project', 'create_project', 'update_project', 'save_air_system',
               'delete_air_system', 'find_forma_project', 'ensure_forma_project', 'list_space_types', 'list_rooms',
               'save_room', 'delete_room', 'sync_revit_spaces', 'import_hap', 'list_hap_imports', 'get_hap_import',
-              'delete_hap_import')
+              'delete_hap_import', 'import_excel', 'list_excel_imports', 'get_excel_import', 'delete_excel_import',
+              'push_revit_spaces', 'list_revit_spaces', 'list_revit_parameters', 'list_space_links', 'save_space_link')
 try:
     STRING_TYPES = (basestring,)
 except NameError:
@@ -106,9 +107,15 @@ class Client(object):
         import re
         if not re.match(r"^ffe_v3_[a-z_]+\Z", name):
             raise ValueError("Use a version 3 Loadwise RPC.")
-        status, raw = self.transport(self.url + "/rest/v1/rpc/" + name,
-                                     {"apikey": self.key},
-                                     json.dumps(args or {}, allow_nan=False))
+        payload = json.dumps(args or {}, allow_nan=False)
+        try:
+            status, raw = self.transport(self.url + "/rest/v1/rpc/" + name, {"apikey": self.key}, payload)
+        except RpcError:
+            raise
+        except Exception as error:
+            # CLR WebException can occur before a response exists, including
+            # while obtaining a request stream. Preserve a retryable result.
+            raise RpcError("Could not confirm the Loadwise request: {0}".format(error), "NETWORK_ERROR")
         try:
             result = json.loads(raw)
         except (ValueError, TypeError):

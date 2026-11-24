@@ -37,6 +37,8 @@ def host():
     window.SendResult = Mock()
     window.SendContext = Mock()
     window.StartCloudWork = Mock()
+    window.Snapshot = {}
+    window.SendSnapshot = Mock()
     return window, api
 
 

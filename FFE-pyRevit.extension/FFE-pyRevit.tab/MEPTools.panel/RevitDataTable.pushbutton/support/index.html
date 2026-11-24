@@ -14,6 +14,7 @@
   <script src="header_groups.js" defer></script>
   <script src="header_colors.js" defer></script>
   <script src="cloud_publish.js" defer></script>
+  <script src="space_groups.js" defer></script>
   <script src="site.js" defer></script>
 </head>
 <body>
@@ -46,6 +47,7 @@
     </div>
     <div class="table-actions">
       <div class="counts" id="counts" aria-live="polite">0 Spaces</div>
+      <button id="space-groups" disabled>Space groups…</button>
       <button id="select-revit" disabled>Select in Revit</button>
       <button id="show-revit" disabled>Show in Revit</button>
     </div>
@@ -75,12 +77,18 @@
       <label>Project <select id="publish-project"></select></label>
       <p id="publish-destination"></p>
       <p id="publish-error" role="alert"></p>
+      <fieldset id="publish-group-scope">
+        <legend>Spaces to sync</legend>
+        <label class="space-check"><input id="publish-all-spaces" type="checkbox" checked>All Spaces</label>
+        <p>To sync named groups, clear All Spaces and check the groups below. Overlapping Spaces are sent once. Unselected Spaces stay unchanged.</p>
+        <div id="publish-groups" class="space-check-list" aria-label="Groups to sync"></div>
+      </fieldset>
       <section id="publish-review" aria-label="Space changes" hidden>
         <p id="publish-summary" aria-live="polite"></p>
-        <p id="publish-units">Area is in ft²; height is in ft. Unavailable dimensions keep existing values; new rooms use 0 ft² and 9 ft. Load inputs stay in Loadwise.</p>
+        <p id="publish-units">Preview area is in ft² and height is in ft. Uploaded parameter values use Revit project display units. Expand Parameters to inspect them. Unset and unreadable values are identified; load calculation inputs remain managed in Loadwise.</p>
         <div class="publish-changes">
           <table>
-            <thead><tr><th scope="col">Number</th><th scope="col">Name</th><th scope="col">Level</th><th scope="col">Area (ft²)</th><th scope="col">Height (ft)</th></tr></thead>
+            <thead><tr><th scope="col">Number</th><th scope="col">Name</th><th scope="col">Level</th><th scope="col">Area (ft²)</th><th scope="col">Height (ft)</th><th scope="col">Parameters</th></tr></thead>
             <tbody id="publish-changes"></tbody>
           </table>
         </div>
@@ -95,6 +103,30 @@
         <button id="publish-reload" type="button">Reload projects</button>
         <button id="publish-cancel" type="button">Close</button>
         <button id="publish-confirm" type="submit" class="primary" disabled>Collect Spaces</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="space-group-dialog" aria-labelledby="space-group-title" aria-describedby="space-group-help">
+    <form id="space-group-form">
+      <h2 id="space-group-title">Space groups</h2>
+      <p id="space-group-help">Create named sets of Spaces for sync. Groups are shared in this model; Save/Sync Revit to keep them. Spaces can belong to several groups. Switching groups or closing discards unsaved edits.</p>
+      <div class="space-group-fields">
+        <label>Group <select id="space-group-choice"><option value="">New group</option></select></label>
+        <label>Group name <input id="space-group-name" type="text" maxlength="100" required autocomplete="off"></label>
+      </div>
+      <div class="space-group-tools">
+        <button id="space-group-use-selection" type="button">Use table selection</button>
+        <button id="space-group-select-listed" type="button">Select listed</button>
+        <button id="space-group-clear-listed" type="button">Clear listed</button>
+      </div>
+      <label>Find Spaces <input id="space-group-search" type="search" placeholder="Number, name, level, or phase" autocomplete="off"></label>
+      <p id="space-group-count" aria-live="polite"></p>
+      <div id="space-group-members" class="space-check-list" aria-label="Space membership"></div>
+      <p id="space-group-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button id="space-group-delete" type="button" disabled>Delete group</button>
+        <button id="space-group-cancel" type="button">Close</button>
+        <button id="space-group-save" type="submit" class="primary">Save group</button>
       </div>
     </form>
   </dialog>

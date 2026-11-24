@@ -467,7 +467,7 @@ def host_classes():
     classes = [node for node in tree.body if isinstance(node, ast.ClassDef)]
     api = {'Window': object, 'IExternalEventHandler': object, 'collections': collections,
            'json': json, 'ValidateRequest': core.ValidateRequest, 'Logger': mock.Mock(),
-           'PublishActions': core.PublishActions,
+           'PublishActions': core.PublishActions, 'GroupActions': core.GroupActions,
            'Visibility': NS(Collapsed=0, Visible=1), 'DB': object(), '_DATA_TABLE_WINDOWS': []}
     api.update({name: getattr(saved, name) for name in ('CaptureLayout', 'ResolveLayout', 'TableMetadata', 'ValidateLayout')})
     exec(compile(ast.Module(body=classes, type_ignores=[]), str(COMMAND), 'exec'), api)
@@ -495,7 +495,11 @@ class HostSafetyTests(unittest.TestCase):
 
     def test_preview_collects_fresh_values_in_api_context_without_cloud_or_storage_writes(self):
         import test_cloud_publish as fixtures
-        self.api.update(CreateCloudClient=mock.Mock(), PrepareSync=fixtures.cloud.PrepareSync)
+        self.api.update(CreateCloudClient=mock.Mock(), PrepareSync=fixtures.cloud.PrepareSync,
+                        SelectSyncRows=fixtures.cloud.SelectSyncRows,
+                        CollectSyncParameters=mock.Mock(return_value={
+                            'spaces': {fixtures.SPACE: fixtures.snapshot()['rows'][0]['parameters']},
+                            'catalog': [], 'issues': [], 'skippedCount': 0, 'unavailableCount': 0}))
         client = self.api['CreateCloudClient'].return_value
         self.window.Document = NS(IsValidObject=True, Equals=lambda document: True)
         self.window.Application = NS(Application=NS(Username='Autodesk user'))
@@ -518,6 +522,8 @@ class HostSafetyTests(unittest.TestCase):
         self.assertEqual([], client.mock_calls)
         self.assertEqual(fixtures.PROJECT, self.window.PublishReview['request']['projectId'])
         self.assertEqual('publishResult', self.window.Send.call_args.args[0]['type'])
+        self.assertNotIn('chunks', self.window.Send.call_args.args[0]['data'])
+        self.api['CollectSyncParameters'].assert_called_once()
 
     def test_sync_rejects_stale_reviews_and_binds_project_before_deferred_http(self):
         import test_cloud_publish as fixtures
@@ -539,9 +545,10 @@ class HostSafetyTests(unittest.TestCase):
         self.window.HandlePublishRequest(request)
         self.window.CloudStore.Ensure.assert_called_once_with(fixtures.PROJECT)
         self.assertFalse(self.window.WritingTables)
-        self.window.PublishClient.sync_revit_spaces.assert_not_called()
+        self.window.PublishClient.push_revit_spaces.assert_not_called()
+        self.window.PublishClient.push_revit_spaces.return_value = {'created': 1, 'updated': 0, 'unchanged': 0}
         self.window.StartCloudWork.call_args.args[1]()
-        self.window.PublishClient.sync_revit_spaces.assert_called_once_with(review['request'])
+        self.window.PublishClient.push_revit_spaces.assert_called_once_with(review['chunks'][0])
 
     def test_cloud_worker_returns_on_dispatcher_and_ignores_closed_windows(self):
         # Run the worker body deterministically; its completion must still be marshalled.

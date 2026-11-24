@@ -14,6 +14,8 @@ try:
 except NameError:
     StringTypes = (str,)
 
+GroupActions = ("saveSpaceGroup", "deleteSpaceGroup")
+
 PublishActions = ("publishCatalog", "publishReview", "publishCommit")
 
 
@@ -364,7 +366,7 @@ def ValidateRequest(message, documentKey, snapshot):
     if action == "ready":
         return {"action": "ready"}
     tableActions = ("loadTable", "saveTable", "renameTable", "deleteTable")
-    if action not in ("refresh", "select", "show", "closeWindow") + tableActions + PublishActions:
+    if action not in ("refresh", "select", "show", "closeWindow") + tableActions + PublishActions + GroupActions:
         raise ValueError("Unknown table action.")
     if message.get("documentKey") != documentKey:
         raise ValueError("This request belongs to another document. Reopen the table.")
@@ -380,11 +382,46 @@ def ValidateRequest(message, documentKey, snapshot):
             if not isinstance(projectId, StringTypes) or len(projectId) != 36:
                 raise ValueError("Choose a cloud project before collecting changes.")
             request["projectId"] = str(uuid.UUID(projectId))
+            groupIds = message.get("groupIds")
+            if groupIds is not None:
+                if (not isinstance(groupIds, list) or not groupIds or len(groupIds) > 1000
+                        or any(not isinstance(groupId, StringTypes) or len(groupId) != 36 for groupId in groupIds)):
+                    raise ValueError("Choose one or more valid Space groups.")
+                request["groupIds"] = sorted(set(str(uuid.UUID(groupId)) for groupId in groupIds))
         elif action == "publishCommit":
             reviewId = message.get("reviewId")
             if not isinstance(reviewId, StringTypes) or len(reviewId) != 36:
                 raise ValueError("Collect Spaces before syncing.")
             request["reviewId"] = str(uuid.UUID(reviewId))
+        return request
+    if action in GroupActions:
+        requestId = message.get("requestId")
+        groupId, revision = message.get("groupId", ""), message.get("revision", "")
+        if not isinstance(requestId, StringTypes) or not requestId or len(requestId) > 100:
+            raise ValueError("Invalid Space group request.")
+        for value in (groupId, revision):
+            if not isinstance(value, StringTypes) or (value and len(value) != 36):
+                raise ValueError("Invalid Space group identity.")
+            if value:
+                uuid.UUID(value)
+        if bool(groupId) != bool(revision) or (action == "deleteSpaceGroup" and not groupId):
+            raise ValueError("Choose a saved Space group and its current revision.")
+        request = {"action": action, "requestId": requestId, "groupId": groupId, "revision": revision}
+        if action == "saveSpaceGroup":
+            name, members = message.get("name"), message.get("members")
+            if not isinstance(name, StringTypes) or not name.strip() or len(name) > 100:
+                raise ValueError("Enter a group name of 1 to 100 characters.")
+            if (not isinstance(members, list) or not members or len(members) > 50000
+                    or any(not isinstance(member, StringTypes) or not member.strip() or len(member) > 200
+                           or member != member.strip() for member in members)):
+                raise ValueError("Choose valid Spaces for the group.")
+            known = set(row["uniqueId"] for row in snapshot.get("rows", []))
+            for group in snapshot.get("spaceGroups", []):
+                if group["id"] == groupId:
+                    known.update(group["members"])
+            if not set(members).issubset(known):
+                raise ValueError("A Space is not in this model's snapshot. Refresh and retry.")
+            request.update(name=name.strip(), members=sorted(set(members)))
         return request
     if action in tableActions:
         tableId = message.get("tableId", "")

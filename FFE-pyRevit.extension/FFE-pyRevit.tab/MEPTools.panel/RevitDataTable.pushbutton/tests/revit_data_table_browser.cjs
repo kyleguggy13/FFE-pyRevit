@@ -186,6 +186,7 @@ async function main() {
       documentKey: 'model-session', documentTitle: 'Mechanical Model', defaultPhaseId: '2',
       refreshedAt: new Date().toISOString(), skippedCount: 0, issues: [],
       savedTables: [], tableIssues: [], canSaveTables: true,
+      spaceGroups: [], groupIssues: [], canEditSpaceGroups: true,
       phases: [{ id: '1', name: 'Existing' }, { id: '2', name: 'New' }],
       levels: [{ id: '10', name: 'Ground', elevation: 0 }, { id: '11', name: 'Basement', elevation: -10 }],
       parameters: [
@@ -264,6 +265,58 @@ async function main() {
     }
     await deliver({ type: 'snapshot', snapshot });
     await waitFor('document.getElementById("counts").textContent.startsWith("3 of 4")');
+    // Named groups preserve exact Space identities across edits and overlap.
+    await evaluate(`${grid}.selectRow('3')`);
+    await evaluate('document.getElementById("space-groups").click()');
+    await waitFor('document.getElementById("space-group-dialog").open');
+    assert.deepEqual(await evaluate('[...document.querySelectorAll("#space-group-members input:checked")].map(x=>x.value)'), ['uid-3']);
+    assert.equal(await evaluate('document.querySelectorAll("#space-group-members img").length'), 0);
+    await evaluate('document.getElementById("space-group-select-listed").click()');
+    assert.equal(await evaluate('document.querySelectorAll("#space-group-members input:checked").length'), 4);
+    await evaluate('document.getElementById("space-group-use-selection").click()');
+    assert.equal(await evaluate('document.querySelectorAll("#space-group-members input:checked").length'), 1);
+    await evaluate('document.getElementById("space-group-search").value="Existing"; document.getElementById("space-group-search").dispatchEvent(new Event("input")); document.getElementById("space-group-select-listed").click()');
+    assert.equal(await evaluate('document.querySelectorAll("#space-group-members input").length'), 1);
+    await evaluate('document.getElementById("space-group-clear-listed").click(); document.getElementById("space-group-search").value=""; document.getElementById("space-group-search").dispatchEvent(new Event("input"))');
+    assert.equal(await evaluate('document.querySelectorAll("#space-group-members input:checked").length'), 1);
+    await evaluate(`document.getElementById("space-group-name").value = "West <img>"; document.getElementById("space-group-name").dispatchEvent(new Event("input")); document.querySelector('#space-group-members input[value="uid-9007199254740993"]').click(); document.getElementById("space-group-save").click()`);
+    await waitFor('window.__requests.at(-1).action === "saveSpaceGroup"');
+    let groupRequest = await evaluate('window.__requests.at(-1)');
+    assert.equal(groupRequest.documentKey, snapshot.documentKey);
+    assert.deepEqual(groupRequest.members.slice().sort(), ['uid-3','uid-9007199254740993']);
+    assert.equal(await evaluate('document.getElementById("space-group-cancel").disabled'), true);
+    await deliver({type:'groupResult',requestId:groupRequest.requestId,success:false,message:'Project metadata is owned.'});
+    await waitFor('!document.getElementById("space-group-save").disabled');
+    assert.equal(await evaluate('document.getElementById("space-group-name").value'), 'West <img>');
+    assert.equal(await evaluate('document.querySelectorAll("#space-group-members input:checked").length'), 2);
+    await evaluate('document.getElementById("space-group-save").click()');
+    await waitFor('window.__requests.at(-1).requestId !== ' + JSON.stringify(groupRequest.requestId));
+    groupRequest = await evaluate('window.__requests.at(-1)');
+    const westGroup = {id:randomUUID(),revision:randomUUID(),name:groupRequest.name,members:groupRequest.members};
+    snapshot.spaceGroups = [westGroup];
+    const groupCatalog = () => ({spaceGroups:snapshot.spaceGroups,groupIssues:[],canEditSpaceGroups:true});
+    await deliver({type:'groupResult',requestId:groupRequest.requestId,success:true,group:westGroup,catalog:groupCatalog()});
+    await waitFor('document.getElementById("space-group-choice").value === ' + JSON.stringify(westGroup.id));
+    await evaluate('document.getElementById("space-group-name").value = "West wing <img>"; document.getElementById("space-group-name").dispatchEvent(new Event("input")); document.getElementById("space-group-save").click()');
+    await waitFor('window.__requests.at(-1).requestId !== ' + JSON.stringify(groupRequest.requestId));
+    groupRequest = await evaluate('window.__requests.at(-1)');
+    assert.equal(groupRequest.groupId, westGroup.id);
+    assert.equal(groupRequest.revision, westGroup.revision);
+    Object.assign(westGroup, {name:groupRequest.name,revision:randomUUID()});
+    await deliver({type:'groupResult',requestId:groupRequest.requestId,success:true,group:westGroup,catalog:groupCatalog()});
+    await waitFor('!document.getElementById("space-group-save").disabled');
+    await evaluate(`document.getElementById("space-group-choice").value = ""; document.getElementById("space-group-choice").dispatchEvent(new Event("change")); document.getElementById("space-group-name").value = "Offices"; document.getElementById("space-group-name").dispatchEvent(new Event("input")); document.querySelector('#space-group-members input[value="uid-9007199254740994"]').click(); document.getElementById("space-group-save").click()`);
+    await waitFor('window.__requests.at(-1).requestId !== ' + JSON.stringify(groupRequest.requestId));
+    groupRequest = await evaluate('window.__requests.at(-1)');
+    const officeGroup = {id:randomUUID(),revision:randomUUID(),name:groupRequest.name,members:groupRequest.members};
+    snapshot.spaceGroups.push(officeGroup);
+    await deliver({type:'groupResult',requestId:groupRequest.requestId,success:true,group:officeGroup,catalog:groupCatalog()});
+    await waitFor('document.getElementById("space-group-choice").value === ' + JSON.stringify(officeGroup.id));
+    await evaluate('document.getElementById("space-group-delete").click()');
+    assert.equal(await evaluate('document.getElementById("space-group-delete").textContent'), 'Confirm delete');
+    assert.equal(await evaluate('window.__requests.at(-1).action'), 'saveSpaceGroup', 'first delete click only confirms');
+    await evaluate('document.getElementById("space-group-cancel").click()');
+    await evaluate(`${grid}.deselectRow()`);
     assert.equal(await evaluate('document.getElementById("publish").textContent'), "Sync Spaces\u2026");
     // Only the host supplies collected rows; the browser confirms a frozen review.
     const publishProject = '00000000-0000-4000-8000-000000000002';
@@ -278,10 +331,16 @@ async function main() {
     await waitFor('!document.getElementById("publish-confirm").disabled');
     assert.equal(await evaluate('document.getElementById("publish-project").selectedOptions[0].textContent'), 'Mechanical <project>');
     assert.equal(await evaluate('document.getElementById("publish-scope").textContent.includes("across every phase and level")'), true);
+    assert.equal(await evaluate('document.querySelectorAll("#publish-groups input").length'), 2);
+    assert.equal(await evaluate('document.querySelectorAll("#publish-groups img").length'), 0);
+    await evaluate('document.getElementById("publish-all-spaces").click()');
+    assert.equal(await evaluate('document.getElementById("publish-confirm").disabled'), true, 'empty group scope cannot collect');
+    await evaluate('[...document.querySelectorAll("#publish-groups input")].forEach(input=>input.click())');
     await evaluate('document.getElementById("publish-confirm").click()');
     await waitFor('window.__requests.at(-1).action === "publishReview"');
     publishRequest = await evaluate('window.__requests.at(-1)');
     assert.equal(publishRequest.projectId, publishProject);
+    assert.deepEqual(publishRequest.groupIds.slice().sort(), [westGroup.id,officeGroup.id].sort());
     assert.equal(publishRequest.spaces, undefined, 'browser does not supply upload rows');
     await deliver({type:'publishResult',action:'publishReview',requestId:publishRequest.requestId,success:false,message:'Could not collect Spaces.'});
     await waitFor('document.getElementById("publish-error").textContent.includes("Could not collect Spaces")');
@@ -297,15 +356,26 @@ async function main() {
     await waitFor('window.__requests.at(-1).action === "publishReview"');
     publishRequest = await evaluate('window.__requests.at(-1)');
     const review = {reviewId:'00000000-0000-4000-8000-000000000009',skippedCount:1,warnings:['Space <unreadable> skipped'],
+      scope:{allSpaces:false,groups:[westGroup,officeGroup].map(({id,name})=>({id,name})),excludedCount:1,unavailableCount:0},
+      parameterCount:102,parameterDefinitionCount:2,unavailableParameterCount:0,
       request:{projectId:publishProject,spaces:Array.from({length:51}, (_, i) => ({uniqueId:'space-'+i,
-        number:i ? String(i) : '002',name:'Office <img>',level:'Level 2',area:i ? 120 : 0,ceilingHeight:9}))}};
+        number:i ? String(i) : '002',name:'Office <img>',level:'Level 2',area:i ? 120 : 0,ceilingHeight:9,
+        parameters:{'Hidden parameter <img>':{v:'<script>literal</script>',s:'<script>literal</script>'},'Unset':{v:null,s:''}}}))}};
     await deliver({type:'publishResult',action:'publishReview',requestId:publishRequest.requestId,success:true,data:review});
     await waitFor('!document.getElementById("publish-review").hidden');
     assert.equal(await evaluate('document.getElementById("publish-confirm").textContent'), 'Sync Spaces');
     assert.equal(await evaluate('document.querySelectorAll("#publish-changes img").length'), 0, 'model text stays literal');
-    assert.deepEqual(await evaluate('[...document.querySelector("#publish-changes tr").cells].map(x=>x.textContent)'), ['002','Office <img>','Level 2','0','9']);
+    assert.deepEqual(await evaluate('[...document.querySelector("#publish-changes tr").cells].map(x=>x.textContent)'), ['002','Office <img>','Level 2','0','9','2 parameters']);
+    await evaluate('document.querySelector("#publish-changes summary").click()');
+    await waitFor('document.querySelector("#publish-changes dl")');
+    assert.equal(await evaluate('document.querySelector("#publish-changes dt").textContent'), 'Hidden parameter <img>');
+    assert.equal(await evaluate('document.querySelector("#publish-changes dd").textContent'), '<script>literal</script>');
+    assert.equal(await evaluate('document.querySelectorAll("#publish-changes img, #publish-changes script").length'), 0);
+    assert.ok((await evaluate('document.getElementById("publish-summary").textContent')).includes('102 parameter value'));
+    await evaluate('document.querySelector("#publish-changes summary").click()');
     assert.equal(await evaluate('document.querySelectorAll("#publish-changes tr").length'), 50);
     assert.equal(await evaluate('document.getElementById("publish-warnings").textContent'), 'Space <unreadable> skipped');
+    assert.equal(await evaluate('document.getElementById("publish-confirm").getBoundingClientRect().bottom < innerHeight'), true, 'sync preview actions remain visible');
     const syncPreviewScreenshot = await command('Page.captureScreenshot', {format:'png'});
     fs.writeFileSync(path.join(profile, 'sync-preview.png'), Buffer.from(syncPreviewScreenshot.data, 'base64'));
     await evaluate('document.getElementById("publish-next").click()');
@@ -316,6 +386,8 @@ async function main() {
     const attempted = await evaluate('window.__requests.at(-1)');
     assert.equal(attempted.reviewId, review.reviewId);
     assert.equal(attempted.spaces, undefined);
+    assert.equal(await evaluate('document.getElementById("publish-all-spaces").disabled'), true, "review scope is frozen");
+    assert.ok((await evaluate('document.getElementById("publish-summary").textContent')).includes("West wing <img>"));
     assert.equal(attempted.selection, undefined);
     assert.equal(attempted.message, undefined);
     await deliver({type:'publishResult',action:'publishCommit',requestId:attempted.requestId,success:false,retry:true,message:'Connection closed.'});
@@ -326,12 +398,22 @@ async function main() {
     publishRequest = await evaluate('window.__requests.at(-1)');
     assert.equal(publishRequest.reviewId, attempted.reviewId);
     await deliver({type:'publishResult',action:'publishCommit',requestId:publishRequest.requestId,success:true,
-      data:{created:1,updated:2,unchanged:48,linked:1,notInRevit:['missing-room']}});
+      data:{created:1,updated:2,unchanged:48,chunks:1,parameterCount:102,newlyMissing:[],complete:false}});
     await waitFor('!document.getElementById("publish-dialog").open');
     const syncStatus = await evaluate('document.getElementById("status").textContent');
-    assert.ok(syncStatus.includes('1 created, 2 updated, 48 unchanged, 1 linked by number'));
-    assert.ok(syncStatus.includes('1 room(s) absent') && syncStatus.includes('1 Space(s) skipped'));
+    assert.ok(syncStatus.includes('1 created, 2 updated, 48 unchanged'));
+    assert.ok(syncStatus.includes('102 parameter value(s)') && syncStatus.includes('1 Space(s) skipped'));
     assert.equal(await evaluate('document.getElementById("table-dirty").textContent'), '');
+    await evaluate('document.getElementById("space-groups").click()');
+    await evaluate('document.getElementById("space-group-choice").value=' + JSON.stringify(officeGroup.id) + '; document.getElementById("space-group-choice").dispatchEvent(new Event("change")); document.getElementById("space-group-delete").click(); document.getElementById("space-group-delete").click()');
+    await waitFor('window.__requests.at(-1).action === "deleteSpaceGroup"');
+    groupRequest = await evaluate('window.__requests.at(-1)');
+    assert.equal(groupRequest.groupId, officeGroup.id);
+    snapshot.spaceGroups = [westGroup];
+    await deliver({type:'groupResult',requestId:groupRequest.requestId,success:true,group:null,catalog:groupCatalog()});
+    await waitFor('!document.getElementById("space-group-cancel").disabled');
+    assert.equal(await evaluate('document.getElementById("space-group-choice").options.length'), 2);
+    await evaluate('document.getElementById("space-group-cancel").click()');
     assert.deepEqual(await evaluate(`${grid}.getRows("active").map(row => row.getData().id)`),
       ['3', '9007199254740994', '9007199254740993'], 'level elevation then natural number ordering');
     assert.equal(await evaluate('document.querySelectorAll("#grid img").length'), 0, 'model text cannot inject markup');
@@ -903,6 +985,12 @@ async function main() {
     const publishScreenshot = await command('Page.captureScreenshot', {format:'png'});
     fs.writeFileSync(path.join(profile, 'publish-dialog.png'), Buffer.from(publishScreenshot.data, 'base64'));
     await evaluate('document.getElementById("publish-cancel").click()');
+    await evaluate('document.getElementById("space-groups").click()');
+    assert.equal(await evaluate('document.getElementById("space-group-save").getBoundingClientRect().bottom < innerHeight'), true, 'group editor actions fit the minimum window');
+    assert.equal(await evaluate('document.getElementById("space-group-members").getBoundingClientRect().height >= 90'), true, 'membership list remains usable at minimum size');
+    const groupScreenshot = await command('Page.captureScreenshot', {format:'png'});
+    fs.writeFileSync(path.join(profile, 'space-group-editor.png'), Buffer.from(groupScreenshot.data, 'base64'));
+    await evaluate('document.getElementById("space-group-cancel").click()');
     snapshot.rows = [];
     snapshot.parameters = [];
     await deliver({ type: 'snapshot', snapshot });
@@ -910,7 +998,7 @@ async function main() {
     assert.equal(await evaluate('document.getElementById("select-revit").disabled'), true);
     assert.equal(await evaluate('document.getElementById("show-revit").disabled'), true);
     assert.deepEqual(errors, [], 'no uncaught browser exceptions');
-    console.log(`Browser checks passed: Loadwise preview/sync/retry, header colors, saved layouts, multi-sort priorities, whole-band dragging, row grouping, picker/filtering, and 6,000 grouped rows (${largeTableMs}ms).`);
+    console.log(`Browser checks passed: named Space groups, selective Loadwise sync/retry, header colors, saved layouts, multi-sort priorities, whole-band dragging, row grouping, picker/filtering, and 6,000 grouped rows (${largeTableMs}ms).`);
     console.log(`Screenshot: ${screenshotPath}`);
     console.log(`Grouping hierarchy: ${path.join(profile, 'grouping-hierarchy.png')}`);
     console.log(`Column header groups: ${path.join(profile, 'column-header-groups.png')}`);
