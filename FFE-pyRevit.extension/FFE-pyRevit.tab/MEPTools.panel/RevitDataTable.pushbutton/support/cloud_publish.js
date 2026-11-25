@@ -9,6 +9,13 @@
     publishCommit: "Syncing Spaces to Loadwise…",
   };
 
+  const collectionStages = {
+    spaces: "Scanning host-model Spaces…",
+    definitions: "Finding instance and type parameters across the model…",
+    values: "Reading parameter values for selected Spaces…",
+    preview: "Preparing the sync preview…",
+  };
+
   class CloudPublishControls {
     constructor(options) {
       this.options = options;
@@ -16,6 +23,7 @@
       this.catalog = null;
       this.serial = 0;
       this.selectedGroupIds = new Set();
+      this.parameterRequests = new Map();
       this.resetReview();
       byId("publish").addEventListener("click", () => this.open());
       byId("publish-reload").addEventListener("click", () => this.reload());
@@ -43,6 +51,7 @@
       this.review = null;
       this.retry = false;
       this.page = 0;
+      this.parameterRequests.clear();
       byId("publish-review").hidden = true;
       byId("publish-changes").replaceChildren();
       byId("publish-warnings").textContent = "";
@@ -56,7 +65,7 @@
       byId("publish-project").disabled = !ready || Boolean(this.catalog?.projectId || this.review);
       byId("publish-previous").disabled = !ready || this.page === 0;
       byId("publish-next").disabled = !ready || !this.review ||
-        (this.page + 1) * pageSize >= this.review.request.spaces.length;
+        (this.page + 1) * pageSize >= this.review.spaces.length;
       byId("publish-confirm").textContent = this.retry ? "Retry sync" : this.review ? "Sync Spaces" : "Collect Spaces";
       byId("publish-confirm").disabled = !ready || !this.catalog || !byId("publish-project").value ||
         (!this.review && !byId("publish-all-spaces").checked && !this.selectedGroupIds.size);
@@ -107,28 +116,22 @@
     }
 
     renderPage() {
-      const spaces = this.review.request.spaces;
+      const spaces = this.review.spaces;
       const rows = spaces.slice(this.page * pageSize, (this.page + 1) * pageSize).map(space => {
         const row = document.createElement("tr");
         for (const key of ["number", "name", "level", "area", "ceilingHeight"]) {
-          row.insertCell().textContent = space[key] ?? this.review.dimensions?.[space.uniqueId]?.[key] ?? "Unavailable";
+          row.insertCell().textContent = space[key] ?? "Unavailable";
         }
-        const parameters = Object.entries(space.parameters || {});
         const details = document.createElement("details");
         const summary = document.createElement("summary");
-        summary.textContent = parameters.length + " parameters";
-        details.append(summary);
+        summary.textContent = space.parameterCount + " parameters";
+        const content = document.createElement("div");
+        details.append(summary, content);
+        let requested = false;
         details.addEventListener("toggle", () => {
-          if (!details.open || details.children.length > 1) return;
-          const list = document.createElement("dl");
-          for (const [name, value] of parameters) {
-            const label = document.createElement("dt");
-            const text = document.createElement("dd");
-            label.textContent = name;
-            text.textContent = value.s || (value.v === null ? "Unset" : String(value.v));
-            list.append(label, text);
-          }
-          details.append(list);
+          if (!details.open || requested) return;
+          requested = true;
+          this.loadParameters(space.uniqueId, content, () => { requested = false; });
         });
         row.insertCell().append(details);
         return row;
@@ -145,6 +148,38 @@
         " parameter value(s), including instance/type parameters and hidden columns. Rooms outside this selection are retained.";
       byId("publish-warnings").textContent = this.review.warnings.join("\n");
       this.update();
+    }
+
+    loadParameters(uniqueId, content, retry) {
+      const requestId = "publish-" + (++this.serial);
+      this.parameterRequests.set(requestId, { content, retry });
+      content.textContent = "Loading parameters…";
+      try {
+        this.options.bridge.postMessage({ action: "publishParameters", requestId, uniqueId,
+          reviewId: this.review.reviewId, documentKey: this.options.getSnapshot().documentKey });
+      } catch (error) {
+        this.handleParameters({ requestId, success: false, message: error.message });
+      }
+    }
+
+    handleParameters(message) {
+      const request = this.parameterRequests.get(message.requestId);
+      if (!request) return;
+      this.parameterRequests.delete(message.requestId);
+      if (!message.success) {
+        request.content.textContent = (message.message || "Could not load parameters.") + " Reopen this row to retry.";
+        request.retry();
+        return;
+      }
+      const list = document.createElement("dl");
+      for (const [name, value] of Object.entries(message.data)) {
+        const label = document.createElement("dt");
+        const text = document.createElement("dd");
+        label.textContent = name;
+        text.textContent = value.s || (value.v === null ? "Unset" : String(value.v));
+        list.append(label, text);
+      }
+      request.content.replaceChildren(list);
     }
 
     open() {
@@ -172,6 +207,12 @@
       if (!this.ready()) return;
       this.pending = { requestId: "publish-" + (++this.serial), action };
       byId("publish-error").textContent = "";
+      if (action === "publishReview") {
+        byId("publish-collection").hidden = false;
+        byId("publish-collection-stage").textContent = "Waiting for Revit to start collecting…";
+        byId("publish-collection-bar").removeAttribute("value");
+        byId("publish-collection-detail").textContent = "";
+      }
       this.options.setBusy(true);
       this.options.status(actionStatus[action]);
       this.update();
@@ -182,10 +223,32 @@
       }
     }
 
+    handleProgress(message) {
+      if (this.pending?.action !== "publishReview" || this.pending.requestId !== message.requestId) return;
+      const stageIndex = Object.keys(collectionStages).indexOf(message.stage);
+      if (stageIndex < 0) return;
+      const stage = byId("publish-collection-stage");
+      const label = collectionStages[message.stage];
+      if (stage.textContent !== label) stage.textContent = label;
+      const bar = byId("publish-collection-bar");
+      if (message.total > 0) bar.value = stageIndex + (message.position - 1) / message.total;
+      else bar.removeAttribute("value");
+      const space = message.space;
+      byId("publish-collection-detail").textContent = message.total > 0
+        ? ["Space " + message.position + " of " + message.total, space?.number, space?.name, space?.level]
+          .filter(Boolean).join(" · ")
+        : "";
+    }
+
     handleResult(message) {
+      if (message.action === "publishParameters") {
+        this.handleParameters(message);
+        return;
+      }
       if (!this.pending || this.pending.requestId !== message.requestId) return;
       const action = this.pending.action;
       this.pending = null;
+      if (action === "publishReview") byId("publish-collection").hidden = true;
       if (!message.success) {
         const error = message.message || "Space sync failed.";
         this.retry = Boolean(message.retry);
@@ -211,11 +274,17 @@
         if (!choices.length) byId("publish-error").textContent = "No projects are available. Create one in Loadwise, then reload.";
         this.options.status(choices.length ? "Choose a project and collect Spaces." : "No Loadwise projects are available.");
       } else if (action === "publishReview") {
-        this.review = message.data;
-        byId("publish-review").hidden = false;
-        byId("publish-destination").textContent = "Collected locally. Confirm Sync Spaces to send these values to Loadwise.";
-        this.renderPage();
-        this.options.status("Review the collected Spaces, then confirm sync.");
+        try {
+          this.review = message.data;
+          this.renderPage();
+          byId("publish-review").hidden = false;
+          byId("publish-destination").textContent = "Collected locally. Confirm Sync Spaces to send these values to Loadwise.";
+          this.options.status("Review the collected Spaces, then confirm sync.");
+        } catch (error) {
+          this.resetReview();
+          byId("publish-error").textContent = "Could not display the sync preview. Collect Spaces again.";
+          this.options.status("Could not display the sync preview: " + error.message, "error");
+        }
       } else {
         const result = message.data;
         const missing = result.newlyMissing?.length || 0;

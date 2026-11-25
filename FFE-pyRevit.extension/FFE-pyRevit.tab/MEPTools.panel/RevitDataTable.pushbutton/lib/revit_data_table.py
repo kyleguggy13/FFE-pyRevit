@@ -16,7 +16,7 @@ except NameError:
 
 GroupActions = ("saveSpaceGroup", "deleteSpaceGroup")
 
-PublishActions = ("publishCatalog", "publishReview", "publishCommit")
+PublishActions = ("publishCatalog", "publishReview", "publishParameters", "publishCommit")
 
 
 def IdText(elementId):
@@ -256,6 +256,15 @@ def CollectSpaceParameters(space, document, db, catalog, selectedIds, elementNam
 
 def BuildSnapshot(document, documentKey, db, selectedParameterIds=None, capabilities=None):
     """Collect all host Spaces once; filtering operates on this immutable snapshot."""
+    for snapshot in SnapshotSteps(document, documentKey, db, selectedParameterIds, capabilities, False):
+        pass
+    return snapshot
+
+
+def SnapshotSteps(document, documentKey, db, selectedParameterIds=None, capabilities=None, reportProgress=True):
+    """Yield progress before each Space, followed by the completed snapshot."""
+    if reportProgress:
+        yield ("spaces", 0, 0, None)
     phases = [{"id": IdText(phase.Id), "name": phase.Name, "uniqueId": getattr(phase, "UniqueId", None)}
               for phase in document.Phases]
     phaseNames = dict((phase["id"], phase["name"]) for phase in phases)
@@ -281,7 +290,13 @@ def BuildSnapshot(document, documentKey, db, selectedParameterIds=None, capabili
     spaces = (db.FilteredElementCollector(document)
               .OfCategory(db.BuiltInCategory.OST_MEPSpaces)
               .WhereElementIsNotElementType())
-    for space in spaces:
+    if reportProgress:
+        # Finish native collector enumeration before yielding to another Revit event.
+        spaces = list(spaces)
+        total = len(spaces)
+    for index, space in enumerate(spaces):
+        if reportProgress:
+            yield ("spaces", index + 1, total, None)
         try:
             elementId = IdText(space.Id)
             warnings = []
@@ -342,7 +357,7 @@ def BuildSnapshot(document, documentKey, db, selectedParameterIds=None, capabili
                 identity = "unknown"
             issues.append("Space {0}: {1}".format(identity, error))
 
-    return {
+    yield {
         "documentKey": documentKey,
         "documentTitle": document.Title,
         "refreshedAt": datetime.datetime.now().isoformat(),
@@ -388,11 +403,16 @@ def ValidateRequest(message, documentKey, snapshot):
                         or any(not isinstance(groupId, StringTypes) or len(groupId) != 36 for groupId in groupIds)):
                     raise ValueError("Choose one or more valid Space groups.")
                 request["groupIds"] = sorted(set(str(uuid.UUID(groupId)) for groupId in groupIds))
-        elif action == "publishCommit":
+        elif action in ("publishCommit", "publishParameters"):
             reviewId = message.get("reviewId")
             if not isinstance(reviewId, StringTypes) or len(reviewId) != 36:
                 raise ValueError("Collect Spaces before syncing.")
             request["reviewId"] = str(uuid.UUID(reviewId))
+            if action == "publishParameters":
+                uniqueId = message.get("uniqueId")
+                if not isinstance(uniqueId, StringTypes) or not uniqueId or len(uniqueId) > 200:
+                    raise ValueError("Choose a Space from the sync preview.")
+                request["uniqueId"] = uniqueId
         return request
     if action in GroupActions:
         requestId = message.get("requestId")

@@ -30,6 +30,10 @@ main { min-height: 0; flex: 1; display: flex; flex-direction: column; padding: 1
 #publish-project { max-width: none; }
 #publish-error { color: #b22d30; }
 #publish-error:empty { display: none; }
+#publish-collection { margin: 12px 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 5px; background: #f4f7f8; }
+#publish-collection-stage { margin: 0 0 5px; font-weight: 600; }
+#publish-collection-bar { display: block; width: 100%; height: 12px; accent-color: var(--accent); }
+#publish-collection-detail { margin: 5px 0 0; color: var(--muted); }
 #publish-dialog .dialog-actions { flex-wrap: wrap; }
 .publish-review-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
 .publish-changes { max-height: min(30vh, 300px); overflow: auto; border: 1px solid var(--border); }

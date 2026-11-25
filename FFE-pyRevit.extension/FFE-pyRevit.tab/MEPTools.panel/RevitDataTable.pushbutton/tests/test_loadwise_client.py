@@ -26,6 +26,20 @@ class ClientTests(unittest.TestCase):
         self.assertNotIn('actor', payload)
         self.assertEqual(len(OPERATIONS), 26)
 
+    def test_push_preserves_unicode_parameter_names_units_and_values(self):
+        bodies = []
+
+        def transport(url, headers, body):
+            bodies.append(body.encode('utf-8'))
+            return 200, '{"ok":true}'
+
+        name = 'Area (ft\u00b2)'
+        request = {'spaces': [{'uniqueId': 'space', 'parameters': {name: {'v': 12.5, 's': '12.5 ft\u00b2'}}}],
+                   'parameters': [{'name': name, 'unit': 'ft\u00b2'}]}
+        Client(transport=transport).push_revit_spaces(request)
+        self.assertIn(b'ft\xc2\xb2', bodies[0])
+        self.assertEqual(json.loads(bodies[0])['p_request'], dict(request, schemaVersion=3))
+
     def test_reads_without_actor_and_invalid_configuration(self):
         seen = []
         client = Client(transport=lambda url, headers, body: (seen.append(json.loads(body)) or (200, '{"ok":true,"items":[]}')))

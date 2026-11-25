@@ -107,7 +107,8 @@ class Client(object):
         import re
         if not re.match(r"^ffe_v3_[a-z_]+\Z", name):
             raise ValueError("Use a version 3 Loadwise RPC.")
-        payload = json.dumps(args or {}, allow_nan=False)
+        # Keep CLR strings as Unicode until the HTTP transport encodes them as UTF-8.
+        payload = json.dumps(args or {}, ensure_ascii=False, allow_nan=False)
         try:
             status, raw = self.transport(self.url + "/rest/v1/rpc/" + name, {"apikey": self.key}, payload)
         except RpcError:

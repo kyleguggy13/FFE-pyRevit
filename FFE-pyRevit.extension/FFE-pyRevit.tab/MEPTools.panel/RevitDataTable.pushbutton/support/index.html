@@ -77,6 +77,11 @@
       <label>Project <select id="publish-project"></select></label>
       <p id="publish-destination"></p>
       <p id="publish-error" role="alert"></p>
+      <section id="publish-collection" hidden>
+        <p id="publish-collection-stage" role="status"></p>
+        <progress id="publish-collection-bar" max="3" aria-label="Space collection progress" aria-describedby="publish-collection-detail"></progress>
+        <p id="publish-collection-detail"></p>
+      </section>
       <fieldset id="publish-group-scope">
         <legend>Spaces to sync</legend>
         <label class="space-check"><input id="publish-all-spaces" type="checkbox" checked>All Spaces</label>

@@ -25,10 +25,12 @@ clr.AddReference("WindowsBase")
 
 from System import Uri, Action
 from System.Collections.Generic import List
+from System.Diagnostics import Stopwatch
 from System.Windows import (Window, WindowState, WindowStartupLocation,
                             Thickness, Visibility, TextWrapping,
                             MessageBox, MessageBoxButton, MessageBoxImage, MessageBoxResult)
 from System.Windows.Controls import Grid, TextBlock
+from System.Windows.Threading import DispatcherPriority
 from Autodesk.Revit.UI import ExternalEvent, IExternalEventHandler
 from pyrevit import DB, forms, script
 
@@ -40,13 +42,13 @@ if LibraryDirectory not in sys.path:
     sys.path.insert(0, LibraryDirectory)
 
 from ffe_webview2 import load_webview2_types, format_webview2_error
-from revit_data_table import BuildSnapshot, ValidateRequest, NavigateSpaces, PublishActions
+from revit_data_table import BuildSnapshot, SnapshotSteps, ValidateRequest, NavigateSpaces, PublishActions
 from saved_tables import RevitTableStore, CaptureLayout, ResolveLayout, TableMetadata, ValidateLayout
 from ffe_supabase import Client as CloudClient
-from cloud_publish import CloudProjectStore, LoadCatalog, PrepareSync, SelectSyncRows, SyncReview
+from cloud_publish import CloudProjectStore, LoadCatalog, PrepareSync, PreviewSummary, SelectSyncRows, SyncReview
 from forma_project import ReadFormaContext, CheckFormaProject, CreateFormaProject
 from space_groups import RevitSpaceGroupStore, GroupActions
-from revit_parameters import CollectSyncParameters
+from revit_parameters import SyncParameterSteps
 
 try:
     _DATA_TABLE_WINDOWS
@@ -94,6 +96,8 @@ class DataTableEventHandler(IExternalEventHandler):
                     window.SendResult("warning" if snapshot["skippedCount"] else "success",
                                       "Refreshed {0} Space(s). Skipped {1}.".format(
                         len(snapshot["rows"]), snapshot["skippedCount"]))
+                elif window.IsPublishCollectionRequest(request):
+                    window.AdvancePublishCollection()
                 elif request["action"] in PublishActions:
                     window.HandlePublishRequest(request)
                 elif request["action"] in GroupActions:
@@ -106,6 +110,8 @@ class DataTableEventHandler(IExternalEventHandler):
                     window.SendResult(result["kind"], result["message"])
             except Exception as error:
                 Logger.warning("Data table request failed: {0}".format(error))
+                if window.IsPublishCollectionRequest(request):
+                    window.FinishPublishCollection()
                 if request.get("requestId"):
                     window.SendTableFailure(request, error)
                 else:
@@ -145,6 +151,7 @@ class DataTableWindow(Window):
         self.PublishPlan = None
         self.PublishReview = None
         self.PublishClient = None
+        self.PublishCollection = None
         self.DocumentRevision = 0
         self.CloudStore = CloudProjectStore(document, DB)
         self.IndexUri = Uri(os.path.abspath(os.path.join(SupportDirectory, "index.html"))).AbsoluteUri
@@ -250,25 +257,37 @@ class DataTableWindow(Window):
                 self.ClosePermit = True
                 self.Close()
                 return
+            if request["action"] == "publishParameters":
+                self.SendPublishParameters(request)
+                return
             if not self.DocumentActive:
                 raise ValueError("Activate this table's model in Revit, then retry.")
             if len(self.Handler.Requests) >= 8:
                 raise ValueError("Revit is busy. Wait for the current request, then retry.")
-            self.Handler.Requests.append(request)
-            try:
-                result = self.ExternalEvent.Raise()
-                if str(result) not in ("Accepted", "Pending"):
-                    raise ValueError("Revit could not accept the request ({0}). Retry when idle.".format(result))
-            except Exception:
-                self.Handler.Requests.pop()
-                raise
+            self.QueueRequest(request)
         except Exception as error:
             if isinstance(message, dict) and message.get("requestId"):
                 self.SendTableFailure(message, error)
             else:
                 self.SendResult("error", str(error))
 
+    def QueueRequest(self, request):
+        """Ask Revit to execute a validated request on its next available event cycle."""
+        self.Handler.Requests.append(request)
+        try:
+            result = self.ExternalEvent.Raise()
+            if str(result) not in ("Accepted", "Pending"):
+                raise ValueError("Revit could not accept the request ({0}). Retry when idle.".format(result))
+        except Exception:
+            self.Handler.Requests.pop()
+            raise
+
     def SetSnapshot(self, snapshot):
+        """Update the displayed snapshot and its saved model metadata."""
+        self.ReadSnapshotCatalog(snapshot)
+        self.Snapshot = snapshot
+
+    def ReadSnapshotCatalog(self, snapshot):
         """Attach the latest model catalog without creating storage on read."""
         store = getattr(self, "TableStore", None)
         if store is not None:
@@ -294,7 +313,6 @@ class DataTableWindow(Window):
                 snapshot["spaceGroups"] = []
                 snapshot["groupIssues"] = ["Could not read Space groups: {0}".format(error)]
                 snapshot["canEditSpaceGroups"] = False
-        self.Snapshot = snapshot
 
     def HandleTableRequest(self, request):
         """Read or transact table definitions only from the external-event handler."""
@@ -466,24 +484,114 @@ class DataTableWindow(Window):
         if plan.get("projectId") and plan["projectId"] != projectId:
             raise ValueError("Use this model's connected Loadwise project.")
         self.PublishReview = None
-        snapshot = BuildSnapshot(self.Document, self.DocumentKey, DB,
-                                 self.Snapshot.get("selectedParameterIds", []))
-        self.SetSnapshot(snapshot)
-        syncRows, scope, warnings = SelectSyncRows(snapshot, request.get("groupIds"))
-        parameterData = CollectSyncParameters(self.Document, syncRows, DB, snapshot["rows"])
-        review = PrepareSync(snapshot, projectId, request.get("groupIds"), parameterData)
-        review["documentRevision"] = self.DocumentRevision
-        self.PublishReview = review
-        self.PublishClient = CreateCloudClient(self.Application.Application)
-        self.Outdated = False
-        self.SendSnapshot()
+        self.PublishCollection = {"request": request, "steps": self.CollectPublishReview(request),
+                                  "revision": self.DocumentRevision, "stage": None}
+        self.CloudBusy = True
+        self.AdvancePublishCollection()
+
+    def CollectPublishReview(self, request):
+        """Run the model scans in resumable API steps and return plain data."""
+        for step in SnapshotSteps(self.Document, self.DocumentKey, DB, self.Snapshot.get("selectedParameterIds", [])):
+            if isinstance(step, tuple):
+                yield step
+        snapshot = step
+        self.ReadSnapshotCatalog(snapshot)
+        groupIds = request.get("groupIds")
+        syncRows, _, _ = SelectSyncRows(snapshot, groupIds)
+        for step in SyncParameterSteps(self.Document, syncRows, DB, snapshot["rows"]):
+            if isinstance(step, tuple):
+                yield step
+        yield {"snapshot": snapshot, "parameters": step}
+
+    def AdvancePublishCollection(self):
+        """Read one batch in Revit and give WebView2 time to paint between batches."""
+        collection = self.PublishCollection
+        request = collection["request"]
+        if collection["revision"] != self.DocumentRevision:
+            raise ValueError("The Revit model changed during collection. Collect Spaces again.")
+        timer = Stopwatch.StartNew()
+        for step in collection["steps"]:
+            if isinstance(step, dict):
+                self.PreparePublishReview(collection, step)
+                return
+            stage, position, total, row = step
+            if stage != collection["stage"] or timer.ElapsedMilliseconds >= 75:
+                collection["stage"] = stage
+                space = {key: row.get(key) for key in ("number", "name", "level")} if row is not None else None
+                self.Send({"type": "publishProgress", "requestId": request["requestId"], "stage": stage,
+                           "position": position, "total": total, "space": space})
+                self.SchedulePublishCollection(request)
+                return
+
+    def PreparePublishReview(self, collection, data):
+        """Validate the collected payload off the UI thread and send a lightweight preview."""
+        request = collection["request"]
+        revision = collection["revision"]
+        snapshot = data["snapshot"]
+        client = CreateCloudClient(self.Application.Application)
+        self.Send({"type": "publishProgress", "requestId": request["requestId"], "stage": "preview"})
+
+        def prepare():
+            review = PrepareSync(snapshot, request["projectId"], request.get("groupIds"), data["parameters"])
+            return review, PreviewSummary(review)
+
+        def complete(response):
+            if revision != self.DocumentRevision:
+                self.SendTableFailure(request, "The Revit model changed during collection. Collect Spaces again.")
+                return
+            if not response["success"]:
+                self.Send(response)
+                return
+            review, response["data"] = response["data"]
+            review["documentRevision"] = revision
+            self.PublishReview = review
+            self.PublishClient = client
+            self.Snapshot = snapshot
+            self.Outdated = False
+            self.Send(response)
+            self.SendSnapshot()
+            self.SendContext()
+
+        self.StartCloudWork(request, prepare, complete)
+        self.PublishCollection = None
+
+    def SendPublishParameters(self, request):
+        """Read a single row from the frozen preview without using the Revit API."""
+        review = self.PublishReview
+        if review is None or review["reviewId"] != request["reviewId"]:
+            raise ValueError("Collect Spaces again to view these parameters.")
+        for space in review["request"]["spaces"]:
+            if space["uniqueId"] == request["uniqueId"]:
+                self.Send({"type": "publishResult", "action": request["action"], "requestId": request["requestId"],
+                           "success": True, "data": space["parameters"]})
+                return
+        raise ValueError("This Space is unavailable in the sync preview.")
+
+    def IsPublishCollectionRequest(self, request):
+        """Identify the original request as it returns for another batch."""
+        collection = getattr(self, "PublishCollection", None)
+        return collection is not None and request is collection["request"]
+
+    def SchedulePublishCollection(self, request):
+        """Queue the next batch after the current API callback has returned."""
+        def resume():
+            if self.IsClosed or not self.IsPublishCollectionRequest(request):
+                return
+            try:
+                self.QueueRequest(request)
+            except Exception as error:
+                self.FinishPublishCollection()
+                self.SendTableFailure(request, error)
+        self.Dispatcher.BeginInvoke(DispatcherPriority.Background, Action(resume))
+
+    def FinishPublishCollection(self):
+        """Release the iterator and clear the busy state on success or failure."""
+        self.PublishCollection = None
+        self.CloudBusy = False
         self.SendContext()
-        self.Send({"type": "publishResult", "action": action, "requestId": request["requestId"],
-                   "success": True, "data": {key: value for key, value in review.items()
-                                              if key not in ("chunks", "nextChunk", "totals")}})
 
     def StartCloudWork(self, request, work, onComplete=None):
-        """Run JSON-only HTTPS calls off-thread and deliver results on the WPF dispatcher."""
+        """Run plain-data work off-thread and deliver results on the WPF dispatcher."""
         self.CloudBusy = True
         if onComplete is not None:
             self.SendContext()
@@ -538,8 +646,13 @@ class DataTableWindow(Window):
         """Post structured JSON instead of interpolating model text into scripts."""
         if self.Ready and not self.IsClosed and self.Core is not None:
             try:
-                self.Core.PostWebMessageAsJson(json.dumps(payload, ensure_ascii=True, allow_nan=False))
+                # IronPython 2's ASCII encoder tries to decode CLR strings as UTF-8 bytes.
+                self.Core.PostWebMessageAsJson(json.dumps(payload, ensure_ascii=False, allow_nan=False))
             except Exception as error:
+                if (payload.get("type") == "publishResult" and payload.get("success") and
+                        payload.get("action") in ("publishReview", "publishParameters")):
+                    self.SendTableFailure(payload, "Could not send the sync data to the window: {0}".format(error))
+                    return
                 self.ShowFailure("Could not send data to the table: {0}".format(error))
 
     def SendSnapshot(self):
@@ -602,6 +715,7 @@ class DataTableWindow(Window):
         self.Ready = False
         self.Handler.Window = None
         self.Handler.Requests.clear()
+        self.PublishCollection = None
         if self.Subscribed:
             for detach in (self.DetachDocumentChanged, self.DetachDocumentClosed, self.DetachViewActivated):
                 try:

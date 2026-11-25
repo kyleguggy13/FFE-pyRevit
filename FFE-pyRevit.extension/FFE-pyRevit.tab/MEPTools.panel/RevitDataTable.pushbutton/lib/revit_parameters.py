@@ -88,10 +88,19 @@ def ReadSyncValue(parameter, descriptor, unitId, document, db):
 
 def CollectSyncParameters(document, rows, db, allRows=None):
     """Capture all values for the scoped Spaces, including parameters on their types."""
+    for result in SyncParameterSteps(document, rows, db, allRows):
+        pass
+    return result
+
+
+def SyncParameterSteps(document, rows, db, allRows=None):
+    """Yield progress before each Space in both passes, followed by the collected data."""
     definitions, entries, issues = {}, {}, []
     chosen = set(row["uniqueId"] for row in rows)
     failed, typeCache, unitCache = set(), {}, {}
-    for row in (allRows if allRows is not None else rows):
+    modelRows = allRows if allRows is not None else rows
+    for index, row in enumerate(modelRows):
+        yield ("definitions", index + 1, len(modelRows), row)
         uniqueId = row["uniqueId"]
         selected = uniqueId in chosen
         try:
@@ -135,7 +144,8 @@ def CollectSyncParameters(document, rows, db, allRows=None):
             entries[uniqueId] = found
     names = ParameterNames(definitions)
     spaces, catalog, unavailable = {}, {}, 0
-    for row in rows:
+    for index, row in enumerate(rows):
+        yield ("values", index + 1, len(rows), row)
         uniqueId = row["uniqueId"]
         if uniqueId in failed:
             continue
@@ -167,5 +177,5 @@ def CollectSyncParameters(document, rows, db, allRows=None):
                                  "group": group[:100], "isShared": definition["parameterType"] == "Shared Parameter",
                                  "isType": definition["isType"]}
         spaces[uniqueId] = values
-    return {"spaces": spaces, "catalog": sorted(catalog.values(), key=lambda item: item["name"]),
-            "issues": issues, "skippedCount": len(failed), "unavailableCount": unavailable}
+    yield {"spaces": spaces, "catalog": sorted(catalog.values(), key=lambda item: item["name"]),
+           "issues": issues, "skippedCount": len(failed), "unavailableCount": unavailable}

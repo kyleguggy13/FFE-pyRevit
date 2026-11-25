@@ -101,6 +101,18 @@ def PrepareSync(snapshot, projectId, groupIds=None, parameterData=None):
             "skippedCount": skipped, "warnings": warnings, "scope": scope, "complete": bool(complete)}
 
 
+def PreviewSummary(review):
+    """Send the row list without serializing the frozen parameter payload into WebView2."""
+    spaces = []
+    for space in review["request"]["spaces"]:
+        row = {key: space[key] for key in ("uniqueId", "number", "name", "level")}
+        row.update(review["dimensions"][space["uniqueId"]])
+        row["parameterCount"] = len(space["parameters"])
+        spaces.append(row)
+    return dict(spaces=spaces, **{key: review[key] for key in (
+        "reviewId", "scope", "skippedCount", "warnings", "parameterCount", "unavailableParameterCount")})
+
+
 def SyncReview(client, review):
     """Resume frozen chunks after an uncertain response without changing their sync ID."""
     while review["nextChunk"] < len(review["chunks"]):

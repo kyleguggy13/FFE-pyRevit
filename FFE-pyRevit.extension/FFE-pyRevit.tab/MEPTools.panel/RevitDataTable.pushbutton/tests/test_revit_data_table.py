@@ -484,6 +484,7 @@ class HostSafetyTests(unittest.TestCase):
         self.window.IndexUri = 'file:///index.html'
         self.window.DocumentActive = True
         self.window.DocumentRevision = 0
+        self.window.PublishCollection = None
         self.window.IsClosed = False
         self.window.Handler = self.handler
         self.window.ExternalEvent = NS(Raise=lambda: 'Accepted')
@@ -495,11 +496,18 @@ class HostSafetyTests(unittest.TestCase):
 
     def test_preview_collects_fresh_values_in_api_context_without_cloud_or_storage_writes(self):
         import test_cloud_publish as fixtures
-        self.api.update(CreateCloudClient=mock.Mock(), PrepareSync=fixtures.cloud.PrepareSync,
+        snapshot = fixtures.snapshot()
+        parameterData = {'spaces': {fixtures.SPACE: snapshot['rows'][0]['parameters']},
+                         'catalog': [], 'issues': [], 'skippedCount': 0, 'unavailableCount': 0}
+        self.api.update(CreateCloudClient=mock.Mock(), PrepareSync=mock.Mock(wraps=fixtures.cloud.PrepareSync),
+                        PreviewSummary=fixtures.cloud.PreviewSummary,
                         SelectSyncRows=fixtures.cloud.SelectSyncRows,
-                        CollectSyncParameters=mock.Mock(return_value={
-                            'spaces': {fixtures.SPACE: fixtures.snapshot()['rows'][0]['parameters']},
-                            'catalog': [], 'issues': [], 'skippedCount': 0, 'unavailableCount': 0}))
+                        SyncParameterSteps=mock.Mock(return_value=iter([
+                            ('definitions', 1, 1, snapshot['rows'][0]),
+                            ('values', 1, 1, snapshot['rows'][0]), parameterData])),
+                        SnapshotSteps=mock.Mock(return_value=iter([('spaces', 0, 0, None), snapshot])))
+        callbacks = self.collection_dispatcher()
+
         client = self.api['CreateCloudClient'].return_value
         self.window.Document = NS(IsValidObject=True, Equals=lambda document: True)
         self.window.Application = NS(Application=NS(Username='Autodesk user'))
@@ -510,20 +518,78 @@ class HostSafetyTests(unittest.TestCase):
         self.window.Send = mock.Mock()
         self.window.SendSnapshot = mock.Mock()
         self.window.SendContext = mock.Mock()
-        self.api['BuildSnapshot'] = mock.Mock(return_value=fixtures.snapshot())
         self.window.Snapshot['selectedParameterIds'] = ['1']
         self.send({'action': 'publishReview', 'documentKey': 'doc', 'requestId': 'publish-1',
                    'projectId': fixtures.PROJECT})
-        self.api['BuildSnapshot'].assert_not_called()
-        self.handler.Execute(NS(ActiveUIDocument=NS(Document=self.window.Document)))
-        self.assertEqual(['1'], self.api['BuildSnapshot'].call_args.args[3])
+        self.api['SnapshotSteps'].assert_not_called()
+        application = NS(ActiveUIDocument=NS(Document=self.window.Document))
+        self.handler.Execute(application)
+        self.assertEqual(['1'], self.api['SnapshotSteps'].call_args.args[3])
+        self.assertEqual([], list(self.handler.Requests))
+        self.assertTrue(self.window.CloudBusy)
+        for stage in ('spaces', 'definitions', 'values'):
+            message = self.window.Send.call_args.args[0]
+            self.assertEqual(('publishProgress', 'publish-1', stage),
+                             (message['type'], message['requestId'], message['stage']))
+            callbacks.pop(0)()
+            self.handler.Execute(application)
+        self.assertEqual('preview', self.window.Send.call_args.args[0]['stage'])
+        self.assertEqual([], callbacks)
+        self.api['PrepareSync'].assert_not_called()
+        request, work, complete = self.window.StartCloudWork.call_args.args
+        self.window.CloudBusy = False
+        complete({'type': 'publishResult', 'requestId': request['requestId'], 'success': True, 'data': work()})
+        self.assertFalse(self.window.CloudBusy)
+        self.assertIsNone(self.window.PublishCollection)
         self.window.CloudStore.Ensure.assert_not_called()
-        self.window.StartCloudWork.assert_not_called()
         self.assertEqual([], client.mock_calls)
         self.assertEqual(fixtures.PROJECT, self.window.PublishReview['request']['projectId'])
-        self.assertEqual('publishResult', self.window.Send.call_args.args[0]['type'])
-        self.assertNotIn('chunks', self.window.Send.call_args.args[0]['data'])
-        self.api['CollectSyncParameters'].assert_called_once()
+        response = self.window.Send.call_args.args[0]
+        self.assertEqual('publishResult', response['type'])
+        summary = response['data']['spaces'][0]
+        self.assertEqual(fixtures.SPACE, summary['uniqueId'])
+        self.assertEqual(len(snapshot['rows'][0]['parameters']), summary['parameterCount'])
+        self.assertNotIn('parameters', summary)
+        self.assertNotIn('chunks', response['data'])
+        self.api['SyncParameterSteps'].assert_called_once()
+
+        detailsRequest = {'action': 'publishParameters', 'requestId': 'publish-2', 'documentKey': 'doc',
+                          'reviewId': response['data']['reviewId'], 'uniqueId': fixtures.SPACE}
+        self.send(detailsRequest)
+        self.assertEqual([], list(self.handler.Requests))
+        self.assertEqual(self.window.PublishReview['request']['spaces'][0]['parameters'],
+                         self.window.Send.call_args.args[0]['data'])
+        self.send(dict(detailsRequest, uniqueId='unknown'))
+        self.assertFalse(self.window.Send.call_args.args[0]['success'])
+
+    def collection_dispatcher(self):
+        callbacks = []
+        self.api.update(Action=lambda callback: callback,
+                        DispatcherPriority=NS(Background=1),
+                        Stopwatch=NS(StartNew=lambda: NS(ElapsedMilliseconds=0)))
+        self.window.Dispatcher = NS(BeginInvoke=lambda priority, callback: callbacks.append(callback))
+        return callbacks
+
+    def test_model_change_between_batches_discards_collection(self):
+        callbacks = self.collection_dispatcher()
+        self.window.Document = NS(IsValidObject=True, Equals=lambda document: True)
+        self.window.Send = mock.Mock()
+        self.window.PublishReview = None
+        self.window.CloudBusy = True
+        self.window.Outdated = True
+        self.window.PublishCollection = {'request': {'action': 'publishReview', 'requestId': 'publish-1'},
+                                         'steps': iter([('spaces', 0, 0, None)]), 'revision': 0, 'stage': None}
+        self.window.AdvancePublishCollection()
+        self.window.DocumentRevision += 1
+        callbacks.pop(0)()
+        self.handler.Execute(NS(ActiveUIDocument=NS(Document=self.window.Document)))
+        self.assertIsNone(self.window.PublishCollection)
+        self.assertIsNone(self.window.PublishReview)
+        self.assertFalse(self.window.CloudBusy)
+        response = self.window.Send.call_args.args[0]
+        self.assertEqual('publish-1', response['requestId'])
+        self.assertFalse(response['success'])
+        self.assertIn('model changed during collection', response['message'])
 
     def test_sync_rejects_stale_reviews_and_binds_project_before_deferred_http(self):
         import test_cloud_publish as fixtures
@@ -578,6 +644,29 @@ class HostSafetyTests(unittest.TestCase):
         response = self.window.Send.call_args.args[0]
         self.assertEqual(('publishResult', 'publish-1', False),
                          (response['type'], response['requestId'], response['success']))
+
+    def test_preview_transfer_failure_returns_a_small_error_and_keeps_bridge_ready(self):
+        self.window.Ready = True
+        self.window.Core = NS(PostWebMessageAsJson=mock.Mock(side_effect=[ValueError('transfer failed'), None]))
+        self.window.Send({'type': 'publishResult', 'action': 'publishReview', 'requestId': 'publish-1',
+                          'success': True, 'data': {'spaces': []}})
+        response = json.loads(self.window.Core.PostWebMessageAsJson.call_args.args[0])
+        self.assertFalse(response['success'])
+        self.assertEqual('publish-1', response['requestId'])
+        self.assertIn('transfer failed', response['message'])
+        self.assertTrue(self.window.Ready)
+
+    def test_preview_details_preserve_unicode_in_webview_json(self):
+        self.window.Ready = True
+        self.window.Core = NS(PostWebMessageAsJson=mock.Mock())
+        self.window.PublishReview = {'reviewId': 'review', 'request': {'spaces': [
+            {'uniqueId': 'space', 'parameters': {'Area (ft\u00b2)': {'v': 12.5, 's': '12.5 ft\u00b2'}}}
+        ]}}
+        self.window.SendPublishParameters({'action': 'publishParameters', 'requestId': 'publish-1',
+                                           'reviewId': 'review', 'uniqueId': 'space'})
+        wire = self.window.Core.PostWebMessageAsJson.call_args.args[0]
+        self.assertIn('12.5 ft\u00b2', wire)
+        self.assertEqual(json.loads(wire)['data'], self.window.PublishReview['request']['spaces'][0]['parameters'])
 
     def test_uncertain_sync_keeps_review_for_retry_without_claiming_it_was_not_written(self):
         import test_cloud_publish as fixtures

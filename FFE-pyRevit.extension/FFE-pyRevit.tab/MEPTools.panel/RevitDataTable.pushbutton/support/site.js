@@ -689,6 +689,7 @@
           if (message.type === "snapshot") await loadSnapshot(message.snapshot);
           else if (message.type === "tableResult") await savedTables.handleResult(message);
           else if (message.type === "publishResult") cloudPublish.handleResult(message);
+          else if (message.type === "publishProgress") cloudPublish.handleProgress(message);
           else if (message.type === "groupResult") spaceGroups.handleResult(message);
           else if (message.type === "closeRequest") savedTables.close();
           else if (message.type === "context") {

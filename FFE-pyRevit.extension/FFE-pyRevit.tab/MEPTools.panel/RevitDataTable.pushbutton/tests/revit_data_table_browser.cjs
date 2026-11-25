@@ -342,8 +342,20 @@ async function main() {
     assert.equal(publishRequest.projectId, publishProject);
     assert.deepEqual(publishRequest.groupIds.slice().sort(), [westGroup.id,officeGroup.id].sort());
     assert.equal(publishRequest.spaces, undefined, 'browser does not supply upload rows');
+    assert.equal(await evaluate('document.querySelector("#publish-collection-bar").position'), -1);
+    assert.equal(await evaluate('document.querySelector("#publish-collection").hidden'), false);
+    const progress = {type:'publishProgress', stage:'values', position:2, total:3,
+      space:{number:'002', name:'Office <img>', level:'Level 2'}};
+    await deliver({...progress, requestId:'other-request'});
+    assert.equal(await evaluate('document.querySelector("#publish-collection-bar").position'), -1);
+    await deliver({...progress, requestId:publishRequest.requestId});
+    await waitFor('document.querySelector("#publish-collection-bar").value > 2');
+    assert.equal(await evaluate('document.querySelector("#publish-collection-detail").textContent'),
+      'Space 2 of 3 \u00b7 002 \u00b7 Office <img> \u00b7 Level 2');
+    assert.equal(await evaluate('document.querySelector("#publish-collection img")'), null);
     await deliver({type:'publishResult',action:'publishReview',requestId:publishRequest.requestId,success:false,message:'Could not collect Spaces.'});
     await waitFor('document.getElementById("publish-error").textContent.includes("Could not collect Spaces")');
+    assert.equal(await evaluate('document.querySelector("#publish-collection").hidden'), true);
     assert.equal(await evaluate('document.getElementById("publish-confirm").disabled'), true);
     await evaluate('document.getElementById("publish-reload").click()');
     await waitFor('window.__requests.at(-1).action === "publishCatalog"');
@@ -355,18 +367,38 @@ async function main() {
     await evaluate('document.getElementById("publish-confirm").click()');
     await waitFor('window.__requests.at(-1).action === "publishReview"');
     publishRequest = await evaluate('window.__requests.at(-1)');
+    await deliver({...progress, requestId:publishRequest.requestId});
+    await waitFor('document.querySelector("#publish-collection-bar").value > 2');
+    await deliver({type:'publishProgress', stage:'preview', requestId:publishRequest.requestId});
+    await waitFor('document.querySelector("#publish-collection-bar").position === -1');
     const review = {reviewId:'00000000-0000-4000-8000-000000000009',skippedCount:1,warnings:['Space <unreadable> skipped'],
       scope:{allSpaces:false,groups:[westGroup,officeGroup].map(({id,name})=>({id,name})),excludedCount:1,unavailableCount:0},
-      parameterCount:102,parameterDefinitionCount:2,unavailableParameterCount:0,
-      request:{projectId:publishProject,spaces:Array.from({length:51}, (_, i) => ({uniqueId:'space-'+i,
+      parameterCount:102,unavailableParameterCount:0,
+      spaces:Array.from({length:51}, (_, i) => ({uniqueId:'space-'+i,
         number:i ? String(i) : '002',name:'Office <img>',level:'Level 2',area:i ? 120 : 0,ceilingHeight:9,
-        parameters:{'Hidden parameter <img>':{v:'<script>literal</script>',s:'<script>literal</script>'},'Unset':{v:null,s:''}}}))}};
+        parameterCount:2}))};
     await deliver({type:'publishResult',action:'publishReview',requestId:publishRequest.requestId,success:true,data:review});
     await waitFor('!document.getElementById("publish-review").hidden');
+    assert.equal(await evaluate('document.querySelector("#publish-collection").hidden'), true);
     assert.equal(await evaluate('document.getElementById("publish-confirm").textContent'), 'Sync Spaces');
     assert.equal(await evaluate('document.querySelectorAll("#publish-changes img").length'), 0, 'model text stays literal');
     assert.deepEqual(await evaluate('[...document.querySelector("#publish-changes tr").cells].map(x=>x.textContent)'), ['002','Office <img>','Level 2','0','9','2 parameters']);
     await evaluate('document.querySelector("#publish-changes summary").click()');
+    await waitFor('window.__requests.at(-1).action === "publishParameters"');
+    let parameterRequest = await evaluate('window.__requests.at(-1)');
+    assert.equal(parameterRequest.reviewId, review.reviewId);
+    assert.equal(parameterRequest.uniqueId, review.spaces[0].uniqueId);
+    await deliver({type:'publishResult',action:parameterRequest.action,requestId:parameterRequest.requestId,
+      success:false,message:'Could not return this row.'});
+    await waitFor('document.querySelector("#publish-changes details").textContent.includes("Could not return this row")');
+    assert.equal(await evaluate('document.getElementById("publish-confirm").disabled'), false);
+    await evaluate('document.querySelector("#publish-changes summary").click()');
+    await waitFor('!document.querySelector("#publish-changes details").open');
+    await evaluate('document.querySelector("#publish-changes summary").click()');
+    await waitFor(`window.__requests.at(-1).requestId !== "${parameterRequest.requestId}"`);
+    parameterRequest = await evaluate('window.__requests.at(-1)');
+    await deliver({type:'publishResult',action:parameterRequest.action,requestId:parameterRequest.requestId,success:true,
+      data:{'Hidden parameter <img>':{v:'<script>literal</script>',s:'<script>literal</script>'},'Unset':{v:null,s:''}}});
     await waitFor('document.querySelector("#publish-changes dl")');
     assert.equal(await evaluate('document.querySelector("#publish-changes dt").textContent'), 'Hidden parameter <img>');
     assert.equal(await evaluate('document.querySelector("#publish-changes dd").textContent'), '<script>literal</script>');
